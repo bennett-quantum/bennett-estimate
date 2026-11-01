@@ -14,10 +14,11 @@ sys.modules[spec.name] = e
 spec.loader.exec_module(e)
 
 
-def object_with_signatures(functions, signatures, layout=None, devices=None):
+def object_with_signatures(functions, signatures, layout=None, devices=None, data=None):
     symbols={str(i):{"name":name,"kind":sig["kind"],"signature":sig,"interface_hash":"0"*64} for i,(name,sig) in enumerate(signatures.items())}
     def text():
         value="bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32\n\nsection symbols\n"+e.jcs(symbols)+"\n\nsection functions\n"+functions+"\n"
+        if data is not None: value+="\nsection data\n"+"\n".join(n+" "+image for n,image in data.items())+"\n"
         if devices is not None: value+="\nsection devices\n"+e.jcs(devices)+"\n"
         if layout is not None: value+="\nsection layout\n"+e.jcs(layout)+"\n"
         return value
@@ -100,6 +101,16 @@ class Profiles(unittest.TestCase):
 
 
 class Catalog(unittest.TestCase):
+    def test_implicit_length_width_changes_exact_cost(self):
+        wires={n:e.Bundle(n,width,"data") for n,width in [("address",32),("base",32),("size",32),("live",1),("pinned",1),("atop",1),("flag",1),("faulted",1),("code",4),("value",8),("displaced",8),("cells",8)]}
+        layout=[{"base":0,"extent":1,"cells":wires["cells"]}]
+        profiles=[]
+        for L in [1,32]:
+            actuals=[32,L,33,1,1,4,8,1]+[wires[n] for n in ["address","base","size","live","pinned","atop","flag","faulted","code","value","displaced"]]+[layout]
+            profiles.append(self.c.recipe("lift.load",actuals))
+        self.assertGreater(profiles[1].peak[("data","total")],profiles[0].peak[("data","total")])
+        self.assertGreater(profiles[1].area[("data","clean")],profiles[0].area[("data","clean")])
+
     def setUp(self):
         self.t = e.Target.read((ROOT.parent / "bennett-targets/targets/ideal-all-to-all.json").read_text())
         self.c = e.Catalog((ROOT / "data/ref-0.9.json").read_text(), self.t)
@@ -161,6 +172,53 @@ class Catalog(unittest.TestCase):
 
 
 class Objects(unittest.TestCase):
+    def test_unused_resolved_parameters_preserve_binding_without_extra_wires(self):
+        sig={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":["i128","f64","token"]}
+        obj=object_with_signatures("oracle @unused (x:wire in) (t:wire) (f:wire[4]) () (a:i128, b:f64, tk:token)\nregs {  }\n^entry():\nlift.retval x",{"unused":sig})
+        target=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+        a=["0","0x0000000000000000",["2","0","0","0"]]
+        b=[str(1<<100),"0x8000000000000000",["3","0","0","0"]]
+        first=e.estimate(obj,target,"unused",a,["1","0","0","0"])
+        second=e.estimate(obj,target,"unused",b,["1","0","0","0"])
+        self.assertEqual(first["resources"],second["resources"])
+        self.assertEqual(second["invocation"]["args"],b)
+        self.assertNotEqual(first["params_hash"],second["params_hash"])
+
+    def test_published_source_binding_gaps_have_concrete_witnesses(self):
+        target=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+        parameter=e.Object.read((ROOT/"tests/fixtures/parameter-source-gap.bisa").read_text())
+        self.assertEqual(parameter.symbol("parameter")["signature"]["args"],["i1"])
+        for value in ["0","1"]:
+            self.assertEqual(e.resolved_arguments(["i1"],[value],parameter),[int(value)])
+            with self.assertRaisesRegex(e.ContractError,"EST-SOURCE-01"):
+                e.estimate(parameter,target,"parameter",[value],["2","0","0","0"])
+        catalog=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),target)
+        with self.assertRaises(e.ContractError):
+            catalog.bind([{"name":"b","type":"wire","width":1}],["a"],{"a":1},())
+        memory=e.Object.read((ROOT/"tests/fixtures/implicit-length-source-gap.bisa").read_text())
+        with self.assertRaisesRegex(e.ContractError,"EST-SOURCE-02"):
+            e.estimate(memory,target,"read_byte",[],["3","0","0","0"])
+
+    def test_layout_construction_order_and_image_occupancy(self):
+        fn="oracle @address () (t:wire[32]) (f:wire[4]) () ()\nregs { p:reg[32] }\n^entry():\np = lift.addr @g\nlift.retval p"
+        sig={"abi":"0.9","tier":"q","kind":"oracle","in":[],"tgt":32,"fault":4,"mem":[],"args":[]}
+        data_sig={"abi":"0.9","tier":"-","kind":"data","size":1}
+        layout={"ptr_width":32,"H":3,"A_tab":1,"S_cells":0,"null_size":1,"heap_base":2,"heap_limit_max":6,"globals":{"g":{"base":1,"size":1,"image":"g"}},"interface_regions":{}}
+        target=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+        results=[]
+        for image in ["00","80"]:
+            obj=object_with_signatures(fn,{"address":sig,"g":data_sig},layout,data={"g":image})
+            catalog=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),target)
+            source=e.Source(obj,target,catalog)
+            source.region("address",[],["2","0","0","0"])
+            state=source.last_state
+            self.assertEqual([r["name"] for r in state],["pc","pc_prime","faulted","code","result_val","heap_used","atop","sp","fp","depth","mem","stack","p","alloctab","frames"])
+            widths={r["name"]:r["storage"].width for r in state}
+            self.assertEqual({n:widths[n] for n in ["heap_used","atop","sp","fp","depth","mem","stack","alloctab","frames"]},{"heap_used":5,"atop":2,"sp":1,"fp":1,"depth":1,"mem":64,"stack":32,"alloctab":132,"frames":74})
+            results.append(e.estimate(obj,target,"address",[],["2","0","0","0"]))
+        self.assertEqual(int(results[1]["resources"]["gate_count"])-int(results[0]["resources"]["gate_count"]),2)
+        self.assertEqual(int(results[1]["resources"]["qubit_second[data]"])-int(results[0]["resources"]["qubit_second[data]"]),302)
+
     def test_controlled_action_call_and_matching_schedule(self):
         path=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
         obj=e.Object.read((path/"controlled.bisa").read_text())
@@ -260,6 +318,20 @@ class Certificates(unittest.TestCase):
 
 
 class CommandLine(unittest.TestCase):
+    def test_vm_admits_contract_witnesses_and_runs_reference_payload(self):
+        vm=Path(os.environ.get("BENNETT_VM_BIN",ROOT.parent/"bennett-vm/target/debug/bennett-vm"))
+        for name in ["parameter-source-gap.bisa","implicit-length-source-gap.bisa"]:
+            path=ROOT/"tests/fixtures"/name
+            result=subprocess.run([str(vm),"check",str(path)],capture_output=True,text=True,timeout=30,check=True)
+            checked=json.loads(result.stdout)
+            self.assertEqual(checked["status"],"ok")
+            self.assertEqual(checked["object_hash"],e.Object.read(path.read_text()).hash)
+        path=ROOT/"tests/fixtures/parameter-source-gap.bisa"
+        for arg in [0,1]:
+            for x in [0,1]:
+                result=subprocess.run([str(vm),"run-oracle",str(path),"parameter","--input",str(x),"--arg",str(arg),"--budget","2,0,0,0"],capture_output=True,text=True,timeout=30,check=True)
+                self.assertEqual(json.loads(result.stdout),{"code":0,"payload":(x+arg)%2,"steps":2})
+
     def test_deterministic_and_failure(self):
         binary=os.environ["BENNETT_ESTIMATE_BIN"]
         command=[binary,str(ROOT/"tests/fixtures/example3.bisa"),"--target",str(ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json")]

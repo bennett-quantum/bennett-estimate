@@ -1,0 +1,11 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"6eeeeb2146e3b75096f1d6f1d5c69632eca50bf3f61801d61452e8b4590a5186","kind":"oracle","name":"parameter","signature":{"abi":"0.9","args":["i1"],"fault":4,"in":[1],"kind":"oracle","mem":[],"tgt":1,"tier":"q"}}}
+
+section functions
+oracle @parameter (x:wire in) (t:wire) (f:wire[4]) () (a:i1)
+regs { r:reg[1] }
+^entry():
+r = lift.add x a
+lift.retval r

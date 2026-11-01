@@ -44,11 +44,19 @@ is contract data, not code copied from another implementation.
 
 Current source coverage includes structured gates, allocation/borrowing,
 copy/XOR/exchange, predication, loops, local-region images and linear coherent
-memory, basic controlled action calls, plus the zero-argument memoryless padded
-oracle families listed in the plan. Layout-backed oracles, complete semantic
+memory, basic controlled action calls, plus padded arithmetic/control oracles
+and layout-state/global-address construction. Unused resolved arguments retain
+their typed invocation bindings. Full memory/activation rows, complete semantic
 calls and cleanup, explicit schedules, topology,
 full parameter lowering and certificate production still require work.
 Unsupported paths fail explicitly; they remain requirements.
+
+Full exact source coverage needs the published decisions described in
+[CONTRACT_GAPS.md](docs/CONTRACT_GAPS.md): physical wire binding of classical
+pseudo-locations and canonical widths for implicit/literal memory lengths.
+The source witnesses are admitted by the VM; varying the currently unspecified
+length width changes exact workspace costs. Proposed text is queued for the
+orchestrator to file in the spec tracker; it has not been adopted here.
 
 `examples/memory-lookup-2pow20.bisa` exercises 1024 linear lookups into 2^20
 eight-bit cells using fewer than 1000 constructor visits. This verifies scaling

@@ -415,6 +415,10 @@ class Bundle:
         require(0 <= index < self.width, f"wire index {index} outside {self.identity}[{self.width}]")
         return Bundle(self.identity, 1, self.cls, self.offset + index, self.state)
 
+    def slice(self,start,end):
+        require(0<=start<=end<=self.width,"invalid bundle slice")
+        return Bundle(self.identity,end-start,self.cls,self.offset+start,self.state)
+
 
 @dataclass
 class Captured:
@@ -1192,10 +1196,13 @@ class Source:
 
     def oracle(self, fn, env, budget, controls=()):
         require(self.obj.versions["isa"] == "0.9", "0.8 has no published complete expansion library; exact padded cost requires 0.9")
-        require("layout" not in self.obj.sections and not fn.groups[3], "layout/activation source binding is pending; no padded cost fabricated")
-        require(not fn.groups[4], "resolved pseudo-location source binding is pending; no parameter substitution fabricated")
         B = unsigned(budget[0])
         rows = fn.code
+        pseudo_names={n for n,ty,role in fn.groups[4] if ty!="token"}
+        for row in rows:
+            if row.op in ["lift.call","lift.oracle_call","lift.oracle_uncall","lift.perm_call"]: continue
+            reads={name for arg in row.args if not arg.startswith(("@","^")) for name in re.findall(NAME,arg)}
+            require(not reads & pseudo_names,"EST-SOURCE-01: published ref source binding does not fix classical pseudo-location allocations; see docs/CONTRACT_GAPS.md")
         N = len(rows)
         P = max(1,N.bit_length())
         sig = self.obj.symbol(fn.name)["signature"]
@@ -1231,8 +1238,15 @@ class Source:
                 w=written[0];width=widths[w]
                 slot={"range":"frame","from":P,"to":P+width}
             if op in ["lift.const","lift.label","lift.addr"]:
-                require(op!="lift.addr","lift.addr needs layout")
-                value=int(a[0]) if op=="lift.const" else labels[a[0].removeprefix("^")]
+                if op=="lift.addr":
+                    layout=self.obj.sections.get("layout")
+                    require(layout is not None and width==self.obj.ptr,"lift.addr needs layout and pointer-width destination")
+                    name=a[0].removeprefix("@")
+                    entry=layout["globals"].get(name,layout["interface_regions"].get(fn.name,{}).get(name))
+                    require(entry is not None,"lift.addr names no global or own interface region")
+                    value=integer(entry["base"],0)
+                else:
+                    value=int(a[0]) if op=="lift.const" else labels[a[0].removeprefix("^")]
                 require(0<=value<1<<width,"lifted literal out of range")
                 body=[invoke(op,[width,value,slot,w])]
             elif op in ["lift.add","lift.sub","lift.mul","lift.and","lift.or","lift.xor","lift.shl","lift.lshr","lift.ashr"]:
@@ -1261,6 +1275,8 @@ class Source:
             elif op=="qjump": body=[]
             elif op=="qbranch": body=[invoke(op,[P,labels[a[1][1:]],labels[a[2][1:]],a[0],successor])]
             elif op=="qjumpr": body=[invoke(op,[P,Fwidth,0,N,a[0],successor,flag,faulted,code])]
+            elif op in ["lift.load","lift.store"] or op=="lift.boundscheck" and re.fullmatch(r"0|[1-9][0-9]*",a[1]):
+                raise ContractError("EST-SOURCE-02: published ref source binding does not fix implicit/literal length wires; see docs/CONTRACT_GAPS.md")
             else: raise ContractError(f"oracle source binding not implemented: {row.op}; no row omitted")
             if op in ["lift.retval","fault"]: nxt=[lit(N)]
             elif op=="qjump": nxt=[lit(labels[a[0][1:]])]
@@ -1277,9 +1293,80 @@ class Source:
         commit_nodes=self.catalog.recipes["oracle.construct"]["body"][2:-2]
         commit_env=dict(env,P=P,N=N,F=Fwidth,T=T,pc=pc,next=nextpc,faulted=faulted,code=code,result=result,tgt=target,fr=fault)
         commit=self.catalog.body(commit_nodes,commit_env,controls)
-        state_width=2*P+1+Fwidth+T+sum(widths[n] for n,ty,r in fn.regs)+B*Q
+        state=self.oracle_state(fn,env,budget,P,Q,pc,nextpc,faulted,code,result)
+        self.last_state=state
+        prefix,suffix=Profile(),Profile()
+        for record in state:
+            b=record["storage"]
+            init=record["initial"]
+            prep=self.catalog.recipe("value.literal",[b.width,init,b],{},controls) if init else Profile()
+            for byte_base,image in record["images"]:
+                chunk=b.slice(byte_base*8,(byte_base+len(image)//2)*8)
+                prep=prep.then(self.catalog.body([{"image":"I","wires":"cells"}],{"I":image,"cells":chunk}))
+            prefix=prefix.then(space_profile(b.cls,"clean",b.width)).then(prep)
+            suffix=prep.then(space_profile(b.cls,"clean",-b.width)).then(suffix)
         work=step.repeat(B).then(commit).then(step.repeat(B))
-        return space_profile(self.cls,"clean",state_width).then(work).then(space_profile(self.cls,"clean",-state_width))
+        return prefix.then(work).then(suffix)
+
+    def oracle_state(self,fn,env,budget,P,Q,pc,nextpc,faulted,code,result):
+        """K25 source state, stored as compact descriptors rather than wires.
+
+        The B frames share one cost coordinate; it represents B distinct equal
+        lifetimes, not a shared frame identity for a scheduled certificate.
+        """
+        records=[]
+        def add(name,b,initial=0,images=()):
+            require(initial>=0 and initial.bit_length()<=b.width,"construction initial value outside width")
+            records.append({"name":name,"storage":b,"initial":initial,"images":list(images)})
+            return b
+        for name,b in [("pc",pc),("pc_prime",nextpc),("faulted",faulted),("code",code),("result_val",result)]: add(name,b)
+        layout=self.obj.sections.get("layout")
+        table=None;packed=0
+        if layout is not None:
+            require(integer(layout["ptr_width"],1)==self.obj.ptr,"layout pointer width differs from object")
+            H,A,S=(integer(layout[k],0) for k in ["H","A_tab","S_cells"])
+            require(H<=self.obj.ptr,"layout H exceeds pointer width")
+            entries=[]
+            mapped=layout["interface_regions"].get(fn.name,{})
+            mem_formals={n:ty for n,ty,role in fn.groups[3]}
+            require(set(mapped)==set(mem_formals),"layout mapped regions differ from source interface")
+            images=[]
+            ranges=[(0,integer(layout["null_size"],0),"null")]
+            for name,g in layout["globals"].items():
+                base,size=integer(g["base"],0),integer(g["size"],0)
+                require(g["image"]==name and name in self.obj.sections.get("data",{}),"global image/data name mismatch")
+                image=self.obj.sections["data"][name]
+                require(len(image)==2*size,"global size differs from data image")
+                entries.append((base,size));ranges.append((base,base+size,name))
+                images.append((base,image))
+            for name,entry in mapped.items():
+                shape=re.fullmatch(r"region\[([0-9]+),8\]",mem_formals[name])
+                require(shape,"mapped interface regions require W=8")
+                base,size=integer(entry["base"],0),1<<int(shape[1])
+                entries.append((base,size));ranges.append((base,base+size,name))
+            require(len(entries)<=1<<A,"too many allocator pre-entries")
+            heap_base,heap_max=integer(layout["heap_base"],0),integer(layout["heap_limit_max"],0)
+            ranges.append((heap_base,heap_base+heap_max,"heap"))
+            for i,(lo,hi,name) in enumerate(ranges):
+                require(0<=lo<=hi<=1<<H,f"layout range outside memory: {name}")
+                for a,b,other in ranges[:i]:
+                    if lo<hi and a<b: require(hi<=a or lo>=b,f"overlapping layout ranges: {name}/{other}")
+            Hc,Ac,Sc,Dc=H+2,A+1,S+1,max(1,(unsigned(budget[3])+1).bit_length())
+            for name,width,initial in [("heap_used",Hc,0),("atop",Ac,len(entries)),("sp",Sc,0),("fp",Sc,0),("depth",Dc,0)]: add(name,self.fresh(name,width),initial)
+            add("mem",self.fresh("mem",8*(1<<H)),images=sorted(images))
+            location_widths=[env[n].width for n,ty,r in fn.regs]
+            Did=max(1,(max(1,len(location_widths))-1).bit_length())
+            cell_width=max(P,Sc,Did,*location_widths)
+            add("stack",self.fresh("stack",(1<<S)*cell_width))
+            entry_width=2*self.obj.ptr+2
+            table=self.fresh("alloctab",(1<<A)*entry_width)
+            for i,(base,size) in enumerate(entries):
+                packed|=(base+(size<<self.obj.ptr)+(3<<(2*self.obj.ptr)))<<(i*entry_width)
+        for n,ty,r in fn.regs: add(n,env[n])
+        if table is not None: add("alloctab",table,packed)
+        B=unsigned(budget[0])
+        if B: add("frames",self.fresh("frames",B*Q))
+        return records
 
     def classical(self, fn, args):
         """Count a resolved classical control path; quantum inputs stay abstract.

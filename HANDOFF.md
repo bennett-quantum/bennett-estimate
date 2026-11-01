@@ -1,12 +1,15 @@
 # Handoff
 
-Status: partial implementation, ISA 0.9 pinned in SPEC_VERSIONS.toml. The runner
+Status: partial implementation; full source coverage needs the published binding
+decisions in [CONTRACT_GAPS.md](docs/CONTRACT_GAPS.md). ISA 0.9 is pinned in
+SPEC_VERSIONS.toml. The runner
 owns commits; no git command was run by this job. Worklog is orchestrator-owned.
 
 Implemented: exact rational expressions and K9/K12 arithmetic; independent
 object and certificate readers; all ten normative object identity vectors;
 published catalog traversal into composable cost summaries; structured source
-primitives; zero-argument memoryless padded oracle summaries; pure classical
+primitives; padded arithmetic/control oracles, root layout-state/global-address
+construction and unused typed parameter bindings; pure classical
 control-path costing and conditional step bounds; deterministic JSON CLI.
 
 Verified: headless `timeout 180 scripts/pre-push --working-tree` exited 0:
@@ -39,6 +42,15 @@ at 2^20 rows yet. Do not label a padded step-machine estimate structure-recovere
 The exported upstream `bennett-vm-hsd`/`b-isa-spec-c15` records were read because
 their databases are read-only under this job's sandbox. Published 0.9 K12 fixes
 the requested parameter vector, escaped per-class rows and upward decimal
-contract; no decision was guessed. There is no newly established normative gap
-in those rules. Upstream Beads writes would require an orchestrator with write
-access; local follow-up work is in this repository's Beads database/export.
+contract; no decision was guessed in those settled rules. The continuation
+demonstrated two separate source-to-wire binding gaps, EST-SOURCE-01/02, tracked
+by `bennett-estimate-bph.4`. Both source objects are accepted by the published VM
+binary with matching hashes. The fixed-argument function executes all four x/a
+combinations correctly, while alternative implicit length widths change exact
+workspace. No resource policy is silently substituted for that missing binding.
+
+Exact proposed text and witnesses are in docs/CONTRACT_GAPS.md. The orchestrator
+request is `.tmp/sol-estimate/cross-repo-beads.md`, per COMMON rule 14; the
+proposals remain unadopted. After the spec publishes its decision and any new
+catalog identity, consume it and finish `.1`/`.2`/`.3`. The sandbox's read-only
+sibling access does not itself justify stopping work.
