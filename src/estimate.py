@@ -51,6 +51,26 @@ def integer(value, minimum=None):
     return n
 
 
+def decimal_value(value):
+    require(isinstance(value,(str,int,Decimal)) and not isinstance(value,bool),"expected decimal number/text")
+    if isinstance(value,str):
+        require(re.fullmatch(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?",value),"expected decimal text, not a rational fraction")
+        value=Decimal(value)
+    return rational(value)
+
+
+def exact_decimal(value):
+    q=rational(value);denominator=q.denominator;twos=fives=0
+    while denominator%2==0:denominator//=2;twos+=1
+    while denominator%5==0:denominator//=5;fives+=1
+    require(denominator==1,"request accuracy must have a finite decimal encoding")
+    digits=max(twos,fives)
+    coefficient=q.numerator*2**(digits-twos)*5**(digits-fives)
+    if not digits:return str(coefficient)
+    sign="-" if coefficient<0 else "";s=str(abs(coefficient)).rjust(digits+1,"0")
+    return sign+(s[:-digits]+"."+s[-digits:]).rstrip("0").rstrip(".")
+
+
 def unsigned(value):
     require(isinstance(value, str) and re.fullmatch(r"0|[1-9][0-9]*", value), "K13: expected canonical unsigned decimal string")
     return int(value)
@@ -506,6 +526,9 @@ def bits(wires):
     return tuple((b.identity, b.offset+i, b.cls) for b in wires for i in range(b.width))
 
 
+_BINDING_SCOPE=object()
+
+
 class Catalog:
     def __init__(self, text, target):
         doc = catalog_document(text)
@@ -520,6 +543,16 @@ class Catalog:
         self.symbols = {}
         self.eps = F(0)
         self.closed_form = True
+        self.ledger=None
+        self.source_metadata={}
+        self.source_context=None
+        self.call_edges=()
+        self.loop_coordinates=[]
+        self.source_ordinals={}
+        self.root_step=None;self.root_phase=None
+        self.binding_serial=0
+        self.allocation_scopes={}
+        self.used_allocations=set()
         self.default_class=next(iter(sorted(target.doc["classes"],key=lambda name:name.encode("utf-16-be"))))
 
     def bind(self, formals, actuals, caller, controls):
@@ -566,7 +599,9 @@ class Catalog:
         try:
             r = self.recipes[name]
             bound, controls = self.bind(r["parameters"], args, env or {}, controls)
-            if self.closed_form and name in ["dispatch.copy","dispatch.store","dispatch.exchange"] and not self.target.doc.get("topology"):
+            self.binding_serial+=1
+            bound[_BINDING_SCOPE]=self.binding_serial
+            if self.ledger is None and self.closed_form and name in ["dispatch.copy","dispatch.store","dispatch.exchange"] and not self.target.doc.get("topology"):
                 p=self.dispatch_summary(name,bound,controls)
                 if p is not None: return p
             return self.body(r["body"], bound, controls, inverse)
@@ -688,6 +723,34 @@ class Catalog:
         except (ValueError,TypeError,KeyError,ContractError):
             return False
 
+    def leaf_address(self):
+        meta=self.source_context
+        chain=list(self.call_edges)
+        if meta is not None:
+            chain.append({"symbol":meta["symbol"],"point":meta["point"],"iteration":list(self.loop_coordinates[:meta["depth"]]),"instance":[]})
+        key=(jcs(chain),self.root_step,self.root_phase)
+        previous,count=self.source_ordinals.get(id(meta),(None,0))
+        if previous!=key:count=0
+        self.source_ordinals[id(meta)]=(key,count+1)
+        return {"chain":chain,"ordinal":count,"step":self.root_step,"phase":self.root_phase}
+
+    def space_event(self,b,acquire):
+        if acquire:self.used_allocations.add(b.identity)
+        if self.ledger is None:return space_profile(b.cls,b.state,b.width if acquire else -b.width)
+        address=self.leaf_address()
+        return self.ledger.allocate(b,**address) if acquire else self.ledger.release(b,**address)
+
+    def gate_event(self,op,operands,controls=(),own=None,params=None):
+        if self.ledger is not None:
+            required=self.ledger.require_exact
+            self.ledger.require_exact=required or bool(self.source_context and self.source_context.get("exact"))
+            try:return self.ledger.gate(op,operands,controls,params=params,**self.leaf_address())
+            finally:self.ledger.require_exact=required
+        actual=bits(operands)
+        k={"cx":1,"ccx":2,"mcx":len(actual)-1}.get(op,0) if own is None else own
+        effective=tuple(dict.fromkeys(actual[:k]+controls))
+        return self.target.gate(op,[w[2] for w in effective+actual[k:]],len(effective),self.eps,own=k)
+
     def body(self, nodes, env, controls=(), inverse=False):
         require(isinstance(nodes, list), "K19: constructor body must be array")
         env = dict(env)
@@ -698,12 +761,17 @@ class Catalog:
                 n = integer(scalar(node["width"], env), 0)
                 cls = node["class"]
                 if isinstance(cls, dict): cls = cls["class"]
-                if cls == "any": cls = self.default_class
-                require(cls in self.target.doc["classes"], "unknown allocation class")
+                if node["alloc"] in env and isinstance(env[node["alloc"]],Bundle) and self.allocation_scopes.get(env[node["alloc"]].identity)==env.get(_BINDING_SCOPE) and (inverse or env[node["alloc"]].identity not in self.used_allocations):continue
+                if cls == "any" and self.ledger is None: cls = self.default_class
+                require(cls=="any" or cls in self.target.doc["classes"], "unknown allocation class")
                 self.serial += 1
                 env[node["alloc"]] = Bundle(f"{self.serial}:{node['alloc']}", n, cls, state="borrowed" if node["state"] in ["dirty","borrowed"] else "clean")
+                self.allocation_scopes[env[node["alloc"]].identity]=env.get(_BINDING_SCOPE)
         out = Profile()
         for node in reversed(nodes) if inverse else nodes:
+            prior_context=self.source_context
+            marked=self.source_metadata.get(id(node))
+            if marked is not None:self.source_context=marked[1]
             self.visits += 1
             require(isinstance(node, dict), "invalid constructor")
             if "gate" in node:
@@ -716,7 +784,14 @@ class Catalog:
                 require(not set(operands[own:]) & set(controls), "K19: effective control is a target")
                 effective = tuple(dict.fromkeys(operands[:own] + controls))
                 classes = [w[2] for w in effective + operands[own:]]
-                p = self.target.gate(op, classes, len(effective), self.eps, own=own)
+                params=[]
+                for parameter in node.get("params",[]):
+                    value=env.get(parameter,parameter) if isinstance(parameter,str) else parameter
+                    if inverse:
+                        if isinstance(value,str) and value.startswith("0x"):value="0x"+format(int(value[2:],16)^(1<<63),"016x")
+                        else:value=-float(value)
+                    params.append(value)
+                p=self.gate_event(op,wire(node["wires"],env),controls,own,params)
             elif "alloc" in node or "release" in node or "acquire" in node or "relinquish" in node:
                 key = next(k for k in ["alloc", "release", "acquire", "relinquish"] if k in node)
                 if key == "alloc": keys(node, ["alloc", "width", "class", "state"], context="allocation")
@@ -724,19 +799,24 @@ class Catalog:
                 b = env.get(node[key])
                 require(isinstance(b, Bundle), f"K27: missing allocation {node[key]}")
                 sign = 1 if key in ["alloc", "acquire"] else -1
-                p = space_profile(b.cls, b.state, b.width * (-sign if inverse else sign))
+                p=self.space_event(b,(sign>0)!=inverse)
             elif "for" in node:
                 keys(node, ["for", "from", "to", "body"], context="loop")
                 lo, hi = scalar(node["from"], env), scalar(node["to"], env)
                 require(hi >= lo, "K19: reversed loop bounds")
                 if lo == hi: p = Profile()
-                elif self.invariant(node["body"], node["for"]) and self.safe_index_fold(node["body"],node["for"],lo,hi,env,controls) and not self.target.doc.get("topology") and all(not isinstance(v,list) or not v or not isinstance(v[0],Bundle) or len({b.cls for b in v}) == 1 for v in env.values()):
+                elif self.ledger is None and self.invariant(node["body"], node["for"]) and self.safe_index_fold(node["body"],node["for"],lo,hi,env,controls) and not self.target.doc.get("topology") and all(not isinstance(v,list) or not v or not isinstance(v[0],Bundle) or len({b.cls for b in v}) == 1 for v in env.values()):
                     bound = dict(env, **{node["for"]: lo})
                     p = self.body(node["body"], bound, controls, inverse).repeat(hi-lo)
                 else:
                     p = Profile()
                     for i in range(hi-1,lo-1,-1) if inverse else range(lo,hi):
+                        coordinates=self.loop_coordinates
+                        source_loop=bool(self.source_context and self.source_context.get("kind")=="qloop" and node.get("for")=="$iteration")
+                        source_loop=source_loop or bool(self.source_context and self.source_context.get("kind")=="qloop" and node.get("for")=="i" and any(node is n for n in self.recipes["qloop.while"]["body"]))
+                        if source_loop:self.loop_coordinates=coordinates+[i-lo]
                         p = p.then(self.body(node["body"], dict(env, **{node["for"]: i}), controls, inverse))
+                        self.loop_coordinates=coordinates
             elif "inverse" in node:
                 keys(node, ["inverse", "body"], context="inverse")
                 require(node["inverse"] is True, "invalid inverse")
@@ -753,7 +833,12 @@ class Catalog:
                 captured = env[node["splice"]]
                 require(isinstance(captured, Captured), "unbound body")
                 joined = tuple(dict.fromkeys(controls + captured.controls))
+                edges,coordinates=self.call_edges,self.loop_coordinates
+                if marked is not None and marked[1].get("call"):
+                    edge={"symbol":marked[1]["symbol"],"point":marked[1]["point"],"iteration":list(coordinates[:marked[1]["depth"]]),"instance":[],"call_index":0}
+                    self.call_edges=edges+(edge,);self.loop_coordinates=[]
                 p = self.body(captured.body, captured.env, joined, inverse)
+                self.call_edges,self.loop_coordinates=edges,coordinates
             elif "image" in node:
                 keys(node, ["image", "wires"], context="image")
                 image = env.get(node["image"], node["image"])
@@ -768,7 +853,7 @@ class Catalog:
                             cursor = offset+i
                             for b in bundle:
                                 if cursor < b.width:
-                                    p = p.then(self.target.gate("x", [b.cls], 0, self.eps))
+                                    p=p.then(self.gate_event("x",[b.bit(cursor)]))
                                     break
                                 cursor -= b.width
                     offset += 8
@@ -776,7 +861,7 @@ class Catalog:
                 keys(node, ["declare", "width", "class", "state", "body"], context="declare")
                 cls = env.get(node["class"], node["class"]) if isinstance(node["class"],str) else node["class"]
                 cls = cls.get("class") if isinstance(cls,dict) else cls
-                if cls == "any": cls = self.default_class
+                if cls == "any" and self.ledger is None: cls = self.default_class
                 self.serial += 1
                 b = Bundle(str(self.serial), integer(scalar(node["width"], env),0), cls, state=node["state"])
                 p = self.body(node["body"], dict(env, **{node["declare"]: b}), controls, inverse)
@@ -817,6 +902,7 @@ class Catalog:
             else:
                 raise ContractError(f"K19: unknown constructor {list(node)}")
             out = out.then(p)
+            self.source_context=prior_context
         return out
 
 
@@ -1160,7 +1246,7 @@ class Schedule:
         integer(b["inherited_controls"],0)
         require(isinstance(b["budget"],list) and len(b["budget"])==4,"schedule budget needs four components")
         for n in b["budget"]:integer(n,0)
-        require(rational(b["epsilon"])>=0,"negative schedule accuracy")
+        require(decimal_value(b["epsilon"])>=0,"negative schedule accuracy")
         keys(b["scheduler"],["name","version"],context="scheduler")
         if "expansion" in b:keys(b["expansion"],["name","version","hash"],context="expansion")
         require(isinstance(doc["entries"],list),"schedule entries must be array")
@@ -1186,14 +1272,14 @@ class Schedule:
             value=entry[kind]
             if kind=="gate":
                 keys(value,[],["realisation","epsilon_share"],"gate decision")
-                if "epsilon_share" in value:require(rational(value["epsilon_share"])>=0,"negative epsilon share")
+                if "epsilon_share" in value:require(decimal_value(value["epsilon_share"])>=0,"negative epsilon share")
                 if "realisation" in value:require(isinstance(value["realisation"],str) and value["realisation"],"empty gate realisation")
             elif kind=="alloc":
                 keys(value,["class"],["vertices"],"allocation decision")
                 require(isinstance(value["class"],str) and value["class"]!="any","allocation decision must resolve class")
             elif kind=="start":
                 keys(value,["time"],context="start decision")
-                require(rational(value["time"])>=0,"negative start time")
+                require(decimal_value(value["time"])>=0,"negative start time")
             else:
                 keys(value,["realisation"],context="cleanup decision")
                 require(value["realisation"] in ["reverse","recompute"],"invalid cleanup realisation")
@@ -1275,9 +1361,10 @@ class Schedule:
 
 class Ledger:
     """Resource endpoints and live allocations; no gate/circuit list is kept."""
-    def __init__(self,target,schedule,default_share=F(0),exact=False):
+    def __init__(self,target,schedule,default_share=F(0),exact=False,count_only=False):
         self.target,self.schedule=target,schedule
         self.default_share=rational(default_share);self.require_exact=exact
+        self.count_only=count_only;self.nonexact_native_operations=0
         self.cursor=self.makespan=F(0)
         self.counts={};self.gates={};self.error=F(0)
         self.records=[];self.dependencies={};self.parallel_events={}
@@ -1289,6 +1376,7 @@ class Ledger:
 
     def _start(self,chain,ordinal,step,phase,minimum=F(0)):
         chosen=self._decision("start",chain,ordinal,step,phase)
+        if self.count_only:return F(0)
         start=rational(chosen["time"]) if chosen is not None else max(self.cursor,minimum)
         require(start>=minimum,"E_SCHEDULE_INFEASIBLE: start violates data or wire-lifetime dependency")
         return start
@@ -1344,6 +1432,7 @@ class Ledger:
         self.sequence+=1
         record={"bundle":b,"class":cls,"state":"clean" if slot is not None else b.state,"start":start,"end":None,"vertices":placement,"slot":slot,"category":category,"scheme":scheme,"id":f"{b.identity}@{self.sequence}"}
         self.records.append(record)
+        record["instant_peak"]=self._used(cls,start)
         return record
 
     def interface(self,slot,b,vertices=None):
@@ -1426,6 +1515,9 @@ class Ledger:
         start=self._start(chain,ordinal,step,phase,self._minimum(wires))
         realisation=choice.get("realisation")
         classes=[self.resolved_class(self._bit_bundle(w)) for w in wires]
+        is_exact=self.target.exact_native(op,classes,len(combined),own)
+        if not is_exact:self.nonexact_native_operations+=1
+        if self.count_only:return Profile()
         native=self.target.native_gate(op,classes,len(combined),eps,own)
         if realisation in [None,"native"] and native is not None:return self._native(op,wires,own,len(combined),eps,start)
         require(realisation!="native",f"E_GATE_UNSUPPORTED: selected native {op} has no match")
@@ -1492,7 +1584,7 @@ class Ledger:
                 if start==end:zero_peak=max(zero_peak,width)
                 key=(cls,r["state"])
                 areas[key]=areas.get(key,F(0))+width*(end-start)
-            active=0;peak=zero_peak
+            active=0;peak=max([zero_peak]+[r["instant_peak"] for r in self.records if r["class"]==cls])
             for time in sorted(changes):active+=changes[time];peak=max(peak,active)
             peaks[cls]=peak
             cap=self.target.doc["classes"][cls]["capacity"]
@@ -1539,11 +1631,17 @@ class Source:
                     if n not in env: env[n] = self.fresh(n,type_width(ty,self.obj.ptr))
             arg_group = fn.groups[4] if fn.kind == "oracle" else fn.groups[3]
             env.update({n:v for (n,ty,r),v in zip(arg_group,parsed)})
+            if self.catalog.ledger is not None and len(self.calls)==1:
+                for bit in controls:self.catalog.ledger.interface(f"control:{bit[1]}",Bundle(bit[0],1,bit[2],bit[1]))
+                names=["in","tgt","fault","mem"] if fn.kind=="oracle" else ["mut","in","mem"]
+                for group,role in zip(wire_groups,names):
+                    for index,(n,ty,mode) in enumerate(group):self.catalog.ledger.interface(f"{role}:{index}",env[n])
             if fn.kind in ["action","perm_action"]:
                 nodes = [i for _,code in fn.blocks.values() for i in code]
                 # Function-local regions are allocated at entry regardless of
                 # their source declaration's position or enclosing predicate.
                 regions, prefix, suffix = {}, Profile(), Profile()
+                deferred_regions=[]
                 for n,ty,role in fn.groups[2]:
                     m=re.fullmatch(r"region\[([0-9]+),([0-9]+)\]",ty)
                     regions[n]=(int(m[1]),int(m[2]),env[n])
@@ -1551,18 +1649,28 @@ class Source:
                     if inst.op != "qregion": continue
                     n,A,W,*image = inst.args
                     A,W = integer(A,0),integer(W,1)
-                    b = self.fresh(n,(1<<A)*W)
+                    b = self.fresh(n,(1<<A)*W,"any" if self.catalog.ledger is not None else None)
                     regions[n] = (A,W,b)
                     env[n] = b
-                    prefix = prefix.then(space_profile(b.cls,"clean",b.width))
+                    meta={"symbol":self.obj.symbol(name)["interface_hash"],"point":f"{inst.block}:{inst.ordinal}","depth":0,"kind":"qregion","exact":fn.kind=="perm_action"}
+                    previous=self.catalog.source_context;self.catalog.source_context=meta
+                    prefix=prefix.then(self.catalog.space_event(b,True))
                     if image:
                         data = self.obj.sections.get("data",{}).get(image[0].removeprefix("@"))
                         require(data is not None,"unbound qregion image")
                         prep = self.catalog.body([{"image":"I","wires":"cells"}],{"I":data,"cells":b})
                         prefix = prefix.then(prep)
-                        suffix = prep.then(space_profile(b.cls,"clean",-b.width)).then(suffix)
-                    else: suffix = space_profile(b.cls,"clean",-b.width).then(suffix)
+                        if self.catalog.ledger is None:suffix=prep.then(space_profile(b.cls,"clean",-b.width)).then(suffix)
+                    else:
+                        data=""
+                        if self.catalog.ledger is None:suffix=space_profile(b.cls,"clean",-b.width).then(suffix)
+                    if self.catalog.ledger is not None:deferred_regions.append((b,data,meta))
+                    self.catalog.source_context=previous
                 p = prefix.then(self.action(nodes,env,regions,controls,adjoint)).then(suffix)
+                for b,data,meta in reversed(deferred_regions):
+                    previous=self.catalog.source_context;self.catalog.source_context=meta
+                    p=p.then(self.catalog.body([{"image":"I","wires":"cells"}],{"I":data,"cells":b},inverse=True)).then(self.catalog.space_event(b,False))
+                    self.catalog.source_context=previous
                 require(all(v == 0 for v in p.delta.values()),"§5.1: unmatched allocation/release in action")
                 return p
             require(fn.kind == "oracle", "root region must be action, oracle, CC or R")
@@ -1873,15 +1981,18 @@ class Source:
         p,steps,_,_=execute(fn,initial)
         return p,steps
 
-    def action_nodes(self, source_nodes, env, regions, controls=()):
+    def action_nodes(self, source_nodes, env, regions, controls=(),depth=0):
         out = []
         predicates = []
-        def emit(node):
-            if predicates:
+        def emit(node,controlled=True):
+            if predicates and controlled:
                 node = {"under": list(predicates), "body":[node]}
+            if self.catalog.ledger is not None:self.catalog.source_metadata[id(node)]=(node,meta)
             out.append(node)
         for inst in source_nodes:
             op,a = inst.op,inst.args
+            function=self.calls[-1]
+            meta={"symbol":self.obj.symbol(function)["interface_hash"],"point":f"{inst.block}:{inst.ordinal}","depth":depth,"kind":op,"call":op=="action_call","exact":self.obj.functions[function].kind=="perm_action"}
             if op in GATES or op == "mcx":
                 params = []
                 if op in ["rx","ry","rz"]:
@@ -1898,18 +2009,18 @@ class Source:
                     cls,n = a
                     n = env.get(n,integer(n,1) if re.fullmatch(r"[0-9]+",n) else None)
                     require(isinstance(n,int) and n>0,"invalid allocation width")
-                    cls = self.cls if cls == "any" else cls
+                    cls = self.cls if cls == "any" and self.catalog.ledger is None else cls
                     state = "borrowed" if op == "qborrow" else "clean"
                 elif op == "qcopy":
-                    n = sum(b.width for b in wire(a[0],env)); cls,state = self.cls,"clean"
+                    n = sum(b.width for b in wire(a[0],env)); cls,state = (self.cls if self.catalog.ledger is None else "any"),"clean"
                 else:
                     require(a[0] in regions,"unknown region")
-                    A,n,_ = regions[a[0]]; cls,state=self.cls,"clean"
+                    A,n,_ = regions[a[0]]; cls,state=(self.cls if self.catalog.ledger is None else "any"),"clean"
                 b = self.fresh(name,n,cls,state)
                 env[name] = b
                 # Bind allocation result outside captured loops; acquire/release
                 # retain its source identity. No wire-sized array is created.
-                out.append({"acquire":name})
+                emit({"acquire":name},False)
                 if op == "qcopy":
                     emit({"invoke":"bind.qxor","args":[n,a[0],name]})
                 elif op == "qload":
@@ -1924,7 +2035,7 @@ class Source:
                 if op == "qunload":
                     A,W,cells=regions[a[0]]
                     emit({"invoke":"dispatch.copy","args":[A,1<<A,W,[] if a[1]=="()" else a[1],cells,name]})
-                out.append({"relinquish":name})
+                emit({"relinquish":name},False)
                 # env retains the immutable descriptor for catalog traversal;
                 # liveness is checked separately by the source lowering.
             elif op in ["qxor","qexch"]:
@@ -1937,7 +2048,7 @@ class Source:
             elif op == "qloop":
                 n=env.get(a[0],int(a[0]) if a[0].isdigit() else None)
                 require(isinstance(n,int) and n>=0,"invalid qloop bound")
-                body = self.action_nodes(inst.body,env,regions,controls)
+                body = self.action_nodes(inst.body,env,regions,controls,depth+1)
                 if len(a)==1: emit({"for":"$iteration","from":0,"to":n,"body":body})
                 else:
                     require(a[1]=="while" and len(a)==3,"qloop while syntax")
@@ -1946,8 +2057,8 @@ class Source:
                     body_name = f"$body{self.serial}";env[body_name]=captured
                     emit({"invoke":"qloop.while","args":[n,a[2],body_name]})
             elif op == "qif":
-                then = self.action_nodes(inst.body,env,regions,controls)
-                otherwise = self.action_nodes(inst.otherwise,env,regions,controls)
+                then = self.action_nodes(inst.body,env,regions,controls,depth)
+                otherwise = self.action_nodes(inst.otherwise,env,regions,controls,depth)
                 emit({"under":a[0],"body":then})
                 emit({"gate":"x","wires":[a[0]]})
                 emit({"under":a[0],"body":otherwise})
@@ -1958,11 +2069,11 @@ class Source:
             elif op=="ctl":
                 require(len(a)>=3,"ctl requires control and region call")
                 nested=Instruction(a[1],a[2:],[],block=inst.block,ordinal=inst.ordinal)
-                emit({"under":a[0],"body":self.action_nodes([nested],env,regions,controls)})
+                emit({"under":a[0],"body":self.action_nodes([nested],env,regions,controls,depth)})
             elif op=="adj":
                 require(len(a)>=2,"adj requires region call")
                 nested=Instruction(a[0],a[1:],[],block=inst.block,ordinal=inst.ordinal)
-                emit({"inverse":True,"body":self.action_nodes([nested],env,regions,controls)})
+                emit({"inverse":True,"body":self.action_nodes([nested],env,regions,controls,depth)})
             elif op=="action_call":
                 require(len(a)==5,"action_call requires four complete argument groups")
                 name=a[0].removeprefix("@")
@@ -2011,39 +2122,49 @@ class Source:
         return out
 
 
-def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=0,step_bound=None):
+def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=0,step_bound=None,epsilon="0"):
     require(region in obj.functions,"unknown entry region")
     require(obj.ptr in target.doc["ptr_widths_supported"],"E_PTR_WIDTH: target does not support object pointer width")
     require(isinstance(variant,str) and variant,"empty variant")
     inherited_controls=integer(inherited_controls,0)
+    accuracy=decimal_value(epsilon)
+    require(accuracy>=0,"negative request accuracy")
+    accuracy_text=exact_decimal(accuracy)
     validate_budget(budget,obj)
     catalog = Catalog(globals().get("CATALOG_TEXT") or (Path(__file__).resolve().parents[1]/"data/ref-0.9.json").read_text(),target)
-    require("topology" not in target.doc,"topology source placement is pending; no feasibility/exactness claim emitted")
     identities=obj.identities()
     for symbol in obj.sections["symbols"].values():
         require(identities[symbol["name"]]==symbol["interface_hash"],f"§9.2: incorrect interface_hash for {symbol['name']}")
     closure=obj.identities(closure=True)[region]
     bindings={"closure_hash":closure,"target_hash":target.hash,"region":region,"variant":variant,
-              "inherited_controls":inherited_controls,"budget":budget,"params_hash":digest(jcs(args)),"epsilon":0,
+              "inherited_controls":inherited_controls,"budget":budget,"params_hash":digest(jcs(args)),"epsilon":accuracy_text if accuracy else 0,
               "expansion":{"name":"ref","version":"0.9","hash":catalog.hash},
               "scheduler":{"name":"bennett-estimate-default","version":"0.1.0"}}
     effective_schedule={"bindings":bindings,"entries":[]}
     if "schedule" in obj.sections:
         schedule=obj.sections["schedule"]
-        keys(schedule,["bindings","entries"],["interface_vertices"],"schedule")
+        Schedule(schedule,obj,schedule["bindings"].get("region"))
         def binding_equal(key,value):
             supplied=schedule["bindings"].get(key)
+            if key=="expansion" and supplied is None:return obj.versions["isa"]=="0.9"
             if key=="budget":
                 return isinstance(supplied,list) and len(supplied)==4 and [rational(n) for n in supplied]==[rational(n) for n in value]
             if key=="epsilon": return supplied is not None and rational(supplied)==rational(value)
             return supplied==value
         selected=all(binding_equal(k,v) for k,v in bindings.items() if k!="scheduler")
         if selected:
-            require(not schedule["entries"],"explicit schedule selectors are pending; matching schedule was not ignored")
             effective_schedule=schedule
     source = Source(obj,target,catalog)
     fn = obj.functions[region]
+    ledger=None
+    replay=bool(effective_schedule["entries"] or "interface_vertices" in effective_schedule or "topology" in target.doc or accuracy or any(c["capacity"]!="unbounded" for c in target.doc["classes"].values()))
+    if replay and fn.kind in ["action","perm_action"]:
+        ledger=Ledger(target,Schedule(effective_schedule,obj,region),exact=fn.kind=="perm_action",count_only=bool(accuracy))
+        catalog.ledger=ledger
+    elif replay and fn.kind=="oracle" or effective_schedule["entries"] or "interface_vertices" in effective_schedule:
+        raise ContractError("scheduled oracle/classical source replay remains pending; selected schedule was not ignored")
     if fn.kind in ["cc","r"]:
+        require(not accuracy and inherited_controls==0,"classical cost request has no accuracy or inherited quantum controls")
         if step_bound is None:
             p,steps = source.classical(fn,args)
         else:
@@ -2060,26 +2181,42 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
     else:
         controls = tuple(("inherited",i,source.cls) for i in range(inherited_controls))
         p = source.region(region,args,budget,controls=controls)
+        if ledger is not None and ledger.count_only:
+            count=ledger.nonexact_native_operations
+            seen=set()
+            while True:
+                require(count not in seen,"E_SCHEDULE_INFEASIBLE: class/accuracy default resolution has no stable operation count")
+                seen.add(count)
+                share=accuracy/count if count else F(0)
+                catalog=Catalog(globals().get("CATALOG_TEXT") or (Path(__file__).resolve().parents[1]/"data/ref-0.9.json").read_text(),target)
+                ledger=Ledger(target,Schedule(effective_schedule,obj,region),default_share=share,exact=fn.kind=="perm_action")
+                catalog.ledger=ledger;source=Source(obj,target,catalog)
+                p=source.region(region,args,budget,controls=controls)
+                if ledger.nonexact_native_operations==count:break
+                count=ledger.nonexact_native_operations
+            require(ledger.error<=accuracy,"E_SCHEDULE_INFEASIBLE: achieved error exceeds request accuracy")
         sig = obj.symbol(region)["signature"]
         widths = list(sig.get("in",[]))+list(sig.get("mut",[]))+([sig["tgt"],sig["fault"]] if fn.kind=="oracle" else [])
         widths += [(1<<integer(m["A"],0))*integer(m["W"],1) for m in sig.get("mem",[])]
         interface = {source.cls:sum(widths)+inherited_controls}
         steps = None
-    rows = p.resources(target,interface)
+    rows=ledger.finish() if ledger is not None else p.resources(target,interface)
     for cls,desc in target.doc["classes"].items():
         peak = rows.get("peak_qubits["+escape(cls)+"]",0)
         require(desc["capacity"]=="unbounded" or peak <= desc["capacity"], f"E_SCHEDULE_INFEASIBLE: capacity exceeded for {cls}")
-    result={"schema":"bennett-estimate/0.1", "label":"bound" if step_bound is not None else "exact", "scope":"sequential reference realisation", "object_hash":obj.hash,
+    result={"schema":"bennett-estimate/0.1", "label":"bound" if step_bound is not None else "exact", "scope":"scheduled reference realisation" if ledger is not None else "sequential reference realisation", "object_hash":obj.hash,
             "interface_hash":identities[region],"closure_hash":closure,"effective_schedule":effective_schedule,"schedule_hash":digest(jcs(effective_schedule)),
             "target_hash":target.hash,"region":region,"variant":variant,"inherited_controls":inherited_controls,
             "invocation":{"args":args,"budget":budget},"params_hash":digest(jcs(args)),
             "resources":{n:decimal_up(q) for n,q in rows.items()},
             "exact_resources":{n:{"numerator":str(q.numerator),"denominator":str(q.denominator)} for n,q in rows.items()},
-            "gates":{n:str(v) for n,v in sorted(p.gates.items())},"classical_steps":str(steps) if steps is not None else None,
-            "error_bound":str(p.error),"summary_operations":catalog.visits}
+            "gates":{n:str(v) for n,v in sorted(ledger.gates.items() if ledger is not None else p.gates.items())},"classical_steps":str(steps) if steps is not None else None,
+            "error_bound":str(ledger.error if ledger is not None else p.error),"summary_operations":catalog.visits}
     if step_bound is not None:
         result["bound_assumptions"]=[f"classical execution terminates within {steps} source instructions, including callees and reversal"]
         result["rational_upper_bounds"]=result.pop("exact_resources")
+    if ledger is not None:
+        result["resolved_default_epsilon_share"]={"numerator":str(ledger.default_share.numerator),"denominator":str(ledger.default_share.denominator)}
     return result
 
 
@@ -2204,6 +2341,7 @@ def main(argv=None):
     parser.add_argument("--budget",default="0,0,0,0",help="B,heap,stack,depth (default is the explicit zero tuple)")
     parser.add_argument("--variant",default="forward")
     parser.add_argument("--inherited-controls",type=int,default=0)
+    parser.add_argument("--epsilon",default="0",help="exact decimal requested accuracy (default 0)")
     parser.add_argument("--certificate",type=Path,help="read certificate and cross-check K12 resources; does not verify correctness claims")
     parser.add_argument("--classical-step-bound",type=int,help="conditional upper bound for purely classical objects; termination assumption is reported")
     a=parser.parse_args(argv)
@@ -2215,7 +2353,7 @@ def main(argv=None):
         require(region is not None,"multiple entry regions: supply --region")
         params=loads(Path(a.params[1:]).read_text() if a.params.startswith("@") else a.params)
         budget=a.budget.split(",")
-        result=estimate(obj,target,region,params,budget,a.variant,a.inherited_controls,a.classical_step_bound)
+        result=estimate(obj,target,region,params,budget,a.variant,a.inherited_controls,a.classical_step_bound,a.epsilon)
         if a.certificate:
             result["certificate_status"]=Certificate.read(a.certificate.read_text()).check_resource_rows(result)
         print(jcs(result))

@@ -28,6 +28,14 @@ def schedule(entries=(),target_hash="b"*64):
     return {"bindings":{"closure_hash":"a"*64,"target_hash":target_hash,"region":"root","variant":"forward","inherited_controls":0,"budget":[2,0,0,0],"params_hash":e.digest("[]"),"epsilon":0,"expansion":{"name":"ref","version":"0.9","hash":"5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197"},"scheduler":{"name":"test","version":"1"}},"entries":list(entries)}
 
 
+def make_object(text,signature):
+    records={"0":{"name":"root","kind":signature["kind"],"signature":signature,"interface_hash":"0"*64}}
+    header="bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32\n\nsection symbols\n"
+    def document():return header+e.jcs(records)+"\n\nsection functions\n"+text+"\n"
+    obj=e.Object.read(document());records["0"]["interface_hash"]=obj.identities()["root"]
+    return e.Object.read(document())
+
+
 class Selectors(unittest.TestCase):
     def test_specificity_per_kind_ties_and_covered_ties(self):
         broad=entry(realisation="native",epsilon_share="0.125")
@@ -68,8 +76,73 @@ class Selectors(unittest.TestCase):
         # No operation in an empty generated domain means no tie witness.
         e.Schedule(schedule([entry(),entry()]))
 
+    def test_decimal_fields_are_decimal_text(self):
+        with self.assertRaises(e.ContractError):e.Schedule(schedule([entry("start",time="1/3")]))
+        with self.assertRaises(e.ContractError):e.Schedule(schedule([entry(epsilon_share="1/3")]))
+
 
 class Accounting(unittest.TestCase):
+    def test_default_accuracy_share_is_exact_one_thirtieth(self):
+        sig={"abi":"0.9","tier":"q","kind":"action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        obj=make_object("action @root (t:wire) () () () ()\n^entry():\nrz 0.5 t\nrz 0.5 t\nrz 0.5 t",sig)
+        doc=e.loads(e.jcs(target().doc))
+        gate=next(g for g in doc["gates"] if g["op"]=="rz")
+        gate["epsilon"]={"var":"eps"};gate["cost"]["time"]={"var":"eps"}
+        t=e.Target.read(e.jcs(doc))
+        result=e.estimate(obj,t,"root",[],["0"]*4,epsilon="0.1")
+        self.assertEqual(result["resolved_default_epsilon_share"],{"numerator":"1","denominator":"30"})
+        self.assertEqual(result["exact_resources"]["time"],{"numerator":"1","denominator":"10"})
+        self.assertEqual(F(result["error_bound"]),F(1,10))
+        # Explicit shares are included in N; they do not reduce the default
+        # share's denominator or become a less-specific entry's fallback.
+        obj.sections["schedule"]=result["effective_schedule"]
+        obj.sections["schedule"]["entries"]=[entry(path=[point(obj.symbol("root")["interface_hash"],"entry:1")],epsilon_share="0.01")]
+        result=e.estimate(obj,t,"root",[],["0"]*4,epsilon="0.1000")
+        self.assertEqual(F(result["error_bound"]),F(23,300))
+
+    def test_default_class_fallback_reaches_source_estimate(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        obj=make_object("perm_action @root (t:wire) () () () ()\n^entry():\na = qalloc any 1\ncx t a[0]\ncx t a[0]\nqfree a",sig)
+        doc=e.loads(e.jcs(target().doc));desc={"capacity":1,"qubit_second":1,"dirty_rate":1}
+        doc["classes"]={"A":dict(desc),"B":dict(desc)}
+        t=e.Target.read(e.jcs(doc));result=e.estimate(obj,t,"root",[],["0"]*4)
+        self.assertEqual(result["resources"]["peak_qubits[A]"],"1")
+        self.assertEqual(result["resources"]["peak_qubits[B]"],"1")
+    def test_catalog_stream_preserves_nested_scratch_lifetimes(self):
+        for name in ["bind.value.add","bind.value.mul","bind.value.icmp.slt"]:
+            t=target();ledger=e.Ledger(t,e.Schedule(schedule()))
+            env={n:e.Bundle(n,1 if n=="t" and "icmp" in name else 2,"data") for n in ["a","b","t"]}
+            for i,b in enumerate(env.values()):ledger.interface(f"mut:{i}",b)
+            catalog=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);catalog.ledger=ledger
+            p=catalog.recipe(name,[2,"a","b","t"],env)
+            self.assertEqual(ledger.finish(),p.resources(t,{"data":sum(b.width for b in env.values())}),name)
+
+    def test_published_controlled_schedule_and_topology_reach_estimator(self):
+        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
+        obj=e.Object.read((fixture/"controlled.bisa").read_text())
+        t=e.Target.read((fixture/"target.json").read_text())
+        result=e.estimate(obj,t,"controlled",[],["0"]*4)
+        self.assertEqual(result["resources"],{"peak_qubits[fast]":"2","qubit_second[fast]":"2","time":"1"})
+        self.assertEqual(result["schedule_hash"],e.digest(e.jcs(obj.sections["schedule"])))
+        doc=e.loads(e.jcs(t.doc));doc["topology"]={"vertices":[{"class":"fast"} for _ in range(4)],"edges":[[0,1],[0,2],[1,3],[2,3]]}
+        grid=e.Target.read(e.jcs(doc))
+        obj.sections["schedule"]["bindings"]["target_hash"]=grid.hash
+        obj.sections["schedule"]["interface_vertices"]=[[0],[1]]
+        self.assertEqual(e.estimate(obj,grid,"controlled",[],["0"]*4)["resources"]["time"],"1")
+        obj.sections["schedule"]["interface_vertices"]=[[0],[3]]
+        with self.assertRaisesRegex(e.ContractError,"§17 item 15"):
+            e.estimate(obj,grid,"controlled",[],["0"]*4)
+
+    def test_loop_iteration_coordinates_select_one_start(self):
+        obj=e.Object.read((ROOT/"tests/fixtures/example3.bisa").read_text());t=target()
+        original=e.estimate(obj,t,"borrow_demo",[],["0"]*4)
+        obj.sections["schedule"]=original["effective_schedule"]
+        h=obj.symbol("borrow_demo")["interface_hash"]
+        obj.sections["schedule"]["entries"]=[entry("start",path=[point(h,"entry:2",[0])],time="0.5")]
+        result=e.estimate(obj,t,"borrow_demo",[],["0"]*4)
+        self.assertEqual(result["resources"]["time"],"4.5")
+        self.assertEqual(result["resources"]["qubit_second[data]"],"13.5")
+
     def test_disjoint_overlap_resource_and_dependent_start(self):
         t=target();q=e.Bundle("q",2,"data")
         entries=[entry("start",path=[point(point=f"entry:{i}")],time="0") for i in [0,1]]

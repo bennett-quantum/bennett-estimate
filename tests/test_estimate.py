@@ -223,8 +223,13 @@ class Objects(unittest.TestCase):
         path=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
         obj=e.Object.read((path/"controlled.bisa").read_text())
         target=e.Target.read((path/"target.json").read_text())
-        with self.assertRaisesRegex(e.ContractError,"explicit schedule selectors"):
+        scheduled=e.estimate(obj,target,"controlled",[],["0"]*4)
+        self.assertEqual(scheduled["resources"],{"peak_qubits[fast]":"2","qubit_second[fast]":"2","time":"1"})
+        original=obj.sections["schedule"]["entries"][0]["gate"]["realisation"]
+        obj.sections["schedule"]["entries"][0]["gate"]["realisation"]="missing-scheme"
+        with self.assertRaisesRegex(e.ContractError,"selected realisation"):
             e.estimate(obj,target,"controlled",[],["0"]*4)
+        obj.sections["schedule"]["entries"][0]["gate"]["realisation"]=original
         ideal=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
         result=e.estimate(obj,ideal,"controlled",[],["0"]*4)
         self.assertEqual(result["gates"],{"x":"1"})

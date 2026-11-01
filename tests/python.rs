@@ -1,7 +1,7 @@
 #[test]
 fn specification_tests() {
     let status = std::process::Command::new("python3")
-        .args(["-I", "-B", "tests/test_estimate.py"])
+        .args(["-I", "-B", "-m", "unittest", "discover", "-s", "tests"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env(
             "BENNETT_ESTIMATE_BIN",
