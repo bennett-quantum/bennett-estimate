@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 from fractions import Fraction as F
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -29,10 +30,15 @@ def schedule(entries=(),target_hash="b"*64):
 
 
 def make_object(text,signature):
-    records={"0":{"name":"root","kind":signature["kind"],"signature":signature,"interface_hash":"0"*64}}
+    return make_program(text,{"root":signature})
+
+
+def make_program(text,signatures,data=None):
+    records={str(i):{"name":name,"kind":sig["kind"],"signature":sig,"interface_hash":"0"*64} for i,(name,sig) in enumerate(signatures.items())}
     header="bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32\n\nsection symbols\n"
-    def document():return header+e.jcs(records)+"\n\nsection functions\n"+text+"\n"
-    obj=e.Object.read(document());records["0"]["interface_hash"]=obj.identities()["root"]
+    def document():return header+e.jcs(records)+"\n\nsection functions\n"+text+"\n"+("\nsection data\n"+"\n".join(n+" "+v for n,v in data.items())+"\n" if data else "")
+    obj=e.Object.read(document())
+    for record in records.values():record["interface_hash"]=obj.identities()[record["name"]]
     return e.Object.read(document())
 
 
@@ -82,6 +88,201 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_qinplace_private_leaf_order_and_call_occurrences(self):
+        action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":["token"],"bounds":[]}
+        oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        obj=make_program("perm_action @root (x:wire) () () (tk:token) ()\n^entry():\nqinplace @identity @identity tk x\noracle @identity (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { r:reg[1] }\n^entry():\nr = lift.mov x\nlift.retval r",{"root":action,"identity":oracle})
+        t=target();budget=["2","0","0","0"]
+        one=e.estimate(obj,t,"identity",[],budget)
+        result=e.estimate(obj,t,"root",[budget],["0"]*4,include_frame=True)
+        self.assertEqual(F(result["resources"]["time"]),2*F(one["resources"]["time"])+1)
+        self.assertEqual(F(result["resources"]["qubit_second[data]"]),2*F(one["resources"]["qubit_second[data]"])+6)
+        self.assertEqual([c["path"][-1]["call_index"] for c in result["invocation_contexts"][1:]],[0,1])
+        self.assertEqual([r["width"] for r in result["frame"]["scratch"][:2]],[1,4])
+        # A caller allocation selector has its own ordinal space, excluding
+        # every gate and allocation inside either oracle invocation.
+        doc=e.loads(e.jcs(t.doc));doc["classes"]["special"]=dict(doc["classes"]["data"])
+        special=e.Target.read(e.jcs(doc))
+        root=e.estimate(obj,special,"root",[budget],["0"]*4)
+        obj.sections["schedule"]=root["effective_schedule"]
+        obj.sections["schedule"]["entries"]=[entry("alloc",path=[point(obj.symbol("root")["interface_hash"])],generated=0,**{"class":"special"})]
+        result=e.estimate(obj,special,"root",[budget],["0"]*4)
+        self.assertEqual([r["class"] for r in result["frame"]["scratch"][:2]],["special","data"])
+
+    def test_two_oracle_call_tokens_are_resolved_per_invocation(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1,4],"in":[],"mem":[],"args":["token","token"],"bounds":[]}
+        oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[],"tgt":1,"fault":4,"mem":[],"args":[]}
+        obj=make_program("perm_action @root (t:wire, f:wire[4]) () () (a:token, b:token) ()\n^entry():\noracle_call @child a () t f () ()\noracle_call @child b () t f () ()\noracle @child () (t:wire) (f:wire[4]) () ()\nregs { r:reg[1] }\n^entry():\nr = lift.const.i1 1\nlift.retval r",{"root":sig,"child":oracle})
+        t=target();a=["1","0","0","0"];b=["2","0","0","0"]
+        first=e.estimate(obj,t,"child",[],a);second=e.estimate(obj,t,"child",[],b)
+        result=e.estimate(obj,t,"root",[a,b],["0"]*4,include_frame=True)
+        for row in ["time","qubit_second[data]","gate_count"]:
+            self.assertEqual(F(result["resources"][row]),F(first["resources"][row])+F(second["resources"][row]),row)
+        self.assertEqual([r["width"] for r in result["frame"]["history"]],[6,6,6])
+        contexts=result["invocation_contexts"]
+        self.assertEqual([c["invocation"]["budget"] for c in contexts],[ ["0"]*4,a,b])
+        self.assertEqual([c["path"][-1]["point"] for c in contexts[1:]],["entry:0","entry:1"])
+        # A selector through the second edge reads its B=2 oracle level;
+        # empty-path selectors would still read the action root (no step).
+        obj.sections["schedule"]=result["effective_schedule"]
+        obj.sections["schedule"]["entries"]=[entry(path=[point(obj.symbol("root")["interface_hash"],"entry:1")],step=2,phase="rev",realisation="missing")]
+        with self.assertRaisesRegex(e.ContractError,"realisation"):
+            e.estimate(obj,t,"root",[a,b],["0"]*4)
+
+    def test_whole_intrinsic_cleanup_recompute_and_nonemitting_carrier(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[2],"mem":[],"args":[],"bounds":[]}
+        obj=make_object("perm_action @root () (s:wire[2] in) () () ()\n^entry():\nd = qcopy s\nquncopy s d",sig)
+        t=target();baseline=e.estimate(obj,t,"root",[],["0"]*4)
+        obj.sections["schedule"]=baseline["effective_schedule"]
+        chosen=entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],"entry:1")],generated=0,realisation="recompute")
+        obj.sections["schedule"]["entries"]=[chosen]
+        result=e.estimate(obj,t,"root",[],["0"]*4)
+        self.assertEqual(result["resources"]["time"],"8")
+        self.assertEqual(result["resources"]["peak_qubits[data]"],"6")
+        self.assertEqual(result["resources"]["qubit_second[data]"],"44")
+        self.assertEqual(result["gates"],{"cx":"8"})
+        self.assertEqual(len(result["cleanup_decisions"]),1)
+        obj.sections["schedule"]["entries"]=[chosen,chosen]
+        with self.assertRaisesRegex(e.ContractError,"multiple maximal matching"):
+            e.estimate(obj,t,"root",[],["0"]*4)
+        for record in obj.sections["schedule"]["entries"]:record["generated"]=1
+        result=e.estimate(obj,t,"root",[],["0"]*4)
+        self.assertEqual(result["exact_resources"],baseline["exact_resources"])
+
+    def test_scheduled_action_adjoint_replaces_source_before_expansion(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[2],"in":[2],"mem":[],"args":[],"bounds":[]}
+        obj=make_program("perm_action @root (t:wire[2]) (s:wire[2] in) () () ()\n^entry():\nadj action_call @child (t) (s) () ()\nperm_action @child (t:wire[2]) (s:wire[2] in) () () ()\n^entry():\nd = qcopy s\nqxor d t\nquncopy s d",{"root":sig,"child":sig})
+        events=[];original=e.Ledger
+        class Recording(original):
+            def allocate(self,b,**kw):
+                events.append(("alloc",kw["chain"][-1]["point"],kw["ordinal"]))
+                return super().allocate(b,**kw)
+            def release(self,b,**kw):
+                events.append(("release",kw["chain"][-1]["point"],kw["ordinal"]))
+                return super().release(b,**kw)
+            def gate(self,op,wires,controls=(),**kw):
+                events.append((op,kw["chain"][-1]["point"],kw["ordinal"],wires[-1].offset))
+                return super().gate(op,wires,controls,**kw)
+        with patch.object(e,"Ledger",Recording):result=e.estimate(obj,target(),"root",[],["0"]*4,include_frame=True)
+        self.assertEqual(events,[("alloc","entry:2",0),("cx","entry:2",1,0),("cx","entry:2",2,1),("cx","entry:1",0,0),("cx","entry:1",1,1),("cx","entry:0",0,0),("cx","entry:0",1,1),("release","entry:0",2)])
+        self.assertEqual(result["resources"]["time"],"6")
+
+    def test_callee_local_region_is_allocated_and_restored_at_call(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[8],"in":[],"mem":[],"args":[],"bounds":[]}
+        obj=make_program("perm_action @root (t:wire[8]) () () () ()\n^entry():\naction_call @child (t) () () ()\nperm_action @child (t:wire[8]) () () () ()\n^entry():\nqregion db 0 8 @image\nr = qload db ()\nqxor r t\nqunload db () r",{"root":sig,"child":sig},data={"image":"81"})
+        baseline=e.estimate(obj,target(),"root",[],["0"]*4)
+        streamed=e.estimate(obj,target(),"root",[],["0"]*4,include_frame=True)
+        # Each A=0 dispatch still runs two five-gate equality recipes,
+        # plus eight data gates. Add eight XORs and four image X gates.
+        self.assertEqual(baseline["resources"]["time"],"48")
+        self.assertEqual(baseline["gates"],{"cx":"36","x":"12"})
+        self.assertEqual(streamed["exact_resources"],baseline["exact_resources"])
+        self.assertEqual(streamed["resources"]["peak_qubits[data]"],"27")
+        self.assertEqual([r["width"] for r in streamed["frame"]["scratch"]],[8,8,0,1,1,1,1,1,0,1,1,1,1,1])
+        self.assertEqual([c["region"] for c in streamed["invocation_contexts"]],["root","child"])
+    def test_oracle_schedule_selects_reverse_row_leaf(self):
+        sig={"abi":"0.9","tier":"q","kind":"oracle","in":[],"tgt":1,"fault":4,"mem":[],"args":[]}
+        obj=make_object("oracle @root () (t:wire) (f:wire[4]) () ()\nregs { r:reg[1] }\n^entry():\nr = lift.const.i1 1\nlift.retval r",sig)
+        doc=e.loads(e.jcs(target().doc))
+        doc["schemes"].append({"name":"triple-x","realises":{"op":"x","controls":{"min":1,"max":1}},"ancillae":{"count":0,"class":"data","state":"clean"},"template":[{"gate":"cx","wires":["c[0]","t"]}]*3})
+        t=e.Target.read(e.jcs(doc));budget=["1","0","0","0"]
+        baseline=e.estimate(obj,t,"root",[],budget)
+        obj.sections["schedule"]=baseline["effective_schedule"]
+        obj.sections["schedule"]["entries"]=[entry(path=[point(obj.symbol("root")["interface_hash"],"entry:0")],step=1,phase="rev",generated=0,realisation="triple-x")]
+        result=e.estimate(obj,t,"root",[],budget)
+        self.assertEqual(F(result["resources"]["time"])-F(baseline["resources"]["time"]),2)
+        self.assertEqual(int(result["gates"]["cx"])-int(baseline["gates"]["cx"]),3)
+        self.assertEqual(int(result["gates"]["x"])-int(baseline["gates"]["x"]),-1)
+        self.assertEqual(result["frame"]["ancillae"][0]["scheme"],"triple-x")
+
+    def test_scheme_theta_and_template_validation(self):
+        doc=e.loads(e.jcs(target().doc))
+        # A two-rz identity pair is used here only to test resource
+        # realisation, not as a correctness certificate for the scheme.
+        doc["schemes"].append({"name":"theta-workspace","realises":{"op":"rz","controls":{"min":0,"max":0},"params":["theta"]},"ancillae":{"count":{"op":"ceil","args":[{"var":"theta"}]},"state":"clean","class":"data"},"template":[{"gate":"rz","wires":["t"],"params":[{"var":"theta"}]}]})
+        t=e.Target.read(e.jcs(doc));q=e.Bundle("q",1,"data")
+        ledger=e.Ledger(t,e.Schedule(schedule([entry(realisation="theta-workspace")])));ledger.interface("mut:0",q)
+        ledger.gate("rz",[q],params=["0x3fe0000000000000"],chain=[point()])
+        self.assertEqual(ledger.finish()["peak_qubits[data]"],2)
+        self.assertEqual(ledger.frame()["ancillae"][0]["width"],1)
+        for change in ["missing-params","bad-gate","unbound-expression","duplicate-scheme"]:
+            broken=e.loads(e.jcs(doc));s=broken["schemes"][-1]
+            if change=="missing-params":del s["template"][0]["params"]
+            if change=="bad-gate":s["template"][0]["gate"]="not-a-gate"
+            if change=="unbound-expression":s["template"][0]["params"]=[{"var":"k"}]
+            if change=="duplicate-scheme":broken["schemes"].append(s)
+            with self.assertRaises(e.ContractError,msg=change):e.Target.read(e.jcs(broken))
+
+    def test_oracle_scheduled_stream_matches_summary_and_reverse_ordinals(self):
+        sig={"abi":"0.9","tier":"q","kind":"oracle","in":[],"tgt":1,"fault":4,"mem":[],"args":[]}
+        obj=make_object("oracle @root () (t:wire) (f:wire[4]) () ()\nregs { r:reg[1] }\n^entry():\nr = lift.const.i1 1\nlift.retval r",sig)
+        t=target();original=e.Ledger
+        for B in [0,1,2,3]:
+            baseline=e.estimate(obj,t,"root",[],[str(B),"0","0","0"])
+            events=[]
+            class Recording(original):
+                def allocate(self,b,**kw):
+                    if kw.get("chain"):events.append(("alloc",kw["chain"][-1]["point"],kw.get("step"),kw.get("phase"),kw["ordinal"]))
+                    return super().allocate(b,**kw)
+                def release(self,b,**kw):
+                    if kw.get("chain"):events.append(("release",kw["chain"][-1]["point"],kw.get("step"),kw.get("phase"),kw["ordinal"]))
+                    return super().release(b,**kw)
+                def gate(self,op,wires,controls=(),**kw):
+                    events.append((op,kw["chain"][-1]["point"],kw.get("step"),kw.get("phase"),kw["ordinal"]))
+                    return super().gate(op,wires,controls,**kw)
+            with patch.object(e,"Ledger",Recording):
+                result=e.estimate(obj,t,"root",[],[str(B),"0","0","0"],include_frame=True)
+            self.assertEqual(result["exact_resources"],baseline["exact_resources"],B)
+            self.assertEqual(result["gates"],baseline["gates"],B)
+            self.assertEqual([r["width"] for r in result["frame"]["history"]],[6]*B)
+            for pt in ["$step","entry:0","entry:1"]:
+                for step in range(1,B+1):
+                    forward=[v[4] for v in events if v[1:4]==(pt,step,"fwd")]
+                    reverse=[v[4] for v in events if v[1:4]==(pt,step,"rev")]
+                    self.assertEqual(forward,list(range(len(forward))),(pt,step))
+                    self.assertEqual(reverse,forward[::-1],(pt,step))
+            self.assertTrue(any(v[1]=="$construct" for v in events))
+            self.assertTrue(any(v[1]=="$commit" for v in events))
+            self.assertTrue(any(v[1]=="$release" for v in events))
+
+    def test_frame_reports_every_lifetime_and_excludes_inherited_controls(self):
+        t=target();ledger=e.Ledger(t,e.Schedule(schedule()))
+        q=e.Bundle("q",1,"data");control=e.Bundle("c",1,"data")
+        ledger.interface("control:0",control);ledger.interface("mut:0",q)
+        scratch=e.Bundle("s",2,"data");borrow=e.Bundle("b",1,"data",state="borrowed")
+        for i in range(2):
+            ledger.allocate(scratch,chain=[point()],ordinal=i*2)
+            ledger.release(scratch,chain=[point()],ordinal=i*2+1)
+        ledger.allocate(borrow,chain=[point()],ordinal=4)
+        ledger.release(borrow,chain=[point()],ordinal=5)
+        ledger.finish();frame=ledger.frame()
+        self.assertEqual(frame["slots"],[{"id":"mut:0","role":"mut","class":"data","width":1}])
+        self.assertEqual([r["width"] for r in frame["scratch"]],[2,2])
+        self.assertEqual([r["width"] for r in frame["borrow"]],[1])
+        identities=[r["id"] for group in frame.values() for r in group]
+        self.assertEqual(len(identities),len(set(identities)))
+        e.Certificate.frame(frame)
+
+    def test_certificate_resource_reconstruction_includes_frame(self):
+        obj=e.Object.read((ROOT/"tests/fixtures/example3.bisa").read_text());t=target()
+        result=e.estimate(obj,t,"borrow_demo",[],["0"]*4,include_frame=True)
+        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09/certificate.json"
+        doc=e.loads(fixture.read_text());root=result["closure_hash"]
+        region=next(iter(doc["regions"].values()))
+        region.update(frame=e.loads(e.jcs(result["frame"])),signature=obj.symbol("borrow_demo")["signature"],kind="perm_action",bounds=[1],resources=result["resources"],estimate={"precision_digits":34,"exact_resources":result["exact_resources"]},claims=[])
+        region["verification"].update(oracle=None,unitary=[],channel=[],borrow_frames=[],inverse_pairs=[])
+        doc["regions"]={root:region}
+        for key in ["object_hash","interface_hash","closure_hash","target_hash","schedule_hash","invocation"]:doc["bindings"][key]=result[key]
+        cert=e.Certificate.read(e.jcs(doc))
+        self.assertIn("resource",cert.check_resource_rows(result))
+        # Producer-chosen non-slot ids may be renamed, but no requirement
+        # may disappear merely because the resource rows still agree.
+        doc["regions"][root]["frame"]["borrow"][0]["id"]="producer-frame"
+        e.Certificate.read(e.jcs(doc)).check_resource_rows(result)
+        doc["regions"][root]["frame"]["borrow"][0]["width"]=2
+        with self.assertRaisesRegex(e.ContractError,"frame"):
+            e.Certificate.read(e.jcs(doc)).check_resource_rows(result)
+
     def test_default_accuracy_share_is_exact_one_thirtieth(self):
         sig={"abi":"0.9","tier":"q","kind":"action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
         obj=make_object("action @root (t:wire) () () () ()\n^entry():\nrz 0.5 t\nrz 0.5 t\nrz 0.5 t",sig)
