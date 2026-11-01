@@ -13,7 +13,7 @@ construction and unused typed parameter bindings; pure classical
 control-path costing and conditional step bounds; deterministic JSON CLI.
 
 Verified: headless `timeout 180 scripts/pre-push --working-tree` exited 0:
-26 estimator tests, one hook orchestration test, Rust formatting, Clippy with
+31 estimator tests, one hook orchestration test, Rust formatting, Clippy with
 warnings denied and shell syntax checks passed. The hook test uses an explicit
 VCS double; no git process was invoked. It verifies pushed-SHA selection,
 deduplication, deletion-only pushes and failed-check cleanup. The runner must
@@ -34,7 +34,10 @@ object or stated gate/step count; its reports record pipeline blockers.
 `scripts/differential.py` reports that unavailability explicitly.
 
 Open requirements: `bennett-estimate-bph` and children `.1` (all source bindings),
-`.2` (schedule/topology/certification) and `.3` (remaining differential evidence).
+`.2` (schedule/topology/certification), `.3` (remaining differential evidence) and
+`.4` (published source-binding decisions). Root and `.1` are blocked on `.4`;
+the implementation requirements remain in scope. The independently filed
+consumer `bennett-estimate-b8o` also remains open.
 Structure recovery stays in scope, with upstream `b-isa-spec-r51` as the
 efficiency work item; there is no claimed meaningful full Grover/SQLite estimate
 at 2^20 rows yet. Do not label a padded step-machine estimate structure-recovered.
