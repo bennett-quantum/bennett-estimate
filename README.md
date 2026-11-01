@@ -26,6 +26,12 @@ No missing argument becomes zero. `--region` is required for multiple entries.
 The CLI's explicit default budget is `0,0,0,0`; its variant is `forward` and
 inherited control count is zero. Those values appear in the result.
 
+`--epsilon` accepts exact decimal accuracy text. Default shares use exact
+fractions, including nonterminating values such as 1/30. Matching action and
+supported oracle schedules are consumed verbatim, with per-kind selector
+resolution, native/scheme choices, rational start times, class capacity,
+occupancy, placements and topology checks.
+
 `exact_resources` stores reduced arbitrary-precision rational values.
 `resources` contains the K12 upward 34-significant-digit decimal display and
 escaped class keys, including zero rows for unused classes. `exact` labels the
@@ -44,11 +50,11 @@ is contract data, not code copied from another implementation.
 
 Current source coverage includes structured gates, allocation/borrowing,
 copy/XOR/exchange, predication, loops, local-region images and linear coherent
-memory, basic controlled action calls, plus padded arithmetic/control oracles
-and layout-state/global-address construction. Unused resolved arguments retain
-their typed invocation bindings. Full memory/activation rows, complete semantic
-calls and cleanup, explicit schedules, topology,
-full parameter lowering and certificate production still require work.
+memory, controlled action/oracle calls and qinplace, plus padded arithmetic/control
+oracles and layout-state/global-address construction. Each nested oracle retains
+its own resolved token. Unused resolved arguments retain their typed invocation
+bindings. Full lifted memory/activation rows, complete source adjoint/cleanup
+partitioning, register/effect histories and certificate production still require work.
 Unsupported paths fail explicitly; they remain requirements.
 
 Full exact source coverage needs the published decisions described in
@@ -62,9 +68,18 @@ orchestrator to file in the spec tracker; it has not been adopted here.
 eight-bit cells using fewer than 1000 constructor visits. This verifies scaling
 of the reference cost calculation; the full rung-4 Grover estimate is pending.
 
-`--certificate file` reads a JCS 0.9 certificate and checks K12 bindings and
-resource rows against a rebuilt supported estimate. Schema parsing and resource
-agreement do **not** verify the certificate's correctness/error claims.
+`--include-frame` reconstructs a B5 descriptor with distinct allocation
+lifetimes and nested invocation records. Concrete schedule/frame reconstruction
+visits dynamic leaves and retains allocation endpoints, never a gate list;
+its work can grow with the budget. The default analytic path retains its
+closed-form scaling.
+
+`--certificate file` reads a JCS 0.9 certificate and checks K12 bindings,
+resource rows and root frame requirements against a rebuilt supported estimate.
+Producer-chosen non-slot identities may be renamed; altered widths, classes,
+states or omitted lifetimes reject. Schema parsing and resource agreement do
+**not** verify correctness/error claims, nested certificate composition or
+shared-storage permissions.
 
 Run the local checks headlessly:
 

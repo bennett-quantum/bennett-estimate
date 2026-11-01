@@ -56,6 +56,17 @@ class Arithmetic(unittest.TestCase):
 
 
 class Targets(unittest.TestCase):
+    def test_numeric_target_fields_are_json_numbers(self):
+        original=e.loads((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+        for location in ["class","capability","rate","expression","table"]:
+            doc=e.loads(e.jcs(original))
+            if location=="class":doc["classes"]["data"]["dirty_rate"]="1"
+            if location=="capability":doc["capabilities"]["classical_step_time"]="1"
+            if location=="rate":doc["resources"]["qubit_second"]["rate"]={"data":"1"}
+            if location=="expression":doc["gates"][0]["cost"]["time"]="1"
+            if location=="table":doc["tables"]["bad"]=["1"]
+            with self.assertRaises(e.ContractError,msg=location):e.Target.read(e.jcs(doc))
+
     def test_published_targets(self):
         paths = sorted((ROOT.parent / "bennett-targets/targets").glob("*.json"))
         self.assertGreaterEqual(len(paths), 3, "published target corpus is required")
@@ -119,9 +130,18 @@ class Catalog(unittest.TestCase):
         self.assertEqual(self.c.hash, "5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197")
         self.assertEqual(len(self.c.recipes), 219)
 
+    def test_k82_named_interfaces_do_not_leak_typed_caller_names(self):
+        self.c.recipes["closed-test"]={"parameters":[{"name":"N","type":"integer"}],"body":[{"gate":"x","wires":["q[0]"]}]}
+        with self.assertRaises(e.ContractError):self.c.recipe("closed-test",[1],{"q":e.Bundle("q",1,"data")})
+        self.c.recipes["named-test"]={"parameters":[],"body":[{"gate":"x","wires":["q[0]"]}]}
+        self.assertEqual(self.c.recipe("named-test",[],{"q":e.Bundle("q",1,"data")}).time,1)
+        with self.assertRaises(e.ContractError):self.c.recipe("named-test",[],{"q":e.Bundle("q",1,"data"),"extra":e.Bundle("extra",1,"data")})
+
     def test_qxor_and_ripple(self):
         wires = {n: e.Bundle(n, 2, "data") for n in ["a", "b", "t", "s"]}
-        p = self.c.recipe("qxor", [2], wires)
+        with self.assertRaisesRegex(e.ContractError,"K82"):
+            self.c.recipe("qxor", [2], wires)
+        p = self.c.recipe("qxor", [2], {n:wires[n] for n in ["s","t"]})
         self.assertEqual(p.counts["gate_count"], 2)
         p = self.c.recipe("bind.value.add", [2, "a", "b", "t"], wires)
         self.assertEqual(p.gates, {"cx": 62, "ccx": 16})
@@ -172,6 +192,20 @@ class Catalog(unittest.TestCase):
 
 
 class Objects(unittest.TestCase):
+    def test_location_and_interface_roles_are_not_width_only(self):
+        oracle=(ROOT/"tests/fixtures/example1.bisa").read_text()
+        action=(ROOT/"tests/fixtures/example3.bisa").read_text()
+        for text in [oracle.replace("one:reg[8]","one:ptr"),oracle.replace("x:wire[8] in","x:i8"),oracle.replace("x:wire[8] in","x:wire[8] mut"),action.replace("regs {  }","regs { ghost:wire }"),action.replace('"tier":"q"','"tier":"r"')]:
+            with self.assertRaises(e.ContractError):e.Object.read(text)
+
+    def test_rung3_nested_uncall_and_impure_fault_prefix(self):
+        obj=e.Object.read((ROOT.parent/"bennett-conformance/ladder/rung-3/fixtures/executor-control.bisa").read_text())
+        target=e.Target.read((ROOT/"data/classical-step-16.json").read_text())
+        for name,steps in [("nested",11),("impure",8)]:
+            result=e.estimate(obj,target,name,[],["0"]*4)
+            self.assertEqual(result["classical_steps"],str(steps))
+            self.assertEqual(result["resources"]["time"],str(steps))
+
     def test_unused_resolved_parameters_preserve_binding_without_extra_wires(self):
         sig={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":["i128","f64","token"]}
         obj=object_with_signatures("oracle @unused (x:wire in) (t:wire) (f:wire[4]) () (a:i128, b:f64, tk:token)\nregs {  }\n^entry():\nlift.retval x",{"unused":sig})
@@ -354,6 +388,7 @@ class CommandLine(unittest.TestCase):
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
         report=module.run(ROOT,Path(os.environ["BENNETT_ESTIMATE_BIN"]))
         self.assertEqual([r["steps"] for r in report["rung3"]["rows"]],[6,11,21,41,1281])
+        self.assertEqual([(r["region"],r["status"],r["steps"]) for r in report["rung3"]["fault_rows"]],[("divzero","FAILED",3),("memfault","FAILED",3),("unknown_effect","FAILED",3)])
         self.assertIn(report["rung2"]["status"],["unavailable","objects_available"])
 
 

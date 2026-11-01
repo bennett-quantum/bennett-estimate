@@ -1,5 +1,6 @@
 """Independent schedule/placement/accounting requirements from ISA 0.9."""
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -33,16 +34,78 @@ def make_object(text,signature):
     return make_program(text,{"root":signature})
 
 
-def make_program(text,signatures,data=None):
+def make_program(text,signatures,data=None,layout=None):
     records={str(i):{"name":name,"kind":sig["kind"],"signature":sig,"interface_hash":"0"*64} for i,(name,sig) in enumerate(signatures.items())}
     header="bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32\n\nsection symbols\n"
-    def document():return header+e.jcs(records)+"\n\nsection functions\n"+text+"\n"+("\nsection data\n"+"\n".join(n+" "+v for n,v in data.items())+"\n" if data else "")
+    def document():return header+e.jcs(records)+"\n\nsection functions\n"+text+"\n"+("\nsection data\n"+"\n".join(n+" "+v for n,v in data.items())+"\n" if data else "")+("\nsection layout\n"+e.jcs(layout)+"\n" if layout else "")
     obj=e.Object.read(document())
     for record in records.values():record["interface_hash"]=obj.identities()[record["name"]]
     return e.Object.read(document())
 
 
 class Selectors(unittest.TestCase):
+    def test_published_k82_all_86_expansion_digests(self):
+        doc=e.loads((ROOT.parent/"bennett-isa-spec/conformance/fixtures/accepted-k82-09/k82.json").read_text())
+        count=0
+        for edge in doc["edges"]:
+            for instance in edge["instances"]:
+                digest=hashlib.sha256();digest.update(b"[");labels={};leaves=0;allocations=0
+                def emit(op,wires):
+                    nonlocal leaves
+                    if leaves:digest.update(b",")
+                    digest.update(e.jcs([op,wires]).encode());leaves+=1
+                class Hashed(e.Catalog):
+                    def space_event(self,b,acquire):
+                        nonlocal allocations
+                        if acquire:labels[b.identity]=f"#{allocations}";allocations+=1
+                        emit("alloc" if acquire else "release",[labels[b.identity]])
+                        return super().space_event(b,acquire)
+                    def gate_event(self,op,wires,controls=(),own=None,params=None):
+                        emit(op,[f"{labels.get(w[0],w[0])}[{w[1]}]" for w in e.bits(wires)])
+                        return super().gate_event(op,wires,controls,own,params)
+                c=Hashed((ROOT/"data/ref-0.9.json").read_text(),target());c.closed_form=False
+                env={n:e.Bundle(n,width,"data") for n,width in instance["bundles"].items()}
+                literal=c.recipe(edge["caller"],instance["args"],env)
+                digest.update(b"]")
+                self.assertEqual(leaves,instance["leaves"],(edge["caller"],instance["args"]))
+                self.assertEqual(digest.hexdigest(),instance["sha256"],(edge["caller"],instance["args"]))
+                summary=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),target()).recipe(edge["caller"],instance["args"],env)
+                self.assertEqual(summary,literal,(edge["caller"],instance["args"]))
+                count+=1
+        self.assertEqual(count,86)
+
+    def test_published_k82_interfaces_and_binding_cases(self):
+        doc=e.loads((ROOT.parent/"bennett-isa-spec/conformance/fixtures/accepted-k82-09/k82.json").read_text())
+        catalog=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),target())
+        names=[n for n,r in catalog.recipes.items() if all(isinstance(f,str) for f in r["parameters"])]
+        self.assertEqual(len(names),doc["catalog"]["named_interface_recipes"])
+        for name,wires in doc["interfaces"].items():self.assertEqual(sorted(catalog.named_interface(name)),sorted(wires),name)
+        for case in doc["cases"]:
+            events=[];labels={};serial=0
+            class Recorder(e.Ledger):
+                def allocate(self,b,**kw):
+                    nonlocal serial
+                    labels[b.identity]=f"#{serial}";serial+=1
+                    events.append(["alloc",[labels[b.identity]]])
+                    return super().allocate(b,**kw)
+                def release(self,b,**kw):
+                    events.append(["release",[labels[b.identity]]])
+                    result=super().release(b,**kw);del labels[b.identity];return result
+                def gate(self,op,wires,controls=(),**kw):
+                    actual=e.bits(wires)
+                    events.append([op,[f"{labels.get(b,n)}[{i}]" for b,i,n in [(w[0],w[1],w[0]) for w in actual]]])
+                    return super().gate(op,wires,controls,**kw)
+            t=target();ledger=Recorder(t,e.Schedule(schedule()))
+            env={n:e.Bundle(n,width,"data") for n,width in case["bundles"].items()}
+            for i,b in enumerate(env.values()):ledger.interface(f"mut:{i}",b)
+            c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);c.ledger=ledger
+            c.recipes.update({r["kind"]:r for r in case["recipes"]})
+            if case["expect"]=="reject":
+                with self.assertRaises(e.ContractError,msg=case["id"]):c.recipe(case["root"],case["args"],env)
+            else:
+                c.recipe(case["root"],case["args"],env);ledger.finish()
+                self.assertEqual(events,case["expect"],case["id"])
+
     def test_specificity_per_kind_ties_and_covered_ties(self):
         broad=entry(realisation="native",epsilon_share="0.125")
         same=entry(realisation="native",epsilon_share="0.25")
@@ -88,6 +151,52 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_loop_binding_carries_reallocated_lifetime_to_next_visit(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":[],"bounds":[3]}
+        obj=make_object("perm_action @root () () () () ()\nregs {  } bounds { 3 }\n^entry():\nc = qalloc any 1\nqloop 3 {\nqfree c\nc = qalloc any 1\nx c[0]\nx c[0]\n}\nqfree c",sig)
+        result=e.estimate(obj,target(),"root",[],["0"]*4,include_frame=True)
+        self.assertEqual(result["gates"],{"x":"6"})
+        self.assertEqual(result["resources"]["peak_qubits[data]"],"1")
+        self.assertEqual(len(result["frame"]["scratch"]),4)
+        self.assertEqual(result["resources"]["qubit_second[data]"],"6")
+        self.assertEqual(e.estimate(obj,target(),"root",[],["0"]*4)["exact_resources"],result["exact_resources"])
+
+    def test_lifted_allocator_uses_all_four_ordered_history_slots(self):
+        sig={"abi":"0.9","tier":"q","kind":"oracle","in":[],"tgt":32,"fault":4,"mem":[],"args":[]}
+        layout={"ptr_width":32,"H":1,"A_tab":0,"S_cells":0,"globals":{},"interface_regions":{},"heap_base":1,"heap_limit_max":1,"null_size":1}
+        obj=make_program("oracle @root () (t:wire[32]) (f:wire[4]) () ()\nregs { n:reg[1], p:reg[32] }\n^entry():\nn = lift.const.i1 1\np = lift.alloc n\nlift.retval p",{"root":sig},layout=layout)
+        t=target();budget=["1","1","0","0"]
+        baseline=e.estimate(obj,t,"root",[],budget)
+        streamed=e.estimate(obj,t,"root",[],budget,include_frame=True)
+        # Pc=2, disp=(ptr32, entry66, heap-used3, atop1), flag1,
+        # succ2: exactly 107 retained bits in each step frame.
+        self.assertEqual([r["width"] for r in streamed["frame"]["history"]],[107])
+        self.assertEqual(streamed["exact_resources"],baseline["exact_resources"])
+        self.assertGreater(int(baseline["gates"]["swap"]),0)
+
+    def test_effective_control_identity_and_predicate_depth(self):
+        doc=e.loads(e.jcs(target().doc));doc["capabilities"]["max_predicate_depth"]=1
+        next(g for g in doc["gates"] if g["op"]=="cx")["cost"]["time"]={"var":"c"}
+        t=e.Target.read(e.jcs(doc));q=e.Bundle("q",3,"data")
+        ledger=e.Ledger(t,e.Schedule(schedule()));ledger.interface("mut:0",q)
+        # Own and effective occurrences of the same physical control count
+        # once even when their unresolved class hints differ.
+        self.assertEqual(ledger.gate("cx",[q.bit(0),q.bit(2)],controls=(("q",0,"any"),)).time,1)
+        with self.assertRaisesRegex(e.ContractError,"predicate"):
+            ledger.gate("x",[q.bit(2)],controls=(("q",0,"data"),("q",1,"data")))
+
+    def test_parameter_angle_bits_and_permutation_source_restriction(self):
+        sig={"abi":"0.9","tier":"q","kind":"action","mut":[1],"in":[],"mem":[],"args":["f64"],"bounds":[]}
+        obj=make_object("action @root (t:wire) () () (theta:f64) ()\n^entry():\nrz theta t",sig)
+        result=e.estimate(obj,target(),"root",["0x8000000000000000"],["0"]*4,include_frame=True)
+        self.assertEqual(result["gates"],{"rz":"1"})
+        with self.assertRaisesRegex(e.ContractError,"nonfinite"):
+            e.estimate(obj,target(),"root",["0x7ff0000000000000"],["0"]*4)
+        sig={**sig,"kind":"perm_action","args":[]}
+        bad=make_object("perm_action @root (t:wire) () () () ()\n^entry():\nh t",sig)
+        with self.assertRaisesRegex(e.ContractError,"permutation"):
+            e.estimate(bad,target(),"root",[],["0"]*4)
+
     def test_qinplace_private_leaf_order_and_call_occurrences(self):
         action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":["token"],"bounds":[]}
         oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}

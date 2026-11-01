@@ -29,13 +29,14 @@ published controlled-action fixture exercises default controlled action calls.
 
 Differential: the published rung-3 `executor-control.bisa` with `sum` arguments
 0, 1, 3, 7, 255 matches the VM's 6, 11, 21, 41, 1281 source steps and sequential
-time exactly. This is a classical count comparison. Rung 2 currently has no ISA
+time exactly. Three faulting rung-3 entries (divzero, memfault, unknown_effect)
+also match their 3-step prefixes exactly. This is a classical count comparison. Rung 2 currently has no ISA
 object or stated gate/step count; its reports record pipeline blockers.
 `scripts/differential.py` reports that unavailability explicitly.
 
 Open requirements: `bennett-estimate-bph` and children `.1` (all source bindings),
 `.2` (schedule/topology/certification), `.3` (remaining differential evidence) and
-`.4` (published source-binding decisions). Root and `.1` are blocked on `.4`;
+`.4` (published source-binding decisions). Root is in progress; `.1` has cases blocked on `.4`;
 the implementation requirements remain in scope. The independently filed
 consumer `bennett-estimate-b8o` also remains open.
 Structure recovery stays in scope, with upstream `b-isa-spec-r51` as the
@@ -54,6 +55,15 @@ workspace. No resource policy is silently substituted for that missing binding.
 
 Exact proposed text and witnesses are in docs/CONTRACT_GAPS.md. The orchestrator
 request is `.tmp/sol-estimate/cross-repo-beads.md`, per COMMON rule 14; the
-proposals remain unadopted. After the spec publishes its decision and any new
-catalog identity, consume it and finish `.1`/`.2`/`.3`. The sandbox's read-only
+proposals remain unadopted. Continue all independent `.1`/`.2`/`.3` work now. Consume the source-binding
+decisions and any new catalog identity once published, then finish affected cases. The sandbox's read-only
 sibling access does not itself justify stopping work.
+
+Continuation adds exact accuracy-share defaults; per-kind schedules and native/template
+choices; endpoint timing/occupancy/capacity/topology; streamed oracle K64 support
+and reverse ordinals; B5 allocation descriptors and root frame reconstruction;
+local-region action callees; nested token channels and qinplace occurrences;
+K62 primitive/call source adjoints and intrinsic copy/load recompute. Full K81
+cleanup partitioning and full executable certificate production remain open.
+K82 is consumed, with the published spec pin advanced to e424d678fa553be5847bf1b53f83703462318b57;
+the spec blob was checked directly against that commit without running git.

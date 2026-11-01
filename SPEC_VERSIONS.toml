@@ -10,9 +10,9 @@ target = "0.9"
 
 [source]
 repository = "bennett-isa-spec"
-commit = "4c76303ecb0c5f3bd8962369b1655403b5ef3974"
+commit = "e424d678fa553be5847bf1b53f83703462318b57"
 path = "spec/Bennett-ISA-Spec-0.9.md"
-sha256 = "94fa3c4f94f12a9f465d913440fa85418b94c0bce1f61c9bb408665f0b46aeec"
+sha256 = "021d5df978f293c36174b73de9facc0884f7502a4bc5c0ab7a621b0ca7071c25"
 
 [expansion]
 name = "ref"

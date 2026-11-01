@@ -261,6 +261,11 @@ class Target:
     def __init__(self, doc, hash_):
         self.doc, self.hash = doc, hash_
 
+    @staticmethod
+    def number(value):
+        require(isinstance(value,(int,Decimal)) and not isinstance(value,bool),"§8.1: target field requires a JSON number")
+        return rational(value)
+
     @classmethod
     def read(cls, text, canonical=True):
         d = loads(text)
@@ -271,33 +276,33 @@ class Target:
             keys(r, ["kind", "unit"], ["rate"], "resource")
             require(r["kind"] in ["count", "time", "peak", "occupancy"], "invalid resource kind")
             for c, n in r.get("rate", {}).items():
-                require(c in d["classes"] and rational(n) >= 0, "invalid resource class/rate")
+                require(c in d["classes"] and cls.number(n) >= 0, "invalid resource class/rate")
         for name, kind in [("time", "time"), ("qubit_second", "occupancy"), ("peak_qubits", "peak")]:
             require(d["resources"].get(name, {}).get("kind") == kind, f"missing mandatory {name}")
         for c in d["classes"].values():
             keys(c, ["qubit_second", "dirty_rate", "capacity"], context="class")
-            require(rational(c["qubit_second"]) >= 0 and rational(c["dirty_rate"]) >= 0, "negative class rate")
-            if c["capacity"] != "unbounded": integer(c["capacity"], 0)
-        for width in d["ptr_widths_supported"]: integer(width, 1)
+            require(cls.number(c["qubit_second"]) >= 0 and cls.number(c["dirty_rate"]) >= 0, "negative class rate")
+            if c["capacity"] != "unbounded": integer(cls.number(c["capacity"]), 0)
+        for width in d["ptr_widths_supported"]: integer(cls.number(width), 1)
         caps = d["capabilities"]
         keys(caps, ["measurement", "mbu", "max_parallel", "max_predicate_depth", "classical_step_time"], context="capabilities")
         keys(caps["measurement"], ["mid_circuit", "feedforward_latency"], context="measurement")
         require(caps["mbu"] is False, "§6.4: mbu is reserved false")
         require(isinstance(caps["measurement"]["mid_circuit"], bool), "invalid measurement capability")
-        require(rational(caps["classical_step_time"]) >= 0 and rational(caps["measurement"]["feedforward_latency"]) >= 0, "negative latency")
+        require(cls.number(caps["classical_step_time"]) >= 0 and cls.number(caps["measurement"]["feedforward_latency"]) >= 0, "negative latency")
         for k in ["max_parallel", "max_predicate_depth"]:
-            if caps[k] != "unbounded": integer(caps[k], 0)
+            if caps[k] != "unbounded": integer(cls.number(caps[k]), 0)
         for name, values in d["tables"].items():
             require(isinstance(values, list), "table must be array")
-            for n in values: require(rational(n) >= 0, "negative table value")
+            for n in values: require(cls.number(n) >= 0, "negative table value")
         for gate in d["gates"]:
             keys(gate, ["op", "classes", "controls", "epsilon", "cost"], ["params"], "gate")
             require(gate["op"] in GATES or gate["op"] == "mcx", "unknown gate")
             require(gate.get("params", []) == (["theta"] if gate["op"] in ["rx", "ry", "rz"] else []), "gate parameter arity")
             require(gate["classes"] and all(c == "*" or c in d["classes"] for c in gate["classes"]), "unknown gate class")
             keys(gate["controls"], ["min", "max"], context="controls")
-            low = integer(gate["controls"]["min"], 0)
-            if gate["controls"]["max"] != "unbounded": integer(gate["controls"]["max"], low)
+            low = integer(cls.number(gate["controls"]["min"]), 0)
+            if gate["controls"]["max"] != "unbounded": integer(cls.number(gate["controls"]["max"]), low)
             require("time" in gate["cost"], "gate cost needs time")
             require(set(gate["cost"]) <= d["resources"].keys(), "undeclared resource cost")
             # Expression syntax/bindings are checked even for unreachable entries.
@@ -318,8 +323,8 @@ class Target:
             parametric=realises["op"] in ["rx","ry","rz"]
             require(realises.get("params",[])==(["theta"] if parametric else []),"scheme parameter arity")
             keys(realises["controls"],["min","max"],context="scheme controls")
-            low=integer(realises["controls"]["min"],0)
-            if realises["controls"]["max"]!="unbounded":integer(realises["controls"]["max"],low)
+            low=integer(cls.number(realises["controls"]["min"]),0)
+            if realises["controls"]["max"]!="unbounded":integer(cls.number(realises["controls"]["max"]),low)
             scheme_bound={"k","c"}|({"theta"} if parametric else set())
             keys(scheme["ancillae"], ["count", "state", "class"], context="ancillae")
             require(scheme["ancillae"]["state"] in ["clean", "dirty"] and scheme["ancillae"]["class"] in d["classes"], "invalid ancillae")
@@ -349,7 +354,7 @@ class Target:
             previous = [-1, -1]
             for edge in top["edges"]:
                 require(len(edge) == 2, "invalid edge")
-                u, v = (integer(n, 0) for n in edge)
+                u, v = (integer(cls.number(n), 0) for n in edge)
                 require(u < v < len(top["vertices"]) and [u,v] > previous, "unsorted/duplicate/invalid topology edge")
                 previous = [u,v]
         if d["qram"] is not None:
@@ -363,7 +368,16 @@ class Target:
         names = objective.get("weighted", objective.get("lexicographic"))
         require(all(n in d["resources"] for n in names), "objective references unknown resource")
         if "weighted" in objective:
-            for n in names.values(): require(rational(n) >= 0, "negative objective weight")
+            require(isinstance(names,dict),"weighted objective must be object")
+            for n in names.values(): require(cls.number(n) >= 0, "negative objective weight")
+        else:require(isinstance(names,list),"lexicographic objective must be array")
+        require(isinstance(d["imports"],dict),"target imports must be object")
+        for model,record in d["imports"].items():
+            keys(record,["version","map"],context="target import")
+            require(isinstance(record["version"],str) and isinstance(record["map"],dict),"invalid target import version/map")
+            for value in record["map"].values():
+                require(isinstance(value,list) and len(value)==2 and value[0] in d["resources"],"invalid imported quantity mapping")
+                require(cls.number(value[1])>=0,"negative imported quantity factor")
         return cls(d, digest(text if canonical else jcs(d)))
 
     @staticmethod
@@ -374,7 +388,7 @@ class Target:
     @staticmethod
     def validate_expr(expr, bound, tables):
         if not isinstance(expr, dict):
-            rational(expr)
+            Target.number(expr)
             return
         if "var" in expr:
             keys(expr, ["var"], context="expression")
@@ -592,11 +606,12 @@ class Catalog:
         self.binding_serial=0
         self.allocation_scopes={}
         self.used_allocations=set()
+        self.named_interfaces={}
         self.default_class=next(iter(sorted(target.doc["classes"],key=lambda name:name.encode("utf-16-be"))))
 
     def bind(self, formals, actuals, caller, controls):
         require(len(formals) == len(actuals), "K19: recipe argument arity")
-        env = dict(caller)
+        env = {}
         seen = set()
         for formal, actual in zip(formals, actuals):
             name = formal if isinstance(formal, str) else formal["name"]
@@ -625,11 +640,42 @@ class Catalog:
                     require(value["address"] == scalar(formal["address"],env) and value["cell"] == scalar(formal["cell"],env) and value["role"] == formal["role"], "K26: region shape/role mismatch")
                     require(value["origin"].startswith(("local:","interface:")) and value["origin"].split(":",1)[1], "K26: invalid origin")
                     require(sum(b.width for b in wire(value["cells"], caller)) == (1 << value["address"])*value["cell"], "K26: cells width mismatch")
+                    value={**value,"cells":wire(value["cells"],caller)}
             else: raise ContractError(f"unknown formal type {kind}")
             env[name] = value
         return env, controls
 
-    def recipe(self, name, args, env=None, controls=(), inverse=False):
+    def named_interface(self,name):
+        """K82 free wire names, ordered by lexical use (not caller contents)."""
+        identity=(name,id(self.recipes[name]["body"]))
+        if identity in self.named_interfaces:return self.named_interfaces[identity]
+        result=[]
+        def use(value,bound):
+            if isinstance(value,list):
+                for item in value:use(item,bound)
+            elif isinstance(value,dict):
+                if "range" in value:use(value["range"],bound)
+            elif isinstance(value,str):
+                base=value.split("[",1)[0]
+                if base not in bound and base not in result:result.append(base)
+        def walk(nodes,bound):
+            bound=set(bound)|{node["alloc"] for node in nodes if "alloc" in node}
+            for node in nodes:
+                for key in ["wires","under","release","acquire","relinquish","in"]:
+                    if key in node:use(node[key],bound)
+                if "invoke" in node:
+                    callee=self.recipes[node["invoke"]]
+                    if all(isinstance(f,str) for f in callee["parameters"]):
+                        for n in self.named_interface(node["invoke"]):use(n,bound)
+                    else:
+                        for formal,actual in zip(callee["parameters"],node["args"]):
+                            if isinstance(formal,dict) and formal["type"] in ["wire","environment","allocation"]:use(actual,bound)
+                if "body" in node:walk(node["body"],bound|{node[k] for k in ["for","each","declare"] if k in node})
+        walk(self.recipes[name]["body"],set(self.recipes[name]["parameters"]))
+        self.named_interfaces[identity]=result
+        return result
+
+    def recipe(self, name, args, env=None, controls=(), inverse=False,invoked=False):
         require(name in self.recipes, f"unknown reference recipe {name}")
         # The pinned recipe dependency graph is acyclic. A finite captured
         # body may invoke the same higher-order recipe again (K19), e.g.
@@ -638,6 +684,10 @@ class Catalog:
         try:
             r = self.recipes[name]
             bound, controls = self.bind(r["parameters"], args, env or {}, controls)
+            if all(isinstance(f,str) for f in r["parameters"]):
+                interface=self.named_interface(name)
+                require(invoked or set(env or {})==set(interface),"K82: direct named-interface recipe needs exactly its wire-name map")
+                for n in interface:bound[n]=wire(n,env or {})
             self.binding_serial+=1
             bound[_BINDING_SCOPE]=self.binding_serial
             if self.ledger is None and self.closed_form and name in ["dispatch.copy","dispatch.store","dispatch.exchange"] and not self.target.doc.get("topology"):
@@ -847,7 +897,7 @@ class Catalog:
                 lo, hi = scalar(node["from"], env), scalar(node["to"], env)
                 require(hi >= lo, "K19: reversed loop bounds")
                 if lo == hi: p = Profile()
-                elif self.ledger is None and self.invariant(node["body"], node["for"]) and self.safe_index_fold(node["body"],node["for"],lo,hi,env,controls) and not self.target.doc.get("topology") and all(not isinstance(v,list) or not v or not isinstance(v[0],Bundle) or len({b.cls for b in v}) == 1 for v in env.values()):
+                elif self.ledger is None and self.closed_form and self.invariant(node["body"], node["for"]) and self.safe_index_fold(node["body"],node["for"],lo,hi,env,controls) and not self.target.doc.get("topology") and all(not isinstance(v,list) or not v or not isinstance(v[0],Bundle) or len({b.cls for b in v}) == 1 for v in env.values()):
                     bound = dict(env, **{node["for"]: lo})
                     p = self.body(node["body"], bound, controls, inverse).repeat(hi-lo)
                 else:
@@ -869,7 +919,7 @@ class Catalog:
                 p = self.body(node["body"], env, joined, inverse)
             elif "invoke" in node:
                 keys(node, ["invoke", "args"], context="invoke")
-                p = self.recipe(node["invoke"], node["args"], env, controls, inverse)
+                p = self.recipe(node["invoke"], node["args"], env, controls, inverse,invoked=True)
             elif "splice" in node:
                 keys(node, ["splice"], context="splice")
                 captured = env[node["splice"]]
@@ -957,6 +1007,7 @@ class Catalog:
 
 
 NAME = r"[A-Za-z_][A-Za-z0-9_.]*"
+_SOURCE_INACTIVE=object()
 SECTIONS = ["symbols", "imports", "functions", "data", "devices", "layout", "schedule", "certificate", "coverage"]
 
 
@@ -1138,9 +1189,34 @@ class Object:
             require(kind in required, "unknown symbol kind")
             keys(sig, ["tier","kind","abi",*required[kind]], context="signature")
             require(sig["kind"] == kind and sig["abi"] == versions["isa"], "signature version/kind mismatch")
+            require(sig["tier"]=={"cc":"cc","r":"r","oracle":"q","action":"q","perm_action":"q","lproc":"q","data":"-"}[kind],"signature kind/tier mismatch")
             if kind != "data":
                 require(symbol["name"] in out.functions and out.functions[symbol["name"]].kind == kind, "symbol/header mismatch")
                 fn=out.functions[symbol["name"]];g=fn.groups
+                all_names=[n for group in g for n,ty,role in group]+[n for n,ty,role in fn.regs]
+                require(len(all_names)==len(set(all_names)),"duplicate function interface/location name")
+                if kind in ["oracle","lproc"]:
+                    require(all(re.fullmatch(r"reg\[[1-9][0-9]*\]",ty) and role is None for n,ty,role in fn.regs),"§3.7/K32: locations require reg[N]")
+                else:require(not fn.regs,"§3.7/K32: only oracle/lproc may declare locations")
+                def wire_group(group,role=None):
+                    require(all(re.fullmatch(r"wire(?:\[[1-9][0-9]*\])?",ty) and r in ([None,role] if role else [None]) for n,ty,r in group),"invalid wire interface type/role")
+                def arg_group(group,suffix=None,tokens=False):
+                    require(all((ty=="token" if tokens else ty in ["ptr","f64","token"] or re.fullmatch(r"i[1-9][0-9]*",ty)) and r in [None,suffix] for n,ty,r in group),"invalid classical/token argument type/role")
+                if kind=="oracle":
+                    wire_group(g[0],"in");wire_group(g[1]);wire_group(g[2]);arg_group(g[4])
+                    require(all(r=="in" for n,ty,r in g[3]),"oracle memory must be read-only")
+                elif kind in ["action","perm_action"]:
+                    wire_group(g[0],"mut");wire_group(g[1],"in");arg_group(g[3])
+                    match=re.search(r"^regs \{.*?\} bounds \{([^}]*)\}$",fn.raw,re.M)
+                    declared=[integer(n,0) for n in match[1].split(", ")] if match else []
+                    loops=[i for i in fn.code if i.op=="qloop"]
+                    require(declared==sig["bounds"] and len(loops)==len(declared),"§5.3: action bounds list/header/body mismatch")
+                    for i,n in zip(loops,declared):
+                        if re.fullmatch(r"0|[1-9][0-9]*",i.args[0]):require(int(i.args[0])==n,"§5.3: action bounds differ from loop trip count")
+                elif kind=="lproc":
+                    require(all(re.fullmatch(r"reg\[[1-9][0-9]*\]",ty) and r is None for group in g[:2] for n,ty,r in group),"lproc locations require reg[N]")
+                    arg_group(g[2],"token",True);arg_group(g[3],"classical")
+                    require(all(ty!="token" for n,ty,r in g[3]) and all(r=="in" for n,ty,r in g[4]),"lproc token/classical/memory group mismatch")
                 def widths(group): return [type_width(ty,out.ptr) for n,ty,role in group]
                 def mem(group):
                     result=[]
@@ -1520,7 +1596,9 @@ class Ledger:
     def _wires(self,operands,controls):
         actual=bits(operands)
         require(len(actual)==len(set((w[0],w[1]) for w in actual)),"coincident gate operands")
-        return actual,tuple(dict.fromkeys(controls))
+        unique={}
+        for bit in controls:unique.setdefault((bit[0],bit[1]),bit)
+        return actual,tuple(unique.values())
 
     def _minimum(self,wires):
         minimum=F(0)
@@ -1559,10 +1637,14 @@ class Ledger:
         require(len(params or [])==(1 if op in ["rx","ry","rz"] else 0),"gate parameter arity")
         for value in params or []:angle(value)
         actual,effective=self._wires(operands,controls)
+        depth=self.target.doc["capabilities"]["max_predicate_depth"]
+        require(depth=="unbounded" or len(effective)<=depth,"E_SCHEDULE_INFEASIBLE: max_predicate_depth exceeded")
         own={"cx":1,"ccx":2,"mcx":len(actual)-1}.get(op,0)
         targets=actual[own:]
         require(not {(b[0],b[1]) for b in targets}.intersection((b[0],b[1]) for b in effective),"effective control is a target")
-        combined=tuple(dict.fromkeys(actual[:own]+effective))
+        unique={}
+        for bit in actual[:own]+effective:unique.setdefault((bit[0],bit[1]),bit)
+        combined=tuple(unique.values())
         wires=combined+targets
         choice=self._decision("gate",chain,ordinal,step,phase) or {}
         eps=rational(choice.get("epsilon_share",0 if self.target.exact_native(op,[self.resolved_class(self._bit_bundle(w)) for w in wires],len(combined),own) else self.default_share))
@@ -1775,8 +1857,12 @@ class Source:
         for n,ty,_ in fn.regs: env[n] = self.fresh(n,type_width(ty,self.obj.ptr))
         widths = {n:(b.width if isinstance(b,Bundle) else sum(w.width for w in b)) for n,b in env.items() if isinstance(b,Bundle) or isinstance(b,list) and b and all(isinstance(w,Bundle) for w in b)}
         slot_widths = []
+        layout=self.obj.sections.get("layout")
         for row in rows:
             ws = [widths[n] for n in row.lhs]
+            if row.op=="lift.alloc":
+                require(layout is not None,"lift.alloc requires a layout")
+                ws=[self.obj.ptr,2*self.obj.ptr+2,integer(layout["H"],0)+2,integer(layout["A_tab"],0)+1]
             for j,w in enumerate(ws):
                 if j == len(slot_widths): slot_widths.append(w)
                 else: slot_widths[j] = max(slot_widths[j],w)
@@ -1784,6 +1870,8 @@ class Source:
         pc,nextpc = self.fresh("pc",P), self.fresh("pc_prime",P)
         faulted,code,result = self.fresh("faulted",1),self.fresh("code",Fwidth),self.fresh("result_val",T)
         frame = self.fresh("frame",Q)
+        state=self.oracle_state(fn,env,budget,P,Q,pc,nextpc,faulted,code,result)
+        state_wires={record["name"]:record["storage"] for record in state}
         flag = {"range":"frame","from":P+sum(slot_widths),"to":P+sum(slot_widths)+1}
         successor = {"range":"frame","from":Q-P,"to":Q}
         labels={}
@@ -1823,6 +1911,14 @@ class Source:
             elif op=="lift.mov": body=[invoke(op,[width,a[0],slot,w])]
             elif op in ["lift.udiv","lift.urem","lift.sdiv","lift.srem"]:
                 body=[invoke(op,[width,Fwidth,*a,slot,w,flag,faulted,code])]
+            elif op=="lift.alloc":
+                require(width==self.obj.ptr,"lift.alloc destination must be ptr width")
+                nwidth=widths[a[0]];used_width=integer(layout["H"],0)+2;top_width=integer(layout["A_tab"],0)+1
+                extended=max(nwidth,used_width)+1
+                displacements=[];cursor=P
+                for j,slot_width in enumerate([self.obj.ptr,2*self.obj.ptr+2,used_width,top_width]):
+                    displacements.append({"range":"frame","from":cursor,"to":cursor+slot_width});cursor+=slot_widths[j]
+                body=[invoke(op,[self.obj.ptr,nwidth,used_width,top_width,extended,min(used_width,self.obj.ptr),min(nwidth,self.obj.ptr),1<<integer(layout["A_tab"],0),integer(layout["heap_base"],0),unsigned(budget[1]),Fwidth,a[0],state_wires["heap_used"],state_wires["atop"],state_wires["alloctab"],w,*displacements,flag,faulted,code])]
             elif op=="lift.parmov":
                 sources=list_operand(a[0]);require(len(sources)==len(written),"parmov arity")
                 cursor=P
@@ -1847,7 +1943,7 @@ class Source:
             elif op=="qjump": nxt=[lit(labels[a[0][1:]])]
             elif op=="qbranch": nxt=[invoke("bind.qxor",[P,successor,"next"])]
             elif op=="qjumpr": nxt=[invoke("successor.dynamic",[P,N,flag,successor,"next"])]
-            elif op in ["lift.faultif","lift.udiv","lift.urem","lift.sdiv","lift.srem"]: nxt=[invoke("successor.flagged",[P,index+1,N,flag,"next"])]
+            elif op in ["lift.faultif","lift.udiv","lift.urem","lift.sdiv","lift.srem","lift.alloc"]: nxt=[invoke("successor.flagged",[P,index+1,N,flag,"next"])]
             else: nxt=[lit(index+1)]
             row_templates.append({"parameters":template_formal,"body":body})
             next_templates.append({"parameters":template_formal+[{"name":"next","type":"wire","width":P}],"body":nxt})
@@ -1855,7 +1951,7 @@ class Source:
                 meta={"symbol":self.obj.symbol(fn.name)["interface_hash"],"point":f"{row.block}:{row.ordinal}","depth":0,"kind":row.op,"exact":True}
                 for node in body+nxt:self.catalog.source_metadata[id(node)]=(node,meta)
         if self.catalog.ledger is not None:
-            return self.oracle_stream(fn,env,budget,controls,P,N,Q,Fwidth,T,pc,nextpc,faulted,code,result,row_templates,next_templates)
+            return self.oracle_stream(fn,env,budget,controls,P,N,Q,Fwidth,T,pc,nextpc,faulted,code,result,row_templates,next_templates,state)
         step=self.catalog.recipe("step",[P,N,Q,pc,nextpc,frame,row_templates,next_templates],env,controls)
         require(all(v==0 for v in step.delta.values()),"unbalanced step workspace")
         target=env[fn.groups[1][0][0]];fault=env[fn.groups[2][0][0]]
@@ -1863,7 +1959,6 @@ class Source:
         commit_nodes=self.catalog.recipes["oracle.construct"]["body"][2:-2]
         commit_env=dict(env,P=P,N=N,F=Fwidth,T=T,pc=pc,next=nextpc,faulted=faulted,code=code,result=result,tgt=target,fr=fault)
         commit=self.catalog.body(commit_nodes,commit_env,controls)
-        state=self.oracle_state(fn,env,budget,P,Q,pc,nextpc,faulted,code,result)
         self.last_state=state
         prefix,suffix=Profile(),Profile()
         for record in state:
@@ -1878,14 +1973,13 @@ class Source:
         work=step.repeat(B).then(commit).then(step.repeat(B))
         return prefix.then(work).then(suffix)
 
-    def oracle_stream(self,fn,env,budget,controls,P,N,Q,Fwidth,T,pc,nextpc,faulted,code,result,rows,next_rows):
+    def oracle_stream(self,fn,env,budget,controls,P,N,Q,Fwidth,T,pc,nextpc,faulted,code,result,rows,next_rows,state):
         """Replay catalog steps against allocation endpoints, preserving K64.
 
         The analytic path above remains constant work in B. A concrete
         schedule must inspect its selected dynamic leaves; none are retained.
         """
         catalog=self.catalog;ledger=catalog.ledger
-        state=self.oracle_state(fn,env,budget,P,Q,pc,nextpc,faulted,code,result)
         self.last_state=state
         symbol=self.obj.symbol(fn.name)["interface_hash"]
         support={pt:{"symbol":symbol,"point":pt,"depth":0,"kind":"support","exact":True} for pt in ["$construct","$step","$commit","$release"]}
@@ -2015,9 +2109,14 @@ class Source:
             image = bytes.fromhex(self.obj.sections["data"][g["image"]])
             allocations[base] = (len(image),True)
             memory.update({base+i:b for i,b in enumerate(image)})
+        atop=len(allocations);history=[];segments=[];version_serial=0
         def execute(function, values):
-            nonlocal bump,clock
+            nonlocal bump,clock,atop,version_serial
             env = dict(values)
+            versions={n:0 for n in env}
+            def put(n,value):
+                nonlocal version_serial
+                version_serial+=1;env[n]=value;versions[n]=version_serial
             block = next(iter(function.blocks))
             p,steps = Profile(),0
             def get(n):
@@ -2031,13 +2130,15 @@ class Source:
                 actuals = m[2].split(", ") if m[2] else []
                 require(len(formals)==len(actuals),"branch argument arity")
                 resolved = [get(a) for a in actuals]
-                env.update({n:v for (n,ty,r),v in zip(formals,resolved)})
+                for (n,ty,r),value in zip(formals,resolved):put(n,value)
                 return m[1]
             while True:
                 code = function.blocks[block][1]
                 jumped = False
                 for inst in code:
                     op,a = inst.op,inst.args
+                    pure=op in ["br","add","sub","mul","and","or","xor","shl","lshr","ashr","udiv","urem","sdiv","srem","select","inttoptr"] or op.startswith(("const.i","icmp.","load.i","zext.i","sext.i","trunc.i","ptrtoint.i"))
+                    frame_index=len(history);history.append({"active":True,"pure":pure,"marker":op=="uncall"})
                     p = p.then(Profile(time=rational(self.target.doc["capabilities"]["classical_step_time"])))
                     steps += 1
                     result = None
@@ -2075,15 +2176,37 @@ class Source:
                         callee=self.obj.functions[a[0].removeprefix("@")]
                         params=callee.groups[0]
                         require(len(params)==len(a)-1,"call argument arity")
-                        cp,cs,results,failed=execute(callee,{n:get(actual) for (n,ty,r),actual in zip(params,a[1:])})
+                        actuals=[get(actual) for actual in a[1:]]
+                        before=(dict(memory),dict(allocations),bump,clock,atop)
+                        previous={n:(env.get(n),versions.get(n)) for n in inst.lhs}
+                        cp,cs,results,failed=execute(callee,{n:value for (n,ty,r),value in zip(params,actuals)})
                         p=p.then(cp);steps+=cs
                         if failed: return p,steps,[],True
                         require(len(results)==len(inst.lhs),"call result arity")
-                        env.update(zip(inst.lhs,results));continue
+                        for n,value in zip(inst.lhs,results):put(n,value)
+                        segments.append({"name":callee.name,"args":actuals,"results":results,"start":frame_index,"end":len(history),"active":True,"before":before,"env":env,"versions":versions,"previous":previous,"produced":{n:versions[n] for n in inst.lhs}})
+                        continue
+                    elif op=="uncall":
+                        require(len(a)==3,"uncall needs argument/result lists")
+                        pending=[s for s in segments if s["active"]]
+                        if not pending:return p,steps,[],True
+                        segment=max(pending,key=lambda s:s["end"])
+                        arguments=[get(n) for n in list_operand(a[1])];results=[get(n) for n in list_operand(a[2])]
+                        if segment["name"]!=a[0].removeprefix("@") or segment["args"]!=arguments or segment["results"]!=results or any(f["active"] and not f["pure"] and not f["marker"] for f in history[segment["end"]:frame_index]):return p,steps,[],True
+                        old_memory,old_allocations,bump,clock,atop=segment["before"]
+                        memory.clear();memory.update(old_memory);allocations.clear();allocations.update(old_allocations)
+                        for n,version in segment["produced"].items():
+                            if segment["versions"].get(n)!=version:continue
+                            value,prior_version=segment["previous"][n]
+                            if prior_version is None:segment["env"].pop(n,None);segment["versions"].pop(n,None)
+                            else:segment["env"][n]=value;segment["versions"][n]=prior_version
+                        for frame in history[segment["start"]:segment["end"]]:frame["active"]=False
+                        for child in segments:
+                            if segment["start"]<=child["start"] and child["end"]<=segment["end"]:child["active"]=False
                     elif op=="alloc":
                         n=get(a[0])[0];base=bump;bump+=max(1,n)
-                        if bump > integer(layout.get("heap_base",0))+integer(layout.get("heap_limit_max",0)) or len(allocations)>=(1<<integer(layout.get("A_tab",0))): return p,steps,[],True
-                        allocations[base]=(max(1,n),False);result=(base,self.obj.ptr)
+                        if bump > integer(layout.get("heap_base",0))+integer(layout.get("heap_limit_max",0)) or atop>=(1<<integer(layout.get("A_tab",0))): return p,steps,[],True
+                        allocations[base]=(n,False);atop+=1;result=(base,self.obj.ptr)
                     elif op=="free":
                         base=get(a[0])[0]
                         if base not in allocations or allocations[base][1]: return p,steps,[],True
@@ -2112,13 +2235,14 @@ class Source:
                     else: raise ContractError(f"classical source binding not implemented: {op}; no exact estimate emitted")
                     if result is not None:
                         require(len(inst.lhs)==1,"classical result arity")
-                        env[inst.lhs[0]]=result
+                        put(inst.lhs[0],result)
                 require(jumped,"classical block has no terminator")
         p,steps,_,_=execute(fn,initial)
         return p,steps
 
     def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False):
         out,fragments = [],[]
+        inactive=env.setdefault(_SOURCE_INACTIVE,set())
         predicates = []
         def emit(node,controlled=True):
             if predicates and controlled:
@@ -2131,6 +2255,7 @@ class Source:
             function=self.calls[-1]
             meta={"symbol":self.obj.symbol(function)["interface_hash"],"point":f"{inst.block}:{inst.ordinal}","depth":depth,"kind":op,"call":op in ["action_call","oracle_call"],"oracle_call":op=="oracle_call","exact":self.obj.functions[function].kind=="perm_action"}
             if op in GATES or op == "mcx":
+                require(self.obj.functions[function].kind!="perm_action" or op in ["x","cx","ccx","mcx","swap"],"§5.3: non-permutation source gate in permutation action")
                 params = []
                 if op in ["rx","ry","rz"]:
                     theta,*a = a
@@ -2144,7 +2269,7 @@ class Source:
             elif op in ["qalloc","qborrow","qcopy","qload"]:
                 require(len(inst.lhs)==1,"missing allocation result")
                 name = inst.lhs[0]
-                require(name not in env,"allocation shadows a live binding")
+                require(name not in env or name in inactive,"allocation shadows a live binding")
                 if op in ["qalloc","qborrow"]:
                     cls,n = a
                     n = env.get(n,integer(n,1) if re.fullmatch(r"[0-9]+",n) else None)
@@ -2156,8 +2281,12 @@ class Source:
                 else:
                     require(a[0] in regions,"unknown region")
                     A,n,_ = regions[a[0]]; cls,state=(self.cls if self.catalog.ledger is None else "any"),"clean"
-                b = self.fresh(name,n,cls,state)
+                if name in env:
+                    b=env[name]
+                    require(isinstance(b,Bundle) and (b.width,b.cls,b.state)==(n,cls,state),"reallocated source binding with changed shape/class/state needs a distinct binding adapter")
+                else:b = self.fresh(name,n,cls,state)
                 env[name] = b
+                inactive.discard(name)
                 # Bind allocation result outside captured loops; acquire/release
                 # retain its source identity. No wire-sized array is created.
                 if not adjoint:emit({"acquire":name},False)
@@ -2171,6 +2300,8 @@ class Source:
             elif op in ["qfree","qreturn","quncopy","qunload"]:
                 name = a[-1]
                 require(name in env and isinstance(env[name],Bundle),"release of unknown bundle")
+                require(name not in inactive,"release of inactive source binding")
+                inactive.add(name)
                 b = env[name]
                 if adjoint:emit({"acquire":name},False)
                 if op == "quncopy": emit({"invoke":"bind.qxor","args":[b.width,a[0],name]})
