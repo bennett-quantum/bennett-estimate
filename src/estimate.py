@@ -349,22 +349,41 @@ class Target:
             if op == "log2inv_eps": require("eps" in bound, "unbound eps")
             for a in expr["args"]: Target.validate_expr(a, bound, tables)
 
+    def native_gate(self,op,classes,controls,eps,own):
+        env={"k":F(own),"c":F(controls),"eps":rational(eps)}
+        for g in self.doc["gates"]:
+            if not self.covers(g,op,controls):continue
+            pattern=g["classes"]
+            if not (len(pattern)==1 and all(pattern[0] in ["*",c] for c in classes) or len(pattern)==len(classes) and all(p in ["*",c] for p,c in zip(pattern,classes))):continue
+            achieved=expression(g["epsilon"],env,self.doc["tables"])
+            require(achieved>=0,"negative achieved epsilon")
+            if achieved>eps:continue
+            costs={n:expression(x,env,self.doc["tables"]) for n,x in g["cost"].items()}
+            require(all(v>=0 for v in costs.values()),"§8.1: negative evaluated cost")
+            return Profile(time=costs["time"],counts={n:v for n,v in costs.items() if self.doc["resources"][n]["kind"]=="count"},gates={op:1},error=achieved)
+        return None
+
+    @staticmethod
+    def covers(entry,op,controls):
+        r=entry["controls"]
+        return entry["op"]==op and controls>=integer(r["min"],0) and (r["max"]=="unbounded" or controls<=integer(r["max"],0))
+
+    def exact_native(self,op,classes,controls,own):
+        for g in self.doc["gates"]:
+            if not self.covers(g,op,controls) or self.epsilon_dependent(g["epsilon"]):continue
+            pattern=g["classes"]
+            if not (len(pattern)==1 and all(pattern[0] in ["*",c] for c in classes) or len(pattern)==len(classes) and all(p in ["*",c] for p,c in zip(pattern,classes))):continue
+            if expression(g["epsilon"],{"k":F(own),"c":F(controls)},self.doc["tables"])==0:return True
+        return False
+
     def gate(self, op, classes, controls, eps=F(0), own=None, theta=None, native_only=False):
         own = {"cx": 1, "ccx": 2, "mcx": len(classes)-1}.get(op, 0) if own is None else own
         env = {"k": F(own), "c": F(controls), "eps": rational(eps)}
         def covers(entry):
             r = entry["controls"]
             return entry["op"] == op and controls >= r["min"] and (r["max"] == "unbounded" or controls <= r["max"])
-        for g in self.doc["gates"]:
-            if not covers(g): continue
-            pattern = g["classes"]
-            if not (len(pattern) == 1 and all(pattern[0] in ["*", c] for c in classes) or len(pattern) == len(classes) and all(p in ["*", c] for p,c in zip(pattern, classes))): continue
-            achieved = expression(g["epsilon"], env, self.doc["tables"])
-            require(achieved >= 0, "negative achieved epsilon")
-            if achieved > eps: continue
-            costs = {n: expression(x, env, self.doc["tables"]) for n,x in g["cost"].items()}
-            require(all(v >= 0 for v in costs.values()), "§8.1: negative evaluated cost")
-            return Profile(time=costs["time"], counts={n:v for n,v in costs.items() if self.doc["resources"][n]["kind"] == "count"}, gates={op: 1}, error=achieved)
+        native=self.native_gate(op,classes,controls,eps,own)
+        if native is not None:return native
         require(not native_only, f"§8.3: scheme leaf {op} has no native match")
         for s in self.doc["schemes"]:
             if not covers(s["realises"]): continue
@@ -1126,6 +1145,373 @@ def resolved_arguments(types, values, obj):
             require(n < 1 << width, f"E_ARG: {ty} argument out of range")
             out.append(n)
     return out
+
+
+class Schedule:
+    """ISA-11 selectors; matching is independent for each decision kind."""
+    def __init__(self,doc,obj=None,region=None):
+        keys(doc,["bindings","entries"],["interface_vertices"],"schedule")
+        self.doc=doc
+        b=doc["bindings"]
+        keys(b,["closure_hash","target_hash","region","variant","inherited_controls","budget","params_hash","epsilon","scheduler"],["expansion"],"schedule bindings")
+        for name in ["closure_hash","target_hash","params_hash"]:
+            require(isinstance(b[name],str) and re.fullmatch(r"[0-9a-f]{64}",b[name]),f"invalid schedule {name}")
+        require(isinstance(b["variant"],str) and b["variant"],"empty schedule variant")
+        integer(b["inherited_controls"],0)
+        require(isinstance(b["budget"],list) and len(b["budget"])==4,"schedule budget needs four components")
+        for n in b["budget"]:integer(n,0)
+        require(rational(b["epsilon"])>=0,"negative schedule accuracy")
+        keys(b["scheduler"],["name","version"],context="scheduler")
+        if "expansion" in b:keys(b["expansion"],["name","version","hash"],context="expansion")
+        require(isinstance(doc["entries"],list),"schedule entries must be array")
+        self.entries=doc["entries"]
+        for entry in self.entries:
+            kind=entry.get("kind")
+            require(kind in ["gate","alloc","start","cleanup"],"unknown schedule entry kind")
+            keys(entry,["path","step","phase","generated","kind",kind],context="schedule entry")
+            require(isinstance(entry["path"],list),"schedule path must be array")
+            for element in entry["path"]:
+                keys(element,["symbol","point","iteration"],["instance","call_index"],"schedule path element")
+                require(isinstance(element["symbol"],str) and re.fullmatch(r"[0-9a-f]{64}",element["symbol"]),"invalid path symbol")
+                require(isinstance(element["point"],str),"invalid path point")
+                for name in ["iteration","instance"]:
+                    value=element.get(name,"*")
+                    if value!="*":
+                        require(isinstance(value,list),f"{name} must be integer array or wildcard")
+                        for n in value:integer(n,0)
+                if element.get("call_index","*")!="*":integer(element["call_index"],0)
+            for name in ["step","generated"]:
+                if entry[name]!="*":integer(entry[name],0)
+            require(entry["phase"] in ["*","fwd","rev"],"invalid schedule phase")
+            value=entry[kind]
+            if kind=="gate":
+                keys(value,[],["realisation","epsilon_share"],"gate decision")
+                if "epsilon_share" in value:require(rational(value["epsilon_share"])>=0,"negative epsilon share")
+                if "realisation" in value:require(isinstance(value["realisation"],str) and value["realisation"],"empty gate realisation")
+            elif kind=="alloc":
+                keys(value,["class"],["vertices"],"allocation decision")
+                require(isinstance(value["class"],str) and value["class"]!="any","allocation decision must resolve class")
+            elif kind=="start":
+                keys(value,["time"],context="start decision")
+                require(rational(value["time"])>=0,"negative start time")
+            else:
+                keys(value,["realisation"],context="cleanup decision")
+                require(value["realisation"] in ["reverse","recompute"],"invalid cleanup realisation")
+        if obj is not None:self.validate_paths(obj,region or b["region"])
+
+    def validate_paths(self,obj,region):
+        symbols={obj.symbol(name)["interface_hash"]:fn for name,fn in obj.functions.items()}
+        root=obj.symbol(region)["interface_hash"]
+        depths={}
+        def visit(fn,nodes,depth):
+            for node in nodes:
+                depths[(fn.name,f"{node.block}:{node.ordinal}")]=depth
+                visit(fn,node.body,depth+(node.op=="qloop"))
+                visit(fn,node.otherwise,depth)
+        for fn in obj.functions.values():
+            for _,nodes in fn.blocks.values():visit(fn,nodes,0)
+        for entry in self.entries:
+            path=entry["path"]
+            if path:require(path[0]["symbol"]==root,"schedule path is not rooted at requested region")
+            for i,element in enumerate(path):
+                require(element["symbol"] in symbols,"schedule path has unknown symbol")
+                fn=symbols[element["symbol"]]
+                point=element["point"]
+                if point.startswith("$"):
+                    require(fn.kind=="oracle" and point in ["$construct","$step","$commit","$release"],"invalid support pseudo-point")
+                    depth=0;inst=None
+                else:
+                    matches=[x for x in fn.code if f"{x.block}:{x.ordinal}"==point]
+                    require(len(matches)==1,"schedule path has unknown source point")
+                    inst=matches[0];depth=depths[(fn.name,point)]
+                iteration=element["iteration"]
+                require(iteration=="*" or len(iteration)==depth,"schedule iteration depth mismatch")
+                instance=element.get("instance","*")
+                if fn.kind!="lproc":require(instance in ["*",[]],"non-lproc point has a nonempty instance")
+                if i+1<len(path) or element.get("call_index","*")!="*":
+                    require(inst is not None,"support point is not an invocation edge")
+                    op,args=inst.op,inst.args
+                    while op in ["ctl","adj"]:
+                        skip=1 if op=="adj" else 2
+                        op,args=args[skip-1],args[skip:]
+                    require(op in ["action_call","oracle_call","lift.oracle_call","lift.oracle_uncall","lift.perm_call","qinplace"],"path descends through a non-call point")
+                    targets=[a.removeprefix("@") for a in args[:2 if op=="qinplace" else 1]]
+                    call_index=element.get("call_index","*")
+                    require(call_index=="*" or integer(call_index,0)<len(targets),"semantic call occurrence outside expansion")
+                    if i+1<len(path):
+                        allowed=targets if call_index=="*" else [targets[integer(call_index,0)]]
+                        require(path[i+1]["symbol"] in [obj.symbol(n)["interface_hash"] for n in allowed],"path callee does not match source call")
+
+    @staticmethod
+    def specificity(entry):
+        return (len(entry["path"]),sum(p["iteration"]!="*" for p in entry["path"]),entry["step"]!="*",entry["phase"]!="*",entry["generated"]!="*")
+
+    def pick(self,kind,chain,ordinal,step=None,phase=None):
+        matches=[]
+        for entry in self.entries:
+            if entry["kind"]!=kind or len(entry["path"])>len(chain):continue
+            if entry["generated"]!="*" and integer(entry["generated"],0)!=ordinal:continue
+            selected_step,selected_phase=step,phase
+            ok=True
+            for i,(selector,actual) in enumerate(zip(entry["path"],chain)):
+                if any(selector[k]!=actual[k] for k in ["symbol","point"]):ok=False;break
+                for k in ["iteration","instance","call_index"]:
+                    expected=selector.get(k,"*")
+                    got=actual.get(k,[] if k in ["iteration","instance"] else None)
+                    if expected!="*" and expected!=got:ok=False;break
+                if not ok:break
+                if i+1<len(chain) and "entered_invocation" in actual:
+                    selected_step,selected_phase=actual["entered_invocation"]
+            if not ok:continue
+            if entry["step"]!="*" and (selected_step is None or integer(entry["step"],0)!=selected_step):continue
+            if entry["phase"]!="*" and entry["phase"]!=selected_phase:continue
+            matches.append(entry)
+        if not matches:return None
+        score=max(self.specificity(e) for e in matches)
+        maximal=[e for e in matches if self.specificity(e)==score]
+        require(len(maximal)==1,"E_SCHEDULE_INFEASIBLE: §11: multiple maximal matching schedule entries")
+        return maximal[0][kind]
+
+
+class Ledger:
+    """Resource endpoints and live allocations; no gate/circuit list is kept."""
+    def __init__(self,target,schedule,default_share=F(0),exact=False):
+        self.target,self.schedule=target,schedule
+        self.default_share=rational(default_share);self.require_exact=exact
+        self.cursor=self.makespan=F(0)
+        self.counts={};self.gates={};self.error=F(0)
+        self.records=[];self.dependencies={};self.parallel_events={}
+        self.interface_index=0;self.sequence=0
+        self.classes=sorted(target.doc["classes"],key=lambda n:n.encode("utf-16-be"))
+
+    def _decision(self,kind,chain,ordinal,step,phase):
+        return self.schedule.pick(kind,chain,ordinal,step,phase)
+
+    def _start(self,chain,ordinal,step,phase,minimum=F(0)):
+        chosen=self._decision("start",chain,ordinal,step,phase)
+        start=rational(chosen["time"]) if chosen is not None else max(self.cursor,minimum)
+        require(start>=minimum,"E_SCHEDULE_INFEASIBLE: start violates data or wire-lifetime dependency")
+        return start
+
+    def _find(self,b):
+        for record in reversed(self.records):
+            source=record["bundle"]
+            if record["end"] is None and source.identity==b.identity and source.offset<=b.offset and b.offset+b.width<=source.offset+source.width:return record
+        raise ContractError(f"E_SCHEDULE_INFEASIBLE: wire is not live: {b.identity}[{b.offset}]")
+
+    def resolved_class(self,b):return self._find(b)["class"]
+
+    @staticmethod
+    def _bit_bundle(bit):return Bundle(bit[0],1,bit[2],bit[1])
+
+    def _used(self,cls,start):
+        return sum(r["bundle"].width for r in self.records if r["class"]==cls and r["start"]<=start and (r["end"] is None or start<r["end"]))
+
+    def _class(self,requested,width,start,vertices):
+        top=self.target.doc.get("topology")
+        if vertices is not None:
+            require(top is not None,"vertices are forbidden without topology")
+            require(isinstance(vertices,list) and len(vertices)==width,"placement width mismatch")
+            require(len(set(vertices))==len(vertices),"duplicate allocation vertex")
+            for v in vertices:require(isinstance(v,int) and not isinstance(v,bool) and 0<=v<len(top["vertices"]),"vertex outside topology")
+            classes={top["vertices"][v]["class"] for v in vertices}
+            require(len(classes)<=1,"one frame slot/allocation must resolve to one class")
+            if classes:
+                cls=next(iter(classes))
+                require(requested in ["any",cls],"vertex class differs from allocation class")
+                requested=cls
+        for cls in self.classes if requested=="any" else [requested]:
+            require(cls in self.target.doc["classes"],"unknown allocation class")
+            capacity=self.target.doc["classes"][cls]["capacity"]
+            if top:
+                physical=sum(v["class"]==cls for v in top["vertices"])
+                capacity=physical if capacity=="unbounded" else min(capacity,physical)
+            if capacity=="unbounded" or self._used(cls,start)+width<=capacity:return cls
+        raise ContractError(f"E_SCHEDULE_INFEASIBLE: class capacity unavailable for {width} wires")
+
+    def _register(self,b,start,requested,vertices=None,slot=None,category="scratch",scheme=None):
+        cls=self._class(requested,b.width,start,vertices)
+        top=self.target.doc.get("topology")
+        placement=None
+        if top:
+            occupied={v for r in self.records if r["start"]<=start and (r["end"] is None or start<r["end"]) for v in r["vertices"]}
+            if vertices is None:
+                placement=[i for i,v in enumerate(top["vertices"]) if v["class"]==cls and i not in occupied][:b.width]
+                require(len(placement)==b.width,"E_SCHEDULE_INFEASIBLE: no free topology vertices")
+            else:
+                require(not occupied.intersection(vertices),"E_SCHEDULE_INFEASIBLE: overlapping live vertex placements")
+                placement=list(vertices)
+        self.sequence+=1
+        record={"bundle":b,"class":cls,"state":"clean" if slot is not None else b.state,"start":start,"end":None,"vertices":placement,"slot":slot,"category":category,"scheme":scheme,"id":f"{b.identity}@{self.sequence}"}
+        self.records.append(record)
+        return record
+
+    def interface(self,slot,b,vertices=None):
+        specified=self.schedule.doc.get("interface_vertices")
+        if specified is not None and vertices is None:
+            require(self.interface_index<len(specified),"too few interface placement arrays")
+            vertices=specified[self.interface_index]
+        self.interface_index+=1
+        self._register(b,F(0),"any",vertices,slot=slot)
+
+    def allocate(self,b,chain=(),ordinal=0,step=None,phase=None,requested=None,category="scratch",scheme=None,start=None,vertices=None):
+        # Resolve all selectors before applying any realisation to this leaf.
+        selected=self._decision("alloc",chain,ordinal,step,phase)
+        moment=self._start(chain,ordinal,step,phase) if start is None else start
+        cls=selected["class"] if selected is not None else requested or b.cls
+        placement=selected.get("vertices") if selected is not None else vertices
+        for r in self.records:
+            s=r["bundle"]
+            require(r["end"] is not None or s.identity!=b.identity or b.offset+b.width<=s.offset or s.offset+s.width<=b.offset,"K27: double acquisition of a live allocation")
+        r=self._register(b,moment,cls,placement,category=category,scheme=scheme)
+        self.cursor=moment;self.makespan=max(self.makespan,moment)
+        return space_profile(r["class"],r["state"],b.width)
+
+    def release(self,b,chain=(),ordinal=0,step=None,phase=None,start=None):
+        r=self._find(b)
+        require(r["bundle"].width==b.width and r["bundle"].offset==b.offset,"partial allocation release")
+        minimum=max([r["start"]]+[value for (identity,index),value in self.dependencies.items() if identity==r["id"]])
+        moment=self._start(chain,ordinal,step,phase,minimum) if start is None else start
+        require(moment>=minimum,"E_SCHEDULE_INFEASIBLE: release violates dependency")
+        r["end"]=moment;self.cursor=moment;self.makespan=max(self.makespan,moment)
+        return space_profile(r["class"],r["state"],-b.width)
+
+    def _wires(self,operands,controls):
+        actual=bits(operands)
+        require(len(actual)==len(set((w[0],w[1]) for w in actual)),"coincident gate operands")
+        return actual,tuple(dict.fromkeys(controls))
+
+    def _minimum(self,wires):
+        minimum=F(0)
+        for bit in wires:
+            r=self._find(self._bit_bundle(bit))
+            minimum=max(minimum,r["start"],self.dependencies.get((r["id"],bit[1]),F(0)))
+        return minimum
+
+    def _native(self,op,wires,own,controls,eps,start):
+        records=[self._find(self._bit_bundle(w)) for w in wires]
+        classes=[r["class"] for r in records]
+        p=self.target.native_gate(op,classes,controls,eps,own)
+        require(p is not None,f"E_GATE_UNSUPPORTED: native scheme leaf {op}, c={controls}, classes={classes}")
+        require(not self.require_exact or p.error==0,"E_GATE_UNSUPPORTED: permutation region requires exact gates")
+        require(start>=self._minimum(wires),"E_SCHEDULE_INFEASIBLE: native leaf violates dependency")
+        top=self.target.doc.get("topology")
+        if top:
+            vertices=[r["vertices"][w[1]-r["bundle"].offset] for r,w in zip(records,wires)]
+            edges={tuple(edge) for edge in top["edges"]}
+            require(all(tuple(sorted((u,v))) in edges for i,u in enumerate(vertices) for v in vertices[:i]),"E_SCHEDULE_INFEASIBLE: §17 item 15: native leaf is not adjacent")
+        end=start+p.time
+        parallel=self.target.doc["capabilities"]["max_parallel"]
+        if parallel!="unbounded" and p.time:
+            self.parallel_events[start]=self.parallel_events.get(start,0)+1
+            self.parallel_events[end]=self.parallel_events.get(end,0)-1
+            active=0
+            for time in sorted(self.parallel_events):
+                active+=self.parallel_events[time]
+                require(active<=parallel,"E_SCHEDULE_INFEASIBLE: max_parallel exceeded")
+        for r,w in zip(records,wires):self.dependencies[(r["id"],w[1])]=end
+        self.counts=add_maps(self.counts,p.counts);self.gates=add_maps(self.gates,p.gates);self.error+=p.error
+        self.cursor=end;self.makespan=max(self.makespan,end)
+        return p
+
+    def gate(self,op,operands,controls=(),chain=(),ordinal=0,step=None,phase=None,params=None):
+        actual,effective=self._wires(operands,controls)
+        own={"cx":1,"ccx":2,"mcx":len(actual)-1}.get(op,0)
+        targets=actual[own:]
+        require(not {(b[0],b[1]) for b in targets}.intersection((b[0],b[1]) for b in effective),"effective control is a target")
+        combined=tuple(dict.fromkeys(actual[:own]+effective))
+        wires=combined+targets
+        choice=self._decision("gate",chain,ordinal,step,phase) or {}
+        eps=rational(choice.get("epsilon_share",0 if self.target.exact_native(op,[self.resolved_class(self._bit_bundle(w)) for w in wires],len(combined),own) else self.default_share))
+        start=self._start(chain,ordinal,step,phase,self._minimum(wires))
+        realisation=choice.get("realisation")
+        classes=[self.resolved_class(self._bit_bundle(w)) for w in wires]
+        native=self.target.native_gate(op,classes,len(combined),eps,own)
+        if realisation in [None,"native"] and native is not None:return self._native(op,wires,own,len(combined),eps,start)
+        require(realisation!="native",f"E_GATE_UNSUPPORTED: selected native {op} has no match")
+        candidates=[s for s in self.target.doc["schemes"] if self.target.covers(s["realises"],op,len(combined)) and (realisation is None or s["name"]==realisation)]
+        require(candidates,f"E_GATE_UNSUPPORTED: no selected realisation for {op}")
+        scheme=candidates[0];environment={"k":F(own),"c":F(len(combined)),"eps":eps}
+        if params:
+            theta=params[0]
+            if isinstance(theta,str) and theta.startswith("0x"):
+                import struct
+                theta=struct.unpack(">d",bytes.fromhex(theta[2:]))[0]
+            require(math.isfinite(float(theta)),"nonfinite scheme angle")
+            environment["theta"]=F(float(theta))
+        anc=scheme["ancillae"]
+        n=integer(expression(anc["count"],environment,self.target.doc["tables"]),0)
+        b=Bundle(f"scheme:{len(self.records)}",n,anc["class"],state="borrowed" if anc["state"]=="dirty" else "clean")
+        # A scheme has no ordinal/cost of its own. Its allocation and native
+        # template are consequences of the one selected source operation.
+        p=self.allocate(b,start=start,requested=b.cls,category="ancillae",scheme=scheme["name"])
+        time=start
+        for leaf in scheme["template"]:
+            repeat=leaf.get("repeat")
+            lo,hi=[integer(expression(repeat[k],environment,self.target.doc["tables"]),0) for k in ["from","to"]] if repeat else [0,1]
+            require(hi>=lo,"reversed scheme repeat bounds")
+            for i in range(lo,hi):
+                bound=dict(environment,i=F(i));leaf_wires=[]
+                for w in leaf["wires"]:
+                    if w in ["t","t2"]:
+                        index=0 if w=="t" else 1
+                        require(index<len(targets),"scheme references absent target")
+                        leaf_wires.append(targets[index])
+                    else:
+                        m=re.fullmatch(r"([ca])\[(.*)\]",w);require(m,"invalid scheme wire")
+                        index=integer(expression(loads(m[2]),bound,self.target.doc["tables"]),0)
+                        if m[1]=="c":
+                            require(index<len(combined),"scheme control outside bundle");leaf_wires.append(combined[index])
+                        else:
+                            require(index<n,"scheme ancilla outside bundle");leaf_wires.extend(bits([b.bit(index)]))
+                require(len({(w[0],w[1]) for w in leaf_wires})==len(leaf_wires),"coincident scheme operands")
+                leaf_op=leaf["gate"]
+                leaf_own={"cx":1,"ccx":2,"mcx":len(leaf_wires)-1}.get(leaf_op,0)
+                part=self._native(leaf_op,tuple(leaf_wires),leaf_own,leaf_own,eps,time)
+                p=p.then(part);time+=part.time
+        p=p.then(self.release(b,start=time))
+        for w in wires:
+            r=self._find(self._bit_bundle(w));self.dependencies[(r["id"],w[1])]=time
+        self.cursor=time;self.makespan=max(self.makespan,time)
+        return p
+
+    def finish(self):
+        specified=self.schedule.doc.get("interface_vertices")
+        require(specified is None or self.interface_index==len(specified),"too many interface placement arrays")
+        for r in self.records:
+            if r["end"] is None:
+                require(r["slot"] is not None,"K27: live allocation at region exit")
+                r["end"]=self.makespan
+        peaks={};areas={}
+        for cls in self.classes:
+            changes={};zero_peak=0
+            for r in self.records:
+                if r["class"]!=cls:continue
+                width=r["bundle"].width;start,end=r["start"],r["end"]
+                changes[start]=changes.get(start,0)+width;changes[end]=changes.get(end,0)-width
+                if start==end:zero_peak=max(zero_peak,width)
+                key=(cls,r["state"])
+                areas[key]=areas.get(key,F(0))+width*(end-start)
+            active=0;peak=zero_peak
+            for time in sorted(changes):active+=changes[time];peak=max(peak,active)
+            peaks[cls]=peak
+            cap=self.target.doc["classes"][cls]["capacity"]
+            require(cap=="unbounded" or peak<=cap,f"E_SCHEDULE_INFEASIBLE: capacity exceeded for {cls}")
+        top=self.target.doc.get("topology")
+        if top:
+            for i,r in enumerate(self.records):
+                for other in self.records[:i]:
+                    if max(r["start"],other["start"])<min(r["end"],other["end"]):
+                        require(not set(r["vertices"]).intersection(other["vertices"]),"E_SCHEDULE_INFEASIBLE: overlapping live vertex placements")
+        rows={}
+        for name,resource in self.target.doc["resources"].items():
+            kind=resource["kind"]
+            if kind in ["time","count"]:rows[escape(name)]=self.makespan if kind=="time" else self.counts.get(name,F(0))
+            else:
+                for cls in self.classes:
+                    value=peaks[cls] if kind=="peak" else rational(resource.get("rate",{}).get(cls,1))*(areas.get((cls,"clean"),F(0))+areas.get((cls,"borrowed"),F(0))*rational(self.target.doc["classes"][cls]["dirty_rate"]))
+                    rows[escape(name)+"["+escape(cls)+"]"]=F(value)
+        return dict(sorted(rows.items()))
 
 
 class Source:
