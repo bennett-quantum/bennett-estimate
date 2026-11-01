@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "bennett_estimate",
+  "project_id": "04dcf34d-001a-46fd-9512-9b68ff08f5aa"
+}
