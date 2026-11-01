@@ -108,7 +108,8 @@ def jcs(value):
     if isinstance(value, str):
         require(not any(0xD800 <= ord(c) <= 0xDFFF for c in value), "JCS: lone surrogate")
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-    if isinstance(value, int): return str(value)
+    if isinstance(value,int):
+        return str(value) if abs(value)<2**53 else jcs(Decimal(value))
     if isinstance(value, (Decimal, float)):
         f = float(value)
         require(math.isfinite(f), "JCS: number outside binary64")
@@ -496,7 +497,7 @@ class Catalog:
         self.symbols = {}
         self.eps = F(0)
         self.closed_form = True
-        self.default_class = next(iter(sorted(target.doc["classes"])))
+        self.default_class=next(iter(sorted(target.doc["classes"],key=lambda name:name.encode("utf-16-be"))))
 
     def bind(self, formals, actuals, caller, controls):
         require(len(formals) == len(actuals), "K19: recipe argument arity")

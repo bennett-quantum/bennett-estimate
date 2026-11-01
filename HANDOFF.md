@@ -9,10 +9,20 @@ published catalog traversal into composable cost summaries; structured source
 primitives; zero-argument memoryless padded oracle summaries; pure classical
 control-path costing and conditional step bounds; deterministic JSON CLI.
 
-The first full working-tree gate ran all 18 tests successfully, then failed on
-Rust formatting. `cargo fmt` corrected that failure. The final gate result is
-recorded in the current `.tmp/PROGRESS.md` Resume block. Do not infer a clean
-pushed-SHA result: the runner must invoke the normal hook after committing.
+Verified: headless `timeout 180 scripts/pre-push --working-tree` exited 0:
+26 estimator tests, one hook orchestration test, Rust formatting, Clippy with
+warnings denied and shell syntax checks passed. The hook test uses an explicit
+VCS double; no git process was invoked. It verifies pushed-SHA selection,
+deduplication, deletion-only pushes and failed-check cleanup. The runner must
+still invoke the normal hook against a real committed SHA.
+
+Additional scaling evidence: the source object in
+`examples/memory-lookup-2pow20.bisa` has 2^20 eight-bit cells and 1024 repeated
+load/XOR/unload operations. Its summary uses fewer than 1000 constructor visits.
+The dispatch formula agrees exactly with literal catalog traversal on small
+address spaces. This is a reference-cost scaling fixture, not the full Grover
+or SQLite rung. Indexed-control/middle-alias tests guard loop folding, and the
+published controlled-action fixture exercises default controlled action calls.
 
 Differential: the published rung-3 `executor-control.bisa` with `sum` arguments
 0, 1, 3, 7, 255 matches the VM's 6, 11, 21, 41, 1281 source steps and sequential

@@ -27,6 +27,14 @@ def object_with_signatures(functions, signatures, layout=None, devices=None):
 
 
 class Arithmetic(unittest.TestCase):
+    def test_jcs_large_integer_and_utf16_class_order(self):
+        self.assertEqual(e.jcs(9007199254740993),"9007199254740992")
+        doc=e.loads((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+        desc={"capacity":"unbounded","dirty_rate":1,"qubit_second":1}
+        doc["classes"]={"\ue000":desc,"😀":desc}
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),e.Target.read(e.jcs(doc)))
+        self.assertEqual(c.default_class,"😀")
+
     def test_upward_34(self):
         self.assertEqual(e.decimal_up(F(1, 3)), "0." + "3" * 33 + "4")
         self.assertEqual(e.decimal_up(F(2, 3)), "0." + "6" * 33 + "7")

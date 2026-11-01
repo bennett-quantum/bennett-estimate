@@ -44,10 +44,15 @@ is contract data, not code copied from another implementation.
 
 Current source coverage includes structured gates, allocation/borrowing,
 copy/XOR/exchange, predication, loops, local-region images and linear coherent
-memory, plus the zero-argument memoryless padded oracle families listed in the
-plan. Layout-backed oracles, semantic calls, explicit schedules, topology,
+memory, basic controlled action calls, plus the zero-argument memoryless padded
+oracle families listed in the plan. Layout-backed oracles, complete semantic
+calls and cleanup, explicit schedules, topology,
 full parameter lowering and certificate production still require work.
 Unsupported paths fail explicitly; they remain requirements.
+
+`examples/memory-lookup-2pow20.bisa` exercises 1024 linear lookups into 2^20
+eight-bit cells using fewer than 1000 constructor visits. This verifies scaling
+of the reference cost calculation; the full rung-4 Grover estimate is pending.
 
 `--certificate file` reads a JCS 0.9 certificate and checks K12 bindings and
 resource rows against a rebuilt supported estimate. Schema parsing and resource
