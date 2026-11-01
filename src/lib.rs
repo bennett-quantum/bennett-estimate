@@ -1,14 +1,21 @@
-//! bennett-estimate: resource estimation from ISA objects, certificates and targets.
+//! Independent ISA estimator using Python's arbitrary-precision rational engine.
+use std::io::Write;
+use std::process::{Command, Stdio};
 
-/// Crate version string.
-pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn version_nonempty() {
-        assert!(!super::version().is_empty());
-    }
+pub fn run(args: &[String]) -> std::io::Result<std::process::ExitStatus> {
+    let mut child = Command::new("python3")
+        .args(["-I", "-"])
+        .args(args)
+        .stdin(Stdio::piped())
+        .spawn()?;
+    let mut input = child.stdin.take().expect("piped stdin");
+    let source = concat!(
+        "CATALOG_TEXT = r'''",
+        include_str!("../data/ref-0.9.json"),
+        "'''\n",
+        include_str!("estimate.py")
+    );
+    input.write_all(source.as_bytes())?;
+    drop(input);
+    child.wait()
 }

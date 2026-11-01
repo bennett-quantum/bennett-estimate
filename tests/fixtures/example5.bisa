@@ -1,0 +1,32 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"5cebd5a72ee7873edda0d2c35afed2a5ab79eba60f2b242b2a856d5fa4074634","kind":"cc","name":"main","signature":{"abi":"0.9","kind":"cc","params":["i64"],"results":[],"tier":"cc"}},"1":{"interface_hash":"05525834cbe5a518aa97444912254f3c12c75dd86314a98ba550f45187208a0b","kind":"r","name":"scratch","signature":{"abi":"0.9","kind":"r","params":["i64"],"results":[],"tier":"r"}},"2":{"interface_hash":"3860ea712b2d70fc495834586bb397656a467c85235aa069768318a06e9fa89b","kind":"perm_action","name":"flip","signature":{"abi":"0.9","args":[],"bounds":[],"in":[],"kind":"perm_action","mem":[],"mut":[1],"tier":"q"}}}
+
+section functions
+fn cc @main (n:i64) () () () ()
+^entry():
+call @scratch n
+ret
+fn r @scratch (n:i64) () () () ()
+^entry():
+q = qreg.new any n
+zero = const.i64 0
+one = const.i64 1
+br ^test(zero)
+^test(i:i64):
+c = icmp.ult i n
+br c ^body(i) ^done()
+^body(j:i64):
+s = qreg.slice q j 1
+action_call @flip (s) () () ()
+t = qreg.slice q j 1
+action_call @flip (t) () () ()
+j2 = add j one
+br ^test(j2)
+^done():
+qreg.free q
+ret
+perm_action @flip (a:wire) () () () ()
+^entry():
+x a

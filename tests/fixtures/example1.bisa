@@ -1,0 +1,12 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"ed9865300b85a519c2379de98e36e635e72b5b78d8bdfca03dccf9a09aa3df5e","kind":"oracle","name":"inc8","signature":{"abi":"0.9","args":[],"fault":4,"in":[8],"kind":"oracle","mem":[],"tgt":8,"tier":"q"}}}
+
+section functions
+oracle @inc8 (x:wire[8] in) (t:wire[8]) (f:wire[4]) () ()
+regs { one:reg[8], r:reg[8] }
+^entry():
+one = lift.const.i8 1
+r = lift.add x one
+lift.retval r

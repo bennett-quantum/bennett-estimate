@@ -1,6 +1,28 @@
 # Spec versions this repo implements. Contract = the published specs, nothing else.
-status = "skeleton"
-isa = "0.3"
-object = "0.3"
-cert = "0.3"
-target = "0.3"
+status = "partial"
+isa = "0.9"
+object = "0.9"
+launch = "0.9"
+sched = "0.9"
+cert = "0.9"
+coverage = "0.9"
+target = "0.9"
+
+[source]
+repository = "bennett-isa-spec"
+commit = "4c76303ecb0c5f3bd8962369b1655403b5ef3974"
+path = "spec/Bennett-ISA-Spec-0.9.md"
+sha256 = "94fa3c4f94f12a9f465d913440fa85418b94c0bce1f61c9bb408665f0b46aeec"
+
+[expansion]
+name = "ref"
+version = "0.9"
+path = "data/ref-0.9.json"
+document_sha256 = "52dbc3f8f0c91d587fd933a43080385fd5284abcfec0ce84788229fcb15c53d8"
+envelope_sha256 = "5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197"
+
+[compatibility]
+object_reader = ["0.8", "0.9"]
+classical_costs = ["0.8", "0.9"]
+# 0.8 has no complete published ref expansion: no padded 0.8 quantum
+# cost is inferred from the 0.9 catalog.

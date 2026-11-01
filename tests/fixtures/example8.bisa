@@ -1,0 +1,24 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"dbf66e749a776cbb1ceccfc8b530caf664e24fb416fdf52ccf3942f4b89fdcf2","kind":"cc","name":"main","signature":{"abi":"0.9","kind":"cc","params":[],"results":[],"tier":"cc"}},"1":{"interface_hash":"d365ade0d8452d7d12b1a72c87e7106b06eef99e5958d0345133cf6eb0cbeb03","kind":"r","name":"work","signature":{"abi":"0.9","kind":"r","params":["ptr"],"results":[],"tier":"r"}}}
+
+section functions
+fn cc @main () () () () ()
+^entry():
+n = const.i32 8
+p = alloc n
+call @work p
+ret
+fn r @work (p:ptr) () () () ()
+^entry():
+v = const.i64 7
+store.i64 p v
+effect clock.read p
+fault 21
+
+section devices
+{"models":{"clock":{"version":"0.9"}},"services":{}}
+
+section layout
+{"A_tab":4,"H":12,"S_cells":0,"globals":{},"heap_base":16,"heap_limit_max":4080,"interface_regions":{},"null_size":16,"ptr_width":32}

@@ -1,0 +1,13 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"badf7dd2a59afa879f092921946539dfb918cedd35f6fbbaa838c630577eaed4","kind":"oracle","name":"zero_cause","signature":{"abi":"0.9","args":[],"fault":4,"in":[1],"kind":"oracle","mem":[],"tgt":1,"tier":"q"}},"1":{"interface_hash":"0403d76ff065acab57cb9165cfe1d3d73bbf8dad60bbc1348fb0305ee4f37611","kind":"cc","name":"zero_cc","signature":{"abi":"0.9","kind":"cc","params":[],"results":[],"tier":"cc"}}}
+
+section functions
+oracle @zero_cause (x:wire in) (t:wire) (f:wire[4]) () ()
+^entry():
+lift.faultif x 0
+lift.retval x
+fn cc @zero_cc () () () () ()
+^entry():
+fault 0

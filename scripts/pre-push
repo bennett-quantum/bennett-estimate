@@ -1,4 +1,40 @@
 #!/usr/bin/env bash
+# The runner/orchestrator invokes this hook. Test the pushed commit(s), never a
+# dirty checkout. Sibling fixture paths require a worktree BESIDE the repository.
 set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
-cargo test
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS BROWSER
+script_dir="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+if [[ "${1:-}" == --working-tree ]]; then
+  exec "$script_dir/check"
+fi
+vcs="${BENNETT_GATE_GIT:-git}"
+root="$("$vcs" -C "$script_dir" rev-parse --show-toplevel)"
+shas=()
+had_refs=0
+if [[ ! -t 0 ]]; then
+  while read -r -t 10 _ref sha _remote_ref _remote_sha; do
+    had_refs=1
+    [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'pre-push: malformed local SHA' >&2; exit 1; }
+    [[ "$sha" == 0000000000000000000000000000000000000000 ]] || shas+=("$sha")
+  done
+fi
+# An explicit deletion-only push has no code to test.
+if [[ "${#shas[@]}" == 0 && "$had_refs" == 1 ]]; then exit 0; fi
+if [[ "${#shas[@]}" == 0 ]]; then shas=("$("$vcs" -C "$root" rev-parse HEAD)"); fi
+declare -A seen=()
+for candidate in "${shas[@]}"; do
+  sha="$("$vcs" -C "$root" rev-parse --verify "${candidate}^{commit}")"
+  [[ -z "${seen[$sha]:-}" ]] || continue
+  seen[$sha]=1
+  wt="$(mktemp -d "$(dirname -- "$root")/.bennett-estimate-gate.XXXXXXXX")"
+  cleanup() {
+    "$vcs" -C "$root" worktree remove --force "$wt"
+  }
+  trap cleanup EXIT
+  "$vcs" -C "$root" worktree add --detach "$wt" "$sha"
+  echo "pre-push: checking $sha in $wt" >&2
+  mkdir -p -- "$wt/.tmp/gate/tmp" "$root/.tmp/gate-target"
+  TMPDIR="$wt/.tmp/gate/tmp" CARGO_TARGET_DIR="$root/.tmp/gate-target" "$wt/scripts/check"
+  cleanup
+  trap - EXIT
+done

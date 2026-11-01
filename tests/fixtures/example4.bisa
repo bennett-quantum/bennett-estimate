@@ -1,0 +1,36 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"ff8e49307d5ec9ab32eea2406339f878630bbb4501080829200433a18d6951cb","kind":"cc","name":"ones","signature":{"abi":"0.9","kind":"cc","params":["i64"],"results":["i3"],"tier":"cc"}},"1":{"interface_hash":"3860ea712b2d70fc495834586bb397656a467c85235aa069768318a06e9fa89b","kind":"perm_action","name":"flip","signature":{"abi":"0.9","args":[],"bounds":[],"in":[],"kind":"perm_action","mem":[],"mut":[1],"tier":"q"}}}
+
+section functions
+fn cc @ones (n:i64) (m:i3) () () ()
+^entry():
+q = qreg.new any n
+w = qreg.width q
+id = qreg.id q
+k = const.i32 8
+p = alloc k
+store.i64 p id
+id2 = load.i64 p
+q2 = qreg.from_id id2
+zero = const.i64 0
+one = const.i64 1
+br ^test(zero)
+^test(i:i64):
+c = icmp.ult i w
+br c ^body(i) ^done()
+^body(j:i64):
+s = qreg.slice q2 j 1
+action_call @flip (s) () () ()
+j2 = add j one
+br ^test(j2)
+^done():
+m = measure.i3 q2
+ret m
+perm_action @flip (a:wire) () () () ()
+^entry():
+x a
+
+section layout
+{"A_tab":4,"H":12,"S_cells":0,"globals":{},"heap_base":16,"heap_limit_max":4080,"interface_regions":{},"null_size":16,"ptr_width":32}

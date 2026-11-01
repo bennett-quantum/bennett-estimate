@@ -1,0 +1,28 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"b80aed1639a9ac6a6856f02b0b3264d905e4eea3fa3f9081c01e56283ea398cf","kind":"cc","name":"adaptive","signature":{"abi":"0.9","kind":"cc","params":["i1","qreg[8]","qreg[8]","qreg[4]"],"results":[],"tier":"cc"}},"1":{"interface_hash":"c0d9835844fa882c1864044acc6fa26dba3935e0d6a9d33f9cdbf1e7c877d250","kind":"cc","name":"overdraw","signature":{"abi":"0.9","kind":"cc","params":[],"results":[],"tier":"cc"}},"2":{"interface_hash":"ed9865300b85a519c2379de98e36e635e72b5b78d8bdfca03dccf9a09aa3df5e","kind":"oracle","name":"inc8","signature":{"abi":"0.9","args":[],"fault":4,"in":[8],"kind":"oracle","mem":[],"tgt":8,"tier":"q"}}}
+
+section functions
+fn cc @adaptive (b:i1, x:qreg[8], t:qreg[8], f:qreg[4]) () () () ()
+^entry():
+two = const.i64 2
+three = const.i64 3
+zero = const.i64 0
+s = select b three two
+tk = budget.mint @inc8 s zero zero zero
+oracle_call @inc8 tk (x) t f () ()
+ret
+fn cc @overdraw () () () () ()
+^entry():
+three = const.i64 3
+one = const.i64 1
+zero = const.i64 0
+tk = budget.mint @inc8 three one zero zero
+ret
+oracle @inc8 (x:wire[8] in) (t:wire[8]) (f:wire[4]) () ()
+regs { one:reg[8], r:reg[8] }
+^entry():
+one = lift.const.i8 1
+r = lift.add x one
+lift.retval r

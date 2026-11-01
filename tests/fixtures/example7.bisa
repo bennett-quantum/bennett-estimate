@@ -1,0 +1,25 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"0d65d926275688cfebf2831c1de960b03a6b8ea6400866e6d9fef8f393ca2c2e","kind":"oracle","name":"g","signature":{"abi":"0.9","args":["i2"],"fault":4,"in":[2,2],"kind":"oracle","mem":[],"tgt":2,"tier":"q"}},"1":{"interface_hash":"786f1970ca3d78ef3d5de795411ee276286711c89b756872757c24f9bd569cc9","kind":"oracle","name":"ginv","signature":{"abi":"0.9","args":["i2"],"fault":4,"in":[2,2],"kind":"oracle","mem":[],"tgt":2,"tier":"q"}},"2":{"interface_hash":"5999b6d3d2362f8c1971ef6f37b404766aa5c18f6ba1880d767bfde351e47392","kind":"perm_action","name":"addya","signature":{"abi":"0.9","args":["token","i2"],"bounds":[],"in":[2],"kind":"perm_action","mem":[],"mut":[2],"tier":"q"}},"3":{"interface_hash":"562ab7270a0f508d6a2f4a757f3f90964da0b60541bac2c5efa421bad009056a","kind":"cc","name":"run","signature":{"abi":"0.9","kind":"cc","params":["qreg[2]","qreg[2]","token","i2"],"results":[],"tier":"cc"}}}
+
+section functions
+oracle @g (x:wire[2] in, y:wire[2] in) (t:wire[2]) (f:wire[4]) () (a:i2)
+regs { s:reg[2], r:reg[2] }
+^entry():
+s = lift.add x y
+r = lift.add s a
+lift.retval r
+oracle @ginv (x:wire[2] in, y:wire[2] in) (t:wire[2]) (f:wire[4]) () (a:i2)
+regs { s:reg[2], r:reg[2] }
+^entry():
+s = lift.sub x y
+r = lift.sub s a
+lift.retval r
+perm_action @addya (x:wire[2]) (y:wire[2] in) () (tk:token, a:i2) ()
+^entry():
+qinplace @g @ginv tk x (y) () (a)
+fn cc @run (x:qreg[2], y:qreg[2], tk:token, a:i2) () () () ()
+^entry():
+action_call @addya (x) (y) () (tk, a)
+ret
