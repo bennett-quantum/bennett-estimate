@@ -4,11 +4,23 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import importlib.util
 
 ROOT=Path(__file__).resolve().parents[1]
 
 
 class Hook(unittest.TestCase):
+    def test_parallel_suites_partition_every_discovered_case_once(self):
+        location=Path(__file__).with_name("run_suite.py")
+        spec=importlib.util.spec_from_file_location("suite_runner",location)
+        runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
+        tests=list(runner.cases(unittest.TestLoader().discover(str(location.parent))))
+        groups={name:[t.id() for t in tests if runner.group(t)==name] for name in runner.GROUPS}
+        self.assertTrue(all(groups.values()))
+        selected=[identity for identities in groups.values() for identity in identities]
+        self.assertEqual(sorted(selected),sorted(t.id() for t in tests))
+        self.assertEqual(len(selected),len(set(selected)))
+
     def test_sha_selection_deletion_and_failure_cleanup(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
             base=Path(directory);repo=base/"repo";repo.mkdir()

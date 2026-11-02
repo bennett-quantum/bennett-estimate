@@ -34,9 +34,9 @@ def make_object(text,signature):
     return make_program(text,{"root":signature})
 
 
-def make_program(text,signatures,data=None,layout=None):
+def make_program(text,signatures,data=None,layout=None,ptr=32):
     records={str(i):{"name":name,"kind":sig["kind"],"signature":sig,"interface_hash":"0"*64} for i,(name,sig) in enumerate(signatures.items())}
-    header="bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32\n\nsection symbols\n"
+    header=f"bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width={ptr}\n\nsection symbols\n"
     def document():return header+e.jcs(records)+"\n\nsection functions\n"+text+"\n"+("\nsection data\n"+"\n".join(n+" "+v for n,v in data.items())+"\n" if data else "")+("\nsection layout\n"+e.jcs(layout)+"\n" if layout else "")
     obj=e.Object.read(document())
     for record in records.values():record["interface_hash"]=obj.identities()[record["name"]]
@@ -167,6 +167,68 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_lifted_table_fields_share_packed_storage_and_add_no_history_slots(self):
+        sig={"abi":"0.9","tier":"q","kind":"oracle","in":[2,1],"tgt":2,"fault":4,"mem":[],"args":[]}
+        layout={"ptr_width":2,"H":1,"A_tab":1,"S_cells":0,"globals":{},"interface_regions":{},"heap_base":1,"heap_limit_max":1,"null_size":1}
+        doc=e.loads(e.jcs(target().doc));doc["ptr_widths_supported"]=[2];t=e.Target.read(e.jcs(doc))
+        for opcode,operands in [("lift.free","p"),("lift.boundscheck","p n")]:
+            obj=make_program("oracle @root (p:wire[2] in, n:wire in) (t:wire[2]) (f:wire[4]) () ()\n^entry():\n"+opcode+" "+operands+"\nlift.retval p",{"root":sig},layout=layout,ptr=2)
+            budget=["1","1","0","0"];baseline=e.estimate(obj,t,"root",[],budget)
+            touched=set();written=set();original=e.Ledger
+            class Recording(original):
+                def gate(self,op,wires,controls=(),**kw):
+                    if kw["chain"][-1]["point"]=="entry:0":
+                        own={"cx":1,"ccx":2,"mcx":len(wires)-1}.get(op,0)
+                        touched.update(w.offset for w in wires if w.identity.endswith(":alloctab"))
+                        written.update(w.offset for w in wires[own:] if w.identity.endswith(":alloctab"))
+                    return super().gate(op,wires,controls,**kw)
+            with patch.object(e,"Ledger",Recording):streamed=e.estimate(obj,t,"root",[],budget,include_frame=True)
+            self.assertEqual(streamed["exact_resources"],baseline["exact_resources"],opcode)
+            self.assertEqual([r["width"] for r in streamed["frame"]["history"]],[5])
+            self.assertEqual(touched,{0,1,4,5,6,7,10,11} if opcode=="lift.free" else set(range(12)))
+            self.assertEqual(written,{4,10} if opcode=="lift.free" else set())
+
+    def test_lifted_oracle_uncall_has_whole_cleanup_recompute_carrier(self):
+        root={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":["token"]}
+        child={**root,"args":[]}
+        obj=make_program("oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token)\nregs { r:reg[1], fr:reg[4] }\n^entry():\nlift.oracle_call @child tk (x) r fr () ()\nlift.oracle_uncall @child tk (x) r fr () ()\nlift.retval x\noracle @child (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x",{"root":root,"child":child})
+        t=target();budget=["1","0","0","0"];args=[budget]
+        baseline=e.estimate(obj,t,"root",args,budget,include_frame=True)
+        selected=entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],"entry:1")],step=1,phase="fwd",generated=0,realisation="recompute")
+        obj.sections["schedule"]=baseline["effective_schedule"]
+        obj.sections["schedule"]["entries"]=[selected]
+        result=e.estimate(obj,t,"root",args,budget)
+        one=e.estimate(obj,t,"child",[],budget,inherited_controls=1)
+        for key in ["time","gate_count"]:
+            self.assertEqual(F(result["resources"][key])-F(baseline["resources"][key]),F(one["resources"][key])+5)
+        decisions=result["cleanup_decisions"]
+        self.assertEqual([(d["step"],d["phase"],d["ordinal"],d["realisation"]) for d in decisions],[(1,"fwd",0,"recompute"),(1,"rev",0,"reverse")])
+        self.assertEqual([c["path"][-1]["call_index"] for c in result["invocation_contexts"][1:]],[0,0,1,0,0])
+        self.assertEqual([c["raw_inverse"] for c in result["invocation_contexts"][1:]],[False,False,True,False,True])
+        # The carrier owns no leaf: the two fresh allocations occupy the
+        # caller's generated ordinals zero and one at the cleanup point.
+        doc=e.loads(e.jcs(t.doc));doc["classes"]["special"]=dict(doc["classes"]["data"])
+        special=e.Target.read(e.jcs(doc));obj.sections.pop("schedule")
+        binding=e.estimate(obj,special,"root",args,budget)
+        obj.sections["schedule"]=binding["effective_schedule"]
+        obj.sections["schedule"]["entries"]=[selected,entry("alloc",path=selected["path"],step=1,phase="fwd",generated=0,**{"class":"special"})]
+        allocations=[];ordinals=[];original=e.Ledger
+        class Recording(original):
+            def own(self,kw):return len(kw["chain"])==1 and kw["chain"][-1]["point"]=="entry:1" and kw["phase"]=="fwd"
+            def allocate(self,b,**kw):
+                profile=super().allocate(b,**kw)
+                if self.own(kw):allocations.append((kw["ordinal"],b.width,self.resolved_class(b)));ordinals.append(kw["ordinal"])
+                return profile
+            def gate(self,op,wires,controls=(),**kw):
+                if self.own(kw):ordinals.append(kw["ordinal"])
+                return super().gate(op,wires,controls,**kw)
+            def release(self,b,**kw):
+                if self.own(kw):ordinals.append(kw["ordinal"])
+                return super().release(b,**kw)
+        with patch.object(e,"Ledger",Recording):e.estimate(obj,special,"root",args,budget)
+        self.assertEqual(allocations,[(0,1,"special"),(1,4,"data")])
+        self.assertEqual(ordinals,list(range(len(ordinals))))
+
     def test_lifted_region_rows_keep_nested_budget_arguments_and_reverse_context(self):
         root={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":["token","i1"]}
         child={**root,"args":["i1"]}

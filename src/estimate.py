@@ -541,6 +541,28 @@ class Bundle:
         return Bundle(self.identity,end-start,self.cls,self.offset+start,self.state)
 
 
+@dataclass(frozen=True)
+class RecordField(Bundle):
+    """Logical field array over packed records; owns no additional wires."""
+    element_width: int = 1
+    record_width: int = 1
+    logical_from: int = 0
+
+    def positions(self):
+        for index in range(self.logical_from,self.logical_from+self.width):
+            entry,bit=divmod(index,self.element_width)
+            yield self.offset+entry*self.record_width+bit
+
+    def bit(self,index):
+        require(0<=index<self.width,"record field index outside width")
+        entry,bit=divmod(self.logical_from+index,self.element_width)
+        return Bundle(self.identity,1,self.cls,self.offset+entry*self.record_width+bit,self.state)
+
+    def slice(self,start,end):
+        require(0<=start<=end<=self.width,"invalid record field slice")
+        return RecordField(self.identity,end-start,self.cls,self.offset,self.state,self.element_width,self.record_width,self.logical_from+start)
+
+
 @dataclass
 class Captured:
     body: list
@@ -588,7 +610,7 @@ def wire(x, env):
             b = bundle[0]
             lo, hi = scalar(x["from"], env), scalar(x["to"], env)
             require(0 <= lo <= hi <= b.width, "K19: invalid wire range")
-            return [Bundle(b.identity, hi-lo, b.cls, b.offset+lo, b.state)]
+            return [b.slice(lo,hi)]
         if "cells" in x: return wire(x["cells"], env)
     require(isinstance(x, str), "K19: invalid wire actual")
     match = re.fullmatch(r"([^\[]+)\[(.*)\]", x)
@@ -608,7 +630,7 @@ def wire(x, env):
 
 def bits(wires):
     # Used only for gate operands/control sets, never for a storage-sized bundle.
-    return tuple((b.identity, b.offset+i, b.cls) for b in wires for i in range(b.width))
+    return tuple((b.identity, i, b.cls) for b in wires for i in (b.positions() if isinstance(b,RecordField) else range(b.offset,b.offset+b.width)))
 
 
 _BINDING_SCOPE=object()
@@ -1996,6 +2018,9 @@ class Source:
         # A dry traversal counts per-point domains, including nested calls.
         # Only counts/orientations survive; no gate or circuit list is built.
         counter_catalog=Catalog(catalog.text,self.target)
+        # Inherited controls can be scratch from the surrounding catalog.
+        # A private dry traversal must not reuse those allocation identities.
+        counter_catalog.serial=catalog.serial
         counter=OrdinalCounter(counter_catalog,catalog.ledger.schedule);counter_catalog.ledger=counter
         counter_catalog.source_metadata=dict(catalog.source_metadata)
         for field in ["source_context","call_edges","root_step","root_phase"]:setattr(counter_catalog,field,getattr(catalog,field))
@@ -2089,6 +2114,7 @@ class Source:
             op = re.sub(r"\.i[1-9][0-9]*$","",row.op)
             a = row.args
             body=[]
+            meta={"symbol":self.obj.symbol(fn.name)["interface_hash"],"point":f"{row.block}:{row.ordinal}","depth":0,"kind":row.op,"exact":True}
             written=row.lhs
             if written:
                 require(len(written)==1 or op=="lift.parmov","unsupported multi-result lifted row")
@@ -2140,15 +2166,52 @@ class Source:
             elif op=="qjump": body=[]
             elif op=="qbranch": body=[invoke(op,[P,labels[a[1][1:]],labels[a[2][1:]],a[0],successor])]
             elif op=="qjumpr": body=[invoke(op,[P,Fwidth,0,N,a[0],successor,flag,faulted,code])]
-            elif op in ["lift.oracle_call","lift.perm_call"]:
+            elif op=="lift.free" or op=="lift.boundscheck" and not re.fullmatch(r"0|[1-9][0-9]*",a[1]):
+                require(layout is not None,"allocator-table row requires layout")
+                require(widths[a[0]]==self.obj.ptr,"allocator-table pointer width mismatch")
+                count=1<<integer(layout["A_tab"],0);entry_width=2*self.obj.ptr+2
+                table=state_wires["alloctab"]
+                fields=[RecordField(table.identity,count*w,table.cls,table.offset+offset,table.state,w,entry_width) for offset,w in [(0,self.obj.ptr),(self.obj.ptr,self.obj.ptr),(2*self.obj.ptr,1),(2*self.obj.ptr+1,1)]]
+                # The free recipe never reads its legacy n/L/E formals. An
+                # empty view binds n without inventing any physical length.
+                length_width,length=(0,[]) if op=="lift.free" else (widths[a[1]],a[1])
+                body=[invoke(op,[self.obj.ptr,length_width,max(self.obj.ptr,length_width)+1,count,integer(layout["A_tab"],0)+1,Fwidth,a[0],length,*fields,state_wires["atop"],flag,faulted,code])]
+            elif op in ["lift.oracle_call","lift.oracle_uncall","lift.perm_call"]:
                 if op=="lift.perm_call":
                     require(self.obj.functions[a[0].removeprefix("@")].kind=="perm_action","lift.perm_call requires permutation action")
                 regions={}
                 for n,ty,role in fn.groups[3]:
                     shape=re.fullmatch(r"region\[([0-9]+),([0-9]+)\]",ty)
                     regions[n]=(int(shape[1]),int(shape[2]),env[n])
-                adapter=Instruction("oracle_call" if op=="lift.oracle_call" else "action_call",a,[],block=row.block,ordinal=row.ordinal)
+                adapter=Instruction("action_call" if op=="lift.perm_call" else "oracle_call",a,[],block=row.block,ordinal=row.ordinal)
                 body=self.action_nodes([adapter],env,regions,controls)
+                if op=="lift.oracle_uncall":
+                    # K65/K81: this intrinsic alone owns its cleanup carrier.
+                    # Reverse is the adjoint of its exact computing call.
+                    reverse=[{"inverse":True,"body":body}]
+                    local=dict(env)
+                    target_width=sum(b.width for b in wire(a[3],env))
+                    fault_width=sum(b.width for b in wire(a[4],env))
+                    fresh_target=self.fresh("cleanup_target",target_width)
+                    target_name=f"$cleanup_target:{self.serial}"
+                    fresh_fault=self.fresh("cleanup_fault",fault_width)
+                    fault_name=f"$cleanup_fault:{self.serial}"
+                    local[target_name]=fresh_target;local[fault_name]=fresh_fault
+                    actuals=list(a);actuals[3:5]=[target_name,fault_name]
+                    calls=[]
+                    for occurrence in [0,1]:
+                        replacement=Instruction("oracle_call",actuals,[],block=row.block,ordinal=row.ordinal)
+                        call=self.action_nodes([replacement],local,regions,controls)
+                        if self.catalog.ledger is not None:
+                            for node in call:self.catalog.source_metadata[id(node)]=(node,{**meta,"call":True,"oracle_call":True,"call_index":occurrence})
+                        calls.append(call)
+                    helpers=[{"acquire":target_name},{"acquire":fault_name},invoke("bind.qxor",[target_width,target_name,a[3]]),invoke("bind.qxor",[fault_width,fault_name,a[4]]),{"relinquish":fault_name},{"relinquish":target_name}]
+                    recompute=[*helpers[:2],*calls[0],*helpers[2:4],{"inverse":True,"body":calls[1]},*helpers[4:]]
+                    if self.catalog.ledger is not None:
+                        for node in helpers:self.catalog.source_metadata[id(node)]=(node,meta)
+                    capture=f"$lift_cleanup:{self.serial}";self.serial+=1
+                    env[capture]=Captured(reverse,dict(env),controls,cleanup=True,recompute=Captured(recompute,local,controls))
+                    body=[{"splice":capture}]
             elif op in ["lift.load","lift.store"] or op=="lift.boundscheck" and re.fullmatch(r"0|[1-9][0-9]*",a[1]):
                 raise ContractError("EST-SOURCE-02: published ref source binding does not fix implicit/literal length wires; see docs/CONTRACT_GAPS.md")
             else: raise ContractError(f"oracle source binding not implemented: {row.op}; no row omitted")
@@ -2156,15 +2219,15 @@ class Source:
             elif op=="qjump": nxt=[lit(labels[a[0][1:]])]
             elif op=="qbranch": nxt=[invoke("bind.qxor",[P,successor,"next"])]
             elif op=="qjumpr": nxt=[invoke("successor.dynamic",[P,N,flag,successor,"next"])]
-            elif op in ["lift.faultif","lift.udiv","lift.urem","lift.sdiv","lift.srem","lift.alloc"]: nxt=[invoke("successor.flagged",[P,index+1,N,flag,"next"])]
+            elif op in ["lift.faultif","lift.udiv","lift.urem","lift.sdiv","lift.srem","lift.alloc","lift.free","lift.boundscheck"]: nxt=[invoke("successor.flagged",[P,index+1,N,flag,"next"])]
             else: nxt=[lit(index+1)]
             row_templates.append({"parameters":template_formal,"body":body})
             next_templates.append({"parameters":template_formal+[{"name":"next","type":"wire","width":P}],"body":nxt})
             if self.catalog.ledger is not None:
-                meta={"symbol":self.obj.symbol(fn.name)["interface_hash"],"point":f"{row.block}:{row.ordinal}","depth":0,"kind":row.op,"exact":True}
                 for node in body+nxt:
                     prior=self.catalog.source_metadata.get(id(node),(None,{}))[1]
-                    self.catalog.source_metadata[id(node)]=(node,{**meta,**{k:prior[k] for k in ["call","oracle_call","call_index"] if k in prior}})
+                    context={**meta,**{k:prior[k] for k in ["call","oracle_call","call_index"] if k in prior}} if prior.get("call") else meta
+                    self.catalog.source_metadata[id(node)]=(node,context)
         if self.catalog.ledger is not None:
             return self.oracle_stream(fn,env,budget,controls,P,N,Q,Fwidth,T,pc,nextpc,faulted,code,result,row_templates,next_templates,state,raw_inverse)
         step=self.catalog.recipe("step",[P,N,Q,pc,nextpc,frame,row_templates,next_templates],env,controls)

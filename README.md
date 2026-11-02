@@ -48,7 +48,8 @@ points; source action adjoints are formed separately before expansion.
 
 The Rust binary embeds both the independent Python arithmetic engine and the
 published JSON catalog. It needs no installed source tree at runtime. Python
-arbitrary-precision integers and `Fraction` implement the cost algebra; gates
+arbitrary-precision integers and `Fraction` implement the cost algebra; integer
+costs stay integral and division remains exact. Gates
 and state vectors are never materialised. Structured repetitions and padded
 memoryless oracle budgets use multiplication of cost summaries. The catalog
 is contract data, not code copied from another implementation. Tests match all
@@ -58,7 +59,9 @@ its closed-form summary.
 Current source coverage includes structured gates, allocation/borrowing,
 copy/XOR/exchange, predication, loops, local-region images and linear coherent
 memory, controlled action/oracle calls and qinplace, plus padded arithmetic/control
-oracles, lifted allocation with all four history slots, and layout-state/global-address construction. Each nested oracle retains
+oracles, lifted allocation with all four history slots, lifted oracle/permutation
+calls and intrinsic oracle-uncall recompute, and layout-state/global-address
+construction. Each nested oracle retains
 its own resolved token. Unused resolved arguments retain their typed invocation
 bindings. Full lifted memory/activation rows, complete cleanup
 partitioning, remaining register/effect histories and certificate proof checking still require work.
