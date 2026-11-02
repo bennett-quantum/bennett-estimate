@@ -1,0 +1,34 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"a4e7fc0b6eddc2c3b6f656d17b51da8f8bdac7d4c385ccf1e99b8f1de2c51559","kind":"cc","name":"main","signature":{"abi":"0.9","kind":"cc","params":[],"results":[],"tier":"cc"}},"1":{"interface_hash":"e9bda14553acfcf517bf6309e9e41924d77d3799d31cbb14634b7f9f27c2324e","kind":"r","name":"worker","signature":{"abi":"0.9","kind":"r","params":[],"results":[],"tier":"r"}},"2":{"interface_hash":"019ebf4c53275707d0ac8bea4e35d80715f6a6e15647945dc4247fc8256f3ea6","kind":"data","name":"disk","signature":{"abi":"0.9","kind":"data","size":512,"tier":"-"}}}
+
+section functions
+fn cc @main () () () () ()
+^entry():
+call @worker
+ret
+fn r @worker () () () () ()
+^entry():
+n = const.i64 512
+p = alloc n
+s = const.i64 0
+effect block.read s p
+v = load.i8 p
+z = const.i8 0
+c = icmp.eq v z
+br c ^zero() ^nonzero()
+^zero():
+ret
+^nonzero():
+x = const.i8 1
+ret
+
+section data
+disk ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+section devices
+{"models":{"block":{"version":"0.9"}},"services":{}}
+
+section layout
+{"A_tab":2,"H":11,"S_cells":0,"block_image":"disk","globals":{},"heap_base":1,"heap_limit_max":1024,"interface_regions":{},"null_size":1,"ptr_width":32}

@@ -114,6 +114,94 @@ class Profiles(unittest.TestCase):
 
 
 class Catalog(unittest.TestCase):
+    def global_delivery(self,c,count,Did,mixed=False):
+        formal=next(f for f in c.recipes["lift.ret"]["parameters"] if f["name"]=="Globals")
+        records=[{"id":i,"width":1+i%3 if mixed else 1,"slot":i,"location":e.Bundle(f"loc:{i}",1+i%3 if mixed else 1,"special" if mixed and i%2 else "data")} for i in range(count)]
+        captured=c.bind([formal],[records],{},())[0]["Globals"]
+        env={"Did":Did,"destination":e.Bundle("dest",Did,"data"),"delivery":e.Bundle("delivery",3,"data"),"Globals":captured}
+        def find(nodes):
+            for node in nodes:
+                if node.get("visit")=="Globals":return node
+                if "body" in node:
+                    result=find(node["body"])
+                    if result:return result
+        return find(c.recipes["lift.ret"]["body"]),env
+
+    def test_global_delivery_summary_matches_literal_mixed_groups_and_inverse(self):
+        doc=e.loads(e.jcs(self.t.doc));doc["classes"]["special"]=dict(doc["classes"]["data"])
+        next(g for g in doc["gates"] if g["op"]=="x")["controls"]["min"]=1
+        doc["schemes"]=[{"name":"x-via-hssh","realises":{"op":"x","controls":{"min":0,"max":0}},"ancillae":{"count":2,"class":"special","state":"clean"},"template":[{"gate":g,"wires":["t"]} for g in ["h","s","s","h"]]}]
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),e.Target.read(e.jcs(doc)))
+        node,env=self.global_delivery(c,8,3,True);c.stack.append("lift.ret")
+        try:
+            for controls in [(),(("outside",0,"data"),)]:
+                for inverse in [False,True]:
+                    c.closed_form=False;literal=c.body([node],env,controls,inverse)
+                    c.closed_form=True;self.assertEqual(c.body([node],env,controls,inverse),literal)
+        finally:c.stack.pop()
+
+    def test_global_delivery_groups_are_reused_without_scanning_every_return(self):
+        class BoundedWork(e.Catalog):
+            def body(self,*args,**kw):
+                if self.visits>5000:raise AssertionError("global locations were enumerated at each return")
+                return super().body(*args,**kw)
+        c=BoundedWork((ROOT/"data/ref-0.9.json").read_text(),self.t)
+        node,env=self.global_delivery(c,4096,12);c.stack.append("lift.ret")
+        try:
+            first=c.body([node],env);visits=c.visits
+            for _ in range(50):self.assertEqual(c.body([node],env),first)
+            self.assertLess(c.visits-visits,100)
+            self.assertGreater(first.time,4096)
+        finally:c.stack.pop()
+
+    def test_delivery_profile_cache_preserves_target_control_alias_errors(self):
+        node,env=self.global_delivery(self.c,4,2);self.c.stack.append("lift.ret")
+        try:
+            self.c.body([node],env,(("outside",0,"data"),))
+            with self.assertRaises(e.ContractError):self.c.body([node],env,(("delivery",0,"data"),))
+            with self.assertRaises(e.ContractError):self.c.body([node],env,(("loc:0",0,"data"),))
+        finally:self.c.stack.pop()
+
+    def table_arguments(self,C,T):
+        P=L=1;E=2;Fwidth=4
+        env={n:e.Bundle(n,width,"data") for n,width in [("p",P),("n",L),("base",C*P),("size",C*P),("live",C),("pinned",C),("atop",T),("t",1),("flag",1),("faulted",1),("code",Fwidth)]}
+        prefix=[P,L,E,C,T];wires=["p","n","base","size","live","pinned","atop"]
+        return env,{"scan.inrange":prefix+wires+["t"],"scan.free.flag":prefix+wires+["t"],"lift.free":prefix+[Fwidth]+wires+["flag","faulted","code"]}
+
+    def test_linear_table_summaries_match_every_literal_resource(self):
+        for C in [0,1,3,4]:
+            env,arguments=self.table_arguments(C,max(1,C.bit_length()))
+            for name,args in arguments.items():
+                for controls in [(),(("outer",0,"data"),)]:
+                    self.c.closed_form=False;literal=self.c.recipe(name,args,env,controls)
+                    self.c.closed_form=True;self.assertEqual(self.c.recipe(name,args,env,controls),literal,(C,name,controls))
+
+    def test_million_entry_table_scan_uses_bounded_summary_work(self):
+        class BoundedWork(e.Catalog):
+            def body(self,*args,**kw):
+                if self.visits>30000:raise AssertionError("allocation table was enumerated")
+                return super().body(*args,**kw)
+        env,arguments=self.table_arguments(2**20,21)
+        for name,args in arguments.items():
+            c=BoundedWork((ROOT/"data/ref-0.9.json").read_text(),self.t)
+            p=c.recipe(name,args,env)
+            self.assertGreater(p.time,2**20);self.assertLess(c.visits,30000)
+            self.assertTrue(all(v==0 for v in p.delta.values()))
+
+    def test_table_summary_preserves_packed_fields_schemes_and_alias_guards(self):
+        doc=e.loads(e.jcs(self.t.doc));doc["classes"]["special"]=dict(doc["classes"]["data"])
+        next(g for g in doc["gates"] if g["op"]=="x")["controls"]["min"]=1
+        next(g for g in doc["gates"] if g["op"]=="cx")["cost"]["time"]={"var":"c"}
+        doc["schemes"]=[{"name":"x-via-hssh","realises":{"op":"x","controls":{"min":0,"max":0}},"ancillae":{"count":2,"class":"special","state":"clean"},"template":[{"gate":g,"wires":["t"]} for g in ["h","s","s","h"]]}]
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),e.Target.read(e.jcs(doc)))
+        env,arguments=self.table_arguments(3,2)
+        for offset,name in enumerate(["base","size","live","pinned"]):env[name]=e.RecordField("table",3,"data",offset,element_width=1,record_width=4)
+        for name,args in arguments.items():
+            for controls in [(),(("table",3,"data"),)]:
+                for inverse in [False,True]:
+                    c.closed_form=False;literal=c.recipe(name,args,env,controls,inverse)
+                    c.closed_form=True;self.assertEqual(c.recipe(name,args,env,controls,inverse),literal,(name,controls,inverse))
+
     def test_image_inverse_reverses_bits_with_empty_effective_controls(self):
         events=[];original=e.Catalog
         class Recording(original):
@@ -260,6 +348,17 @@ class Catalog(unittest.TestCase):
             self.assertGreater(p.time,C*N);self.assertLess(c.visits,500)
             self.assertTrue(all(v==0 for v in p.delta.values()))
 
+    def test_address_popcounts_skip_unused_high_address_bits(self):
+        def bounded_range(*args):
+            result=range(*args)
+            if len(result)>1000:raise AssertionError("unused address bits were enumerated")
+            return result
+        for width in [100000,2**40]:
+            env={n:e.Bundle(n,size,"data") for n,size in [("address",width),("stack",2),("v",1)]}
+            with patch.object(e,"range",bounded_range,create=True):
+                p=self.c.recipe("stack.copy",[width,2,1,1,"address","stack","v"],env)
+            self.assertGreater(p.time,width)
+
     def test_dispatch_literal_schemes_preserve_workspace_area(self):
         doc=e.loads(e.jcs(self.t.doc))
         doc["classes"]["special"]=dict(doc["classes"]["data"])
@@ -281,6 +380,21 @@ class Catalog(unittest.TestCase):
 
 
 class Objects(unittest.TestCase):
+    def test_lifted_free_million_entry_source_object_uses_table_summaries(self):
+        obj=e.Object.read((ROOT/"examples/lifted-free-2pow20.bisa").read_text())
+        t=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+        original=e.Catalog
+        class BoundedWork(original):
+            def body(self,*args,**kw):
+                if self.visits>200000:raise AssertionError("source allocation table was enumerated")
+                return super().body(*args,**kw)
+        with patch.object(e,"Catalog",BoundedWork):result=e.estimate(obj,t,"root",[],["1","0","0","0"])
+        self.assertEqual(result["label"],"exact")
+        self.assertEqual(result["padded_steps"],{"forward":"1","inverse":"1"})
+        self.assertGreater(int(result["resources"]["peak_qubits[data]"]),2**20*66)
+        self.assertGreater(int(result["resources"]["gate_count"]),2**20)
+        self.assertLess(result["summary_operations"],200000)
+
     def test_literal_allocator_length_uses_the_existing_length_binding_gap(self):
         obj=e.Object.read((ROOT/"tests/fixtures/literal-alloc-source-gap.bisa").read_text())
         t=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
@@ -546,6 +660,21 @@ class Certificates(unittest.TestCase):
         claim["domain"]["bundles"].append(dict(component))
         with self.assertRaises(e.ContractError):e.Certificate.read(e.jcs(doc))
 
+    def test_certificate_claim_payloads_are_typed_without_replay(self):
+        changes=[lambda c:c.update(metric="diamond"),lambda c:c.update(precision_bits=0),lambda c:c.update(bound="1/3"),lambda c:c.update(subject={**c["subject"],"variant":""})]
+        for change in changes:
+            doc=self.certificate_document();region=doc["regions"][doc["bindings"]["closure_hash"]];change(region["claims"][1])
+            with self.assertRaises(e.ContractError):e.Certificate.read(e.jcs(doc))
+        doc=self.certificate_document();region=doc["regions"][doc["bindings"]["closure_hash"]];claim=region["claims"][1]
+        claim.update(kind="channel",metric="diamond",dual=[{"Y":[["1","1","0","0"]],"mu":"1"}],bound="1")
+        e.Certificate.read(e.jcs(doc))
+        claim["dual"][0]["Y"][0]=["2","1","0","0"]
+        with self.assertRaises(e.ContractError):e.Certificate.read(e.jcs(doc))
+        for controls,width in [(3,1),(1,2)]:
+            doc=self.certificate_document();claim=doc["regions"][doc["bindings"]["closure_hash"]]["claims"][0]
+            claim["subject"]["inherited_controls"]=controls;claim["domain"]["bundles"][0]["width"]=width
+            with self.assertRaises(e.ContractError):e.Certificate.read(e.jcs(doc))
+
     def test_published_reader_and_frame_negatives(self):
         text = (ROOT.parent / "bennett-isa-spec/conformance/fixtures/controlled-action-09/certificate.json").read_text()
         cert = e.Certificate.read(text)
@@ -564,6 +693,24 @@ class Certificates(unittest.TestCase):
 
 
 class CommandLine(unittest.TestCase):
+    def test_vm_and_reader_admit_published_dynamic_register_width_form(self):
+        vm=Path(os.environ.get("BENNETT_VM_BIN",ROOT.parent/"bennett-vm/target/debug/bennett-vm"))
+        path=ROOT/"tests/fixtures/dynamic-qreg-width.bisa"
+        admitted=json.loads(subprocess.run([str(vm),"check",str(path)],capture_output=True,text=True,timeout=30,check=True).stdout)
+        self.assertEqual(admitted["object_hash"],e.Object.read(path.read_text()).hash)
+        self.assertEqual(admitted["status"],"ok")
+
+    def test_vm_admits_large_table_fixture_and_reports_the_padded_boundary(self):
+        vm=Path(os.environ.get("BENNETT_VM_BIN",ROOT.parent/"bennett-vm/target/debug/bennett-vm"))
+        path=ROOT/"examples/lifted-free-2pow20.bisa";obj=e.Object.read(path.read_text())
+        checked=json.loads(subprocess.run([str(vm),"check",str(path)],capture_output=True,text=True,timeout=30,check=True).stdout)
+        self.assertEqual(checked["object_hash"],obj.hash)
+        actual=json.loads(subprocess.run([str(vm),"run-oracle",str(path),"root","--input","0,1","--budget","1,0,0,0"],capture_output=True,text=True,timeout=30,check=True).stdout)
+        self.assertEqual(actual,{"payload":0,"code":7,"steps":1})
+        target=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+        predicted=e.estimate(obj,target,"root",[],["1","0","0","0"])
+        self.assertEqual(int(predicted["padded_steps"]["forward"]),actual["steps"])
+
     def test_vm_admits_lifted_call_and_source_step_boundary(self):
         vm=Path(os.environ.get("BENNETT_VM_BIN",ROOT.parent/"bennett-vm/target/debug/bennett-vm"))
         path=ROOT/"examples/lifted-call.bisa";obj=e.Object.read(path.read_text())
@@ -654,6 +801,11 @@ class CommandLine(unittest.TestCase):
         self.assertEqual([r["steps"] for r in report["rung3"]["rows"]],[6,11,21,41,1281])
         self.assertEqual([(r["region"],r["status"],r["steps"]) for r in report["rung3"]["fault_rows"]],[("divzero","FAILED",3),("memfault","FAILED",3),("unknown_effect","FAILED",3)])
         self.assertEqual([(r["region"],r["status"],r["steps"]) for r in report["rung3"]["history_rows"]],[("nested","COMPLETED",11),("impure","FAILED",8)])
+        native=report["native_action"]
+        self.assertEqual((native["vm_native_gate_count"],native["estimate_native_gate_count"]),("8","8"))
+        self.assertEqual((native["vm_program_time"],native["vm_classical_steps"],native["vm_nonclassical_time"],native["estimate_action_time"]),("25",7,"18","18"))
+        self.assertEqual((native["estimate_action_occupancy"],native["vm_program_occupancy"],native["space_relation"]),("72","84","action <= program"))
+        self.assertEqual([(r["status"],r["steps"],r["resources"]["time"],r["resources"]["qubit_second[data]"]) for r in report["native_programs"]],[("COMPLETED",7,"25","84"),("COMPLETED",7,"9","20"),("FAILED",5,"5","6"),("COMPLETED",12,"12","0"),("COMPLETED",11,"15","26")])
         self.assertIn(report["rung2"]["status"],["unavailable","objects_available"])
 
 

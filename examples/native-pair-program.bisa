@@ -1,0 +1,25 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"68769ee85d2240a8653e52f4b32baa611602f78b0957000a970bf57827d79474","kind":"cc","name":"main","signature":{"abi":"0.9","kind":"cc","params":[],"results":[],"tier":"cc"}},"1":{"interface_hash":"8f1fcfc23df65daa7991656a86a2ea6a62bf835f626f5ecc2bfa4ee7ec52cbf5","kind":"perm_action","name":"pair","signature":{"abi":"0.9","args":[],"bounds":[],"in":[2],"kind":"perm_action","mem":[],"mut":[2],"tier":"q"}},"2":{"interface_hash":"f321439c82c2aa2a6141f27b0adf7811cfd95db0ac2b6c4fdc146ae87e823015","kind":"perm_action","name":"kernel","signature":{"abi":"0.9","args":[],"bounds":[],"in":[2],"kind":"perm_action","mem":[],"mut":[2],"tier":"q"}}}
+
+section functions
+fn cc @main () () () () ()
+^entry():
+n = const.i64 2
+t = qreg.new data 2
+x = qreg.new data 2
+action_call @pair (t) (x) () ()
+qreg.free x
+qreg.free t
+ret
+perm_action @pair (t:wire[2]) (x:wire[2] in) () () ()
+^entry():
+action_call @kernel (t) (x) () ()
+adj action_call @kernel (t) (x) () ()
+perm_action @kernel (t:wire[2]) (x:wire[2] in) () () ()
+^entry():
+x t[0]
+cx x[0] t[1]
+ccx x[0] x[1] t[0]
+swap t[0] t[1]

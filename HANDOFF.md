@@ -15,26 +15,64 @@ Classical integer/control/memory/call/fault paths, cancellation-aware uncall,
 fresh minted tokens and clock effects are implemented.
 
 Default summaries cover huge repetitions, padded budgets, address dispatch,
-low-N/stride-K stack copy/store/exchange, signed literal words and byte images.
+low-N/stride-K stack copy/store/exchange, allocation-table inrange/free scans,
+signed literal words and byte images.
 A 2^20-cell stack takes fewer than 500 constructor visits. Small controlled
 cases match literal profiles, including scheme workspace area and peak.
 Unsafe wire/control aliases retain literal traversal. No gate list or state
-vector is stored. Plain source loops also summarise finite binding transitions, preserving changed
-widths/classes between visits and entry bindings at zero visits. Earlier source
-rows retain their original lifetimes; source-adjoint/raw-inverse tests check
-iteration addresses and reversed lifetime widths. This is cost composition of
+vector is stored. Plain source loops also summarise finite binding transitions, preserving legal class changes and zero-visit entry bindings. Entry/exit
+live names and types must agree (§4.6); changing a carried width rejects.
+Consumed local names may change width within a visit. Qif captures arm/outer
+lifetimes; while bindings preserve the prescribed flag order, with exact
+closed-form prefix/cycle/suffix costs and bounded work at 2^40 visits. Tests
+include class changes, raw/source reversal, scheme workspace and accuracy. Source-adjoint
+loops have new forward indices; raw inverse retains forward coordinates. This is cost composition of
 the original construction, without structure recovery. Explicit schedules and frame requests inspect dynamic leaves
 and retain allocation endpoints, so their work can grow with the budget.
 
+CC/R register accounting now covers new/free, aliases, width/id/from_id,
+slice consumption, concat wire order, dynamic widths (including zero), capacity
+fault prefixes, classical-call transfers and register-only uncall snapshots.
+Ids remain opaque and never reused after reversal; supported equality/zero
+checks and whole64-bit memory round trips retain identity. Joint source-call
+entry versions and sufficient source identity proofs establish cleanliness for
+supported frees. Unproved cleanliness and quantum-gated segment uncall remain
+explicit implementation work. No basis state or gate list is materialised.
+
+The reader enforces register result/operand arity, the lexical view rule across
+CFG paths, device declarations, data-symbol completeness and whole512-byte
+block images. Control views consume at wrapped calls. Local source releases
+must match owned clean or borrowed allocations. This is partial admission,
+not a complete source-version or proof checker. Deterministic block effects,
+absent-sector zeros, block-image initialization and segment-uncall restoration
+are implemented. Zero-length entropy does not need a tape; positive entropy
+and host replies remain unresolved classical path inputs.
+
+K55 admission now checks known Q domains before any target realization;
+nested action paths and covering entries are respected. Token-forwarded nested
+oracle domains retain their concrete-time checks, including the B2/B3 boundary.
+No target costs or gate list are created in the admission traversal.
+
+Immutable captured records now reuse integer/wire field validation only for
+matching receiving schemas and outer shape bindings. Source globals and
+per-instance locations validate once. Return delivery groups locations by
+width/class and id-popcount, with target/control-alias safeguards and complete
+small literal/inverse/scheme resource agreement. A32-procedure source test
+bounds field validation linearly; repeated4096-global dispatch costs are cached.
+Analytic predicate-depth admission now agrees with replay.
+
 Schedule accounting includes per-kind specificity/ties, exact share defaults,
 native/scheme selection, class/capacity fallback, starts/dependencies, parallel
-limits, topology and endpoint occupancy/peak. Root B5 frames and K12 resource
+limits, topology and endpoint occupancy/peak. Nested certificate payloads now validate exact invocation/claim/domain/table,
+sampler/structural/interval shapes, verification indices/fault counts, cleanup
+choices and error/composition decimals/keys. Positional labels and unbounded
+width/count inputs remain legal; requested labels are not verdicts. Root B5 frames and K12 resource
 certificate bindings/rows are rebuilt independently. Certificate output enriches
 supplied, identically bound proof metadata; it does not verify or invent
 correctness/error claims or nested composition.
 
-Verified: headless scripts/pre-push --working-tree exited 0 with 123 Python
-tests across four disjoint cargo groups, 48.99 seconds for tests, plus Rust
+Verified: headless scripts/pre-push --working-tree exited 0 with 164 Python
+tests across four disjoint cargo groups, 56.04 seconds for tests, plus Rust
 fmt, strict Clippy and shell syntax. Internal test timeout remains 180 seconds.
 The expensive recursive activation witness runs in the selector batch to keep
 four workers occupied; the partition test proves every discovered case runs
@@ -48,8 +86,15 @@ steps/time 6/11/21/41/1281; three fault prefixes match 3; nested/impure uncall
 match 11/8. Rung-2 has no ISA object/count yet. VM also admits the allocator,
 lifted-call, local-jump and nested-token-forwarding examples. Oracle output
 exposes padded forward/inverse steps; source counts are compared as bounds,
-with equality at the lifted-call B=4 boundary. No VM quantum gate-count or
-structure-recovery evidence is claimed.
+with equality at the lifted-call B=4 boundary. The owned native-pair-program
+fixture completes in the VM with 7 classical steps, 8 native gates and total
+time 25. Its pair action estimate matches all 8 gates and action time 18
+exactly (25 minus the seven unit classical steps). Action occupancy 72 is a
+lower bound on complete-program occupancy 84; the scopes differ. This does
+not claim a complete CC quantum-program estimator or structure recovery.
+The VM admits the published dynamic-register-width fixture but execution
+reports an invalid-digit error; the implementation fix is queued for the
+orchestrator. The differential uses the separately legal literal-width form.
 
 SPEC_VERSIONS.toml pins e424d678fa553be5847bf1b53f83703462318b57 and spec SHA
 021d5df978f293c36174b73de9facc0884f7502a4bc5c0ab7a621b0ca7071c25.
@@ -70,9 +115,8 @@ and VM-admitted witnesses are in docs/CONTRACT_GAPS.md and the orchestrator queu
 continue while these decisions are pending.
 
 Open work: bph/.1/.2/.3; bph.4/.5/.6/.7 track contract decisions. Complete
-source admission/type and remaining register/effect paths, large table/global
-delivery summaries, K55 staging, K81 release-ended/independent-call cleanup
-partition and window proofs, conditional-loop/branch binding transitions, borrow-owner accounting and
+source admission/type and remaining register/effect paths, remaining loop/record scaling, CC/R K55 propagation, K81 release-ended/independent-call cleanup
+partition and window proofs, borrow-owner accounting and
 nested certificate/error composition remain. Prioritized design-review issues
 bst/4mr/3p2/w8f/xng are closed; determining published clauses and regressions
 are in docs/REVIEW_FINDINGS.md.
@@ -85,4 +129,11 @@ The available legacy mini is diagnostic. The prescribed tiny superconducting
 target cannot fit the full 2^28-wire interface; a queued consumer change proposes
 the published unbounded ideal target for the full forecast and finite-target
 infeasibility as a separate diagnostic, without reducing the problem.
+The VM-admitted lifted-free-2pow20 example checks a complete million-entry
+source scan: code7/payload0/steps1 at input0,1 and budget1,0,0,0. Its exact
+reference forecast under ideal-all-to-all is 23,657,972,470 gates, time
+42,668,655,910, peak70,254,784 and occupancy2,982,820,003,149,130,692, using
+2,940 summary visits. This is a scaling diagnostic, without a VM native-count
+or full SQLite/Grover claim.
+
 I2 b-isa-spec-r51 and absent artifacts do not remove any Grover/SQLite scope.

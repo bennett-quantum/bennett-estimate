@@ -1,0 +1,19 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"3d87188920e3e7ececf7d7c1d9e7a228cac5d6f8f07506157ed8be208e54a66a","kind":"cc","name":"main","signature":{"abi":"0.9","kind":"cc","params":[],"results":[],"tier":"cc"}},"1":{"interface_hash":"14f64c9a229d1622657dc6867f22678ab71e7669250effe6dd27fe5a76286a07","kind":"perm_action","name":"identity","signature":{"abi":"0.9","args":[],"bounds":[],"in":[],"kind":"perm_action","mem":[],"mut":[1],"tier":"q"}}}
+
+section functions
+fn cc @main () () () () ()
+^entry():
+a = qreg.new data 2
+b = qreg.new data 1
+q = qreg.concat a b
+s = qreg.slice q 1 1
+action_call @identity (s) () () ()
+qreg.free q
+ret
+perm_action @identity (x:wire) () () () ()
+^entry():
+x x
+x x

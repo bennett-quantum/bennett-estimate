@@ -64,6 +64,12 @@ Tests cover 2^20 physical cells with bounded summary work and compare small
 controlled cases against literal expansion. Scheme workspace remains included;
 wire aliases that defeat index renaming use literal traversal.
 
+Four complete CC program differentials agree with the VM on all resource
+rows, source steps and terminal status: a paired action, slice/concat register
+views, a stale-alias fault and a block-image effect. CC/R register accounting includes dynamic widths,
+aliases, opaque IDs, slices/concat and register-only history reversal. Remaining
+measurement, generic cleanliness and quantum segment-reversal paths stay required.
+
 Current source coverage includes structured gates, allocation/borrowing,
 copy/XOR/exchange, predication, loops, local-region images and linear coherent
 memory, controlled action/oracle calls and qinplace, plus padded arithmetic/control
@@ -90,6 +96,13 @@ orchestrator to file in the spec tracker; it has not been adopted here.
 eight-bit cells using fewer than 1000 constructor visits. This verifies scaling
 of the reference cost calculation; the full rung-4 Grover estimate is pending.
 
+Allocation-table scans also use exact address-popcount summaries. The
+VM-admitted lifted-free-2pow20 example estimates a complete 2^20-entry table
+in 2940 constructor visits. Under ideal-all-to-all with budget 1,0,0,0 its
+reference construction costs 23,657,972,470 gates and peaks at 70,254,784
+qubits. The VM checks one logical faulting step; it supplies no native gate
+count for this fixture.
+
 `--include-frame` reconstructs a B5 descriptor with distinct allocation
 lifetimes and nested invocation records. Concrete schedule/frame reconstruction
 visits dynamic leaves and retains allocation endpoints, never a gate list;
@@ -109,6 +122,12 @@ Producer-chosen non-slot identities may be renamed; altered widths, classes,
 states or omitted lifetimes reject. Schema parsing and resource agreement do
 **not** verify correctness/error claims, nested certificate composition or
 shared-storage permissions.
+
+The certificate reader validates nested invocation and claim payloads, domain
+ranges, table tuple encodings, sampler words, error decimals and composition
+keys. Positional control/borrow labels remain annotations, and legal large
+widths or sample counts have no host-size cap. A requested claim label is
+preserved without assigning a verification verdict.
 
 `--certificate-template existing.json --write-certificate output.json` adds
 K12 exact resources, native gate counts and the reconstructed root frame to

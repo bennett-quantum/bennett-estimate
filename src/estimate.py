@@ -14,6 +14,7 @@ from decimal import Decimal
 from fractions import Fraction as F
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 
 if hasattr(sys,"set_int_max_str_digits"):
     sys.set_int_max_str_digits(0)
@@ -567,6 +568,52 @@ class Bundle:
         return Bundle(self.identity,end-start,self.cls,self.offset+start,self.state)
 
 
+class WireVersions:
+    """Immutable interval values for source versions, without wire arrays."""
+    def __init__(self):self.ranges={}
+
+    def acquire(self,b):
+        require(b.width>0 and b.identity not in self.ranges,"version lifetime is already live or empty")
+        self.ranges[b.identity]=((b.offset,b.offset+b.width,0,True),)
+
+    def capture(self,parts):
+        requests={}
+        for b in parts:
+            if b.width:requests.setdefault(b.identity,[]).append((b.offset,b.offset+b.width))
+        result=[]
+        for identity,intervals in sorted(requests.items()):
+            merged=[]
+            for lo,hi in sorted(intervals):
+                if merged and lo<=merged[-1][1]:merged[-1]=(merged[-1][0],max(hi,merged[-1][1]))
+                else:merged.append((lo,hi))
+            for lo,hi in merged:
+                covered=0
+                for begin,end,version,clean in self.ranges.get(identity,()):
+                    a,b=max(lo,begin),min(hi,end)
+                    if a<b:result.append((identity,a,b,version,clean));covered+=b-a
+                require(covered==hi-lo,"source version references an inactive wire range")
+        return tuple(result)
+
+    def restore(self,snapshot):
+        for identity,lo,hi,version,clean in snapshot:
+            parts=[];covered=0
+            for begin,end,old_version,old_clean in self.ranges.get(identity,()):
+                a,b=max(lo,begin),min(hi,end)
+                if a>=b:parts.append((begin,end,old_version,old_clean));continue
+                if begin<a:parts.append((begin,a,old_version,old_clean))
+                parts.append((a,b,version,clean));covered+=b-a
+                if b<end:parts.append((b,end,old_version,old_clean))
+            require(covered==hi-lo,"restored version references an inactive wire range")
+            merged=[]
+            for part in parts:
+                if merged and merged[-1][1]==part[0] and merged[-1][2:]==part[2:]:merged[-1]=(merged[-1][0],part[1],*part[2:])
+                else:merged.append(part)
+            self.ranges[identity]=tuple(merged)
+
+    def assign(self,parts,version,clean=None):
+        self.restore((identity,lo,hi,version,old_clean if clean is None else clean) for identity,lo,hi,old_version,old_clean in self.capture(parts))
+
+
 @dataclass(frozen=True)
 class RecordField(Bundle):
     """Logical field array over packed records; owns no additional wires."""
@@ -597,6 +644,19 @@ class Captured:
     cleanup: bool = False
     recompute: object = None
     builder: object = None
+    loop_plan: object = None
+
+
+@dataclass(frozen=True)
+class CapturedRecords:
+    schema: str
+    shape: tuple
+    records: tuple
+    summaries: dict = field(default_factory=dict,compare=False)
+
+    def __iter__(self):return iter(self.records)
+    def __len__(self):return len(self.records)
+    def __getitem__(self,index):return self.records[index]
 
 
 @lru_cache(maxsize=2)
@@ -634,7 +694,7 @@ def wire_index(text):
 
 def wire(x, env):
     if isinstance(x, Bundle): return [x]
-    if isinstance(x, list): return [w for part in x for w in wire(part, env)]
+    if isinstance(x, (list,tuple)): return [w for part in x for w in wire(part, env)]
     if isinstance(x, dict):
         if set(x) == {"range", "from", "to"}:
             bundle = wire(x["range"], env)
@@ -701,6 +761,7 @@ class Catalog:
         self.used_allocations=set()
         self.inverse_declarations=set()
         self.named_interfaces={}
+        self.record_schemas={}
         self.default_class=next(iter(sorted(target.doc["classes"],key=lambda name:name.encode("utf-16-be"))))
 
     def bind(self, formals, actuals, caller, controls):
@@ -731,7 +792,14 @@ class Catalog:
                 types={n:("integer" if isinstance(f,str) else f["type"]) for n,f in zip(names,fields)}
                 require(len(set(names))==len(names) and len(set(order))==len(order) and all(types.get(n)=="integer" for n in order),"K25: invalid record field/order names")
                 require(all(t in ["integer","wire","region","class","allocation","image"] for t in types.values()),"K25: invalid record field type")
+                reusable=all(t in ["integer","wire"] for t in types.values())
+                schema,dependencies=self.record_schema(formal) if reusable else (None,())
+                captured_shape=tuple((n,scalar(n,env)) for n in dependencies)
                 records=caller[actual] if isinstance(actual,str) else actual
+                if isinstance(records,CapturedRecords):
+                    if reusable and (records.schema,records.shape)==(schema,captured_shape):
+                        env[name]=records;continue
+                    records=[dict(record) for record in records]
                 require(isinstance(records,list),"K25: records actual must be array")
                 value=[];previous=None
                 for record in records:
@@ -750,6 +818,8 @@ class Catalog:
                     key=tuple(resolved[n] for n in order)
                     require(not order or previous is None or previous<key,"K25: record order must be strictly increasing")
                     previous=key;value.append(resolved)
+                if reusable:
+                    value=CapturedRecords(schema,captured_shape,tuple(MappingProxyType({n:tuple(v) if types[n]=="wire" else v for n,v in record.items()}) for record in value))
             elif kind in ["angle", "image", "symbol", "class", "event", "allocation", "value", "arguments", "region"]:
                 value = caller.get(actual, actual) if isinstance(actual, str) else actual
                 if kind == "allocation": require(isinstance(value, Bundle), "K27: invalid allocation handle")
@@ -765,6 +835,24 @@ class Catalog:
             else: raise ContractError(f"unknown formal type {kind}")
             env[name] = value
         return env, controls
+
+    def record_schema(self,formal):
+        schema=jcs({k:v for k,v in formal.items() if k!="name"})
+        if schema not in self.record_schemas:
+            variables=set();integers=set()
+            def collect(expr):
+                if isinstance(expr,str):
+                    if expr not in integers:variables.add(expr)
+                elif isinstance(expr,list):
+                    for item in expr[1:]:collect(item)
+            for field in formal["fields"]:
+                if isinstance(field,str):integers.add(field)
+                elif field["type"]=="integer":integers.add(field["name"])
+                else:
+                    for key in ["width","address","cell"]:
+                        if key in field:collect(field[key])
+            self.record_schemas[schema]=tuple(sorted(variables))
+        return schema,self.record_schemas[schema]
 
     def named_interface(self,name):
         """K82 free wire names, ordered by lexical use (not caller contents)."""
@@ -839,7 +927,7 @@ class Catalog:
         stack=name.startswith("stack.")
         A,C,W=(env["S"],env["C"],env["N"]) if stack else (env["A"],env["C"],env["W"])
         stride=env["K"] if stack else W
-        require(0<=C<=1<<A and (0<=W<=stride if stack else W>0),"invalid address dispatch shape")
+        require(C>=0 and (C==0 or (C-1).bit_length()<=A) and (0<=W<=stride if stack else W>0),"invalid address dispatch shape")
         cells=wire(env["stack" if stack else "cells"],env)
         value=wire(env["v"],env)
         if len(cells)!=1 or len(value)!=1 or isinstance(cells[0],RecordField) or isinstance(value[0],RecordField):return None
@@ -866,11 +954,80 @@ class Catalog:
             data=self.body([{"gate":leaf,"wires":ws}],env,joined).repeat(W)
         base=space_profile(counter.cls,"clean",A).then(space_profile(eq.cls,"clean",1)).then(compare).then(data).then(uncompare).then(space_profile(eq.cls,"clean",-1)).then(space_profile(counter.cls,"clean",-A))
         p=base.repeat(C)
-        ones=sum((C>>(b+1))*(1<<b)+max(0,C% (1<<(b+1))-(1<<b)) for b in range(A))
+        ones=sum((C>>(b+1))*(1<<b)+max(0,C% (1<<(b+1))-(1<<b)) for b in range(min(A,C.bit_length())))
         if ones:
             literal=space_profile(counter.cls,"clean",A).then(self.gate_event("x",[counter.bit(0)],controls,own=0)).then(space_profile(counter.cls,"clean",-A))
             p=p.then(literal.repeat(2*ones))
         return p
+
+    def table_entry_summary(self,node,env,controls,inverse):
+        """Exact affine cost in the address literal's binary digit count.
+
+        These pinned scan bodies use entry only as a homogeneous field index
+        or as value.literal(T,entry). All entry-local storage is balanced;
+        no allocation width, gate parameter or control class depends on entry.
+        Repeated literal Xs add duration/count/area while reusing workspace.
+        """
+        if not self.stack or self.stack[-1] not in ["scan.inrange","scan.free.flag","lift.free"]:return None
+        if node["for"]!="entry" or node["from"]!=0 or node["to"]!="C":return None
+        moving=[part for name in ["base","size","live","pinned"] for part in wire(env[name],env)]
+        if any(len(wire(env[name],env))!=1 for name in ["base","size","live","pinned"]):return None
+        if any(identity==part.identity for identity,_,_ in controls for part in moving):return None
+        C=integer(env["C"],0)
+        if not C:return Profile()
+        zero=self.body(node["body"],dict(env,entry=0),controls,inverse)
+        if C==1:return zero
+        one=self.body(node["body"],dict(env,entry=1),controls,inverse)
+        ones=sum((C>>(bit+1))*(1<<bit)+max(0,C%(1<<(bit+1))-(1<<bit)) for bit in range(min(integer(env["T"],0),C.bit_length())))
+        return self.literal_population(zero,one,C,ones)
+
+    @staticmethod
+    def literal_population(zero,one,C,ones):
+        require(all(v==0 for p in [zero,one] for v in p.delta.values()),"literal population summary needs balanced storage")
+        if not ones:return zero.repeat(C)
+        def total(a,b):return a*C+(b-a)*ones
+        def maps(a,b):return {key:total(a.get(key,0),b.get(key,0)) for key in a.keys()|b.keys()}
+        return Profile(time=total(zero.time,one.time),counts=maps(zero.counts,one.counts),
+                       delta=maps(zero.delta,one.delta),peak={key:max(zero.peak.get(key,0),one.peak.get(key,0)) for key in zero.peak.keys()|one.peak.keys()},
+                       area=maps(zero.area,one.area),gates=maps(zero.gates,one.gates),error=total(zero.error,one.error),
+                       inexact_operations=total(zero.inexact_operations,one.inexact_operations))
+
+    def global_delivery_summary(self,node,env,controls,inverse):
+        if not self.stack or self.stack[-1]!="lift.ret" or node["visit"]!="Globals":return None
+        records=env["Globals"]
+        if not isinstance(records,CapturedRecords):return None
+        Did=integer(env["Did"],0)
+        group_key=("delivery-groups",Did)
+        if group_key not in records.summaries:
+            groups={};identities=set()
+            for record in records:
+                parts=wire(record["location"],env)
+                if len(parts)!=1 or isinstance(parts[0],RecordField):return None
+                location=parts[0];identities.add(location.identity)
+                key=(record["width"],location.cls)
+                group=groups.setdefault(key,[record,0,0]);group[1]+=1
+                value=integer(record["id"],0)
+                if value.bit_length()>Did:value&=(1<<Did)-1
+                group[2]+=value.bit_count()
+            records.summaries[group_key]=(tuple(tuple(group) for group in groups.values()),frozenset(identities))
+        groups,identities=records.summaries[group_key]
+        delivery=wire(env["delivery"],env);destination=wire(env["destination"],env)
+        if len(delivery)!=1 or len(destination)!=1 or isinstance(delivery[0],RecordField) or isinstance(destination[0],RecordField):return None
+        delivery,destination=delivery[0],destination[0]
+        if delivery.identity in identities or any(identity in identities for identity,_,_ in controls):return None
+        if any(record["width"]>delivery.width for record,count,ones in groups):return None
+        used_width=max((record["width"] for record,count,ones in groups),default=0)
+        if any(identity==delivery.identity and delivery.offset<=index<delivery.offset+used_width for identity,index,_ in controls):return None
+        control_shape=tuple((cls,index-destination.offset if identity==destination.identity else None) for identity,index,cls in controls)
+        profile_key=("delivery-profile",Did,self.target.hash,self.default_class,self.eps,self.count_only,self.require_exact,inverse,delivery.width,delivery.cls,destination.cls,control_shape)
+        if profile_key not in records.summaries:
+            out=Profile()
+            for record,count,ones in groups:
+                zero=self.body(node["body"],dict(env,**{**record,"id":0}),controls,inverse)
+                one=self.body(node["body"],dict(env,**{**record,"id":1}),controls,inverse) if ones else zero
+                out=out.then(self.literal_population(zero,one,count,ones))
+            records.summaries[profile_key]=out
+        return records.summaries[profile_key]
 
     @staticmethod
     def invariant(nodes, variable):
@@ -1006,6 +1163,8 @@ class Catalog:
             try:return self.ledger.gate(op,operands,controls,params=params,**self.leaf_address())
             finally:self.ledger.require_exact=required
         actual=bits(operands)
+        depth=self.target.doc["capabilities"]["max_predicate_depth"]
+        require(depth=="unbounded" or len({(identity,index) for identity,index,_ in controls})<=depth,"E_SCHEDULE_INFEASIBLE: max_predicate_depth exceeded")
         k={"cx":1,"ccx":2,"mcx":len(actual)-1}.get(op,0) if own is None else own
         effective=tuple(dict.fromkeys(actual[:k]+controls))
         classes=[w[2] for w in effective+actual[k:]]
@@ -1076,8 +1235,10 @@ class Catalog:
                 keys(node, ["for", "from", "to", "body"], context="loop")
                 lo, hi = scalar(node["from"], env), scalar(node["to"], env)
                 require(hi >= lo, "K19: reversed loop bounds")
-                if lo == hi: p = Profile()
-                elif self.ledger is None and self.closed_form and self.invariant(node["body"], node["for"]) and self.safe_index_fold(node["body"],node["for"],lo,hi,env,controls) and not self.target.doc.get("topology") and all(not isinstance(v,list) or not v or not isinstance(v[0],Bundle) or len({b.cls for b in v}) == 1 for v in env.values()):
+                summary=self.table_entry_summary(node,env,controls,inverse) if self.ledger is None and self.closed_form and not self.target.doc.get("topology") else None
+                if summary is not None:p=summary
+                elif lo == hi: p = Profile()
+                elif self.ledger is None and self.closed_form and self.invariant(node["body"], node["for"]) and self.safe_index_fold(node["body"],node["for"],lo,hi,env,controls) and not self.target.doc.get("topology") and all(not isinstance(v,(list,tuple)) or not v or not isinstance(v[0],Bundle) or len({b.cls for b in v}) == 1 for v in env.values()):
                     bound = dict(env, **{node["for"]: lo})
                     p = self.body(node["body"], bound, controls, inverse).repeat(hi-lo)
                 else:
@@ -1153,10 +1314,12 @@ class Catalog:
                 require(all(v == 0 for v in p.delta.values()), "K27: live declaration at scope exit")
             elif "visit" in node:
                 keys(node, ["visit", "body"], context="visit")
-                p = Profile()
-                records = env[node["visit"]]
-                for record in reversed(records) if inverse else records:
-                    p = p.then(self.body(node["body"], dict(env, **record), controls, inverse))
+                p=self.global_delivery_summary(node,env,controls,inverse) if self.ledger is None and self.closed_form and not self.target.doc.get("topology") else None
+                if p is None:
+                    p = Profile()
+                    records = env[node["visit"]]
+                    for record in reversed(records) if inverse else records:
+                        p = p.then(self.body(node["body"], dict(env, **record), controls, inverse))
             elif "apply" in node:
                 keys(node, ["apply", "index", "args"], context="apply")
                 templates = env[node["apply"]]
@@ -1305,6 +1468,12 @@ def parse_function(lines):
     region_calls={"oracle_call","action_call","adj","ctl"}
     for inst in root:
         op=inst.op
+        if op.startswith("qreg."):
+            expected={"new":2,"free":1,"slice":3,"concat":2,"width":1,"id":1,"from_id":1}[op[5:]]
+            require(len(inst.lhs)==(0 if op=="qreg.free" else 1),"§4.8: register result arity mismatch")
+            require(len(inst.args)==expected,"§3.3: register operand arity mismatch")
+            literal=inst.args[-1] if op in ["qreg.new","qreg.slice"] else None
+            if literal is not None and re.fullmatch(r"-?[0-9]+",literal):integer(literal,1)
         if kind in ["oracle","lproc"]:
             require(op.startswith("lift.") or op in ["qjump","qbranch","qjumpr","fault"],"§4.8: instruction outside lifted tier")
             require(not (op=="lift.ret" and kind=="oracle" or op=="lift.retval" and kind=="lproc"),"§4.2: wrong lifted return kind")
@@ -1443,10 +1612,27 @@ class Object:
                 require(symbol["name"] in out.sections.get("data",{}) and integer(sig["size"],0)*2==len(out.sections["data"][symbol["name"]]),"data signature size mismatch")
         if "layout" in out.sections:
             keys(out.sections["layout"], ["ptr_width","H","A_tab","S_cells","null_size","heap_base","heap_limit_max","globals","interface_regions"], ["block_image"], "layout")
-        if "devices" in out.sections: keys(out.sections["devices"], ["models","services"], context="devices")
+            if "block_image" in out.sections["layout"]:
+                image=out.sections.get("data",{}).get(out.sections["layout"]["block_image"])
+                require(image is not None and len(image)%1024==0,"K10: block image must name data containing whole 512-byte sectors")
+        devices=out.sections.get("devices",{"models":{},"services":{}})
+        keys(devices,["models","services"],context="devices")
+        require(isinstance(devices["models"],dict) and isinstance(devices["services"],dict),"§9.1: device model/service maps required")
+        require(set(devices["models"])<={"console","clock","entropy","block"},"§9.1: unknown device model")
+        for declarations in [devices["models"],devices["services"]]:
+            for name,value in declarations.items():
+                keys(value,["version"],context="device declaration")
+                require(isinstance(value["version"],str) and value["version"],"§9.1: device version must be nonempty text")
+        for fn in out.functions.values():
+            for row in fn.code:
+                if row.op=="effect":
+                    device=row.args[0].split(".")[0]
+                    require(device not in {"console","clock","entropy","block"} or device in devices["models"],"§9.1: used device model is not declared")
+                elif row.op=="hostcall":require(row.args[0] in devices["services"],"§9.1: used host service is not declared")
         names=[s["name"] for s in symbols.values()]
         require(len(names)==len(set(names)),"duplicate symbol name")
         require(set(out.functions)=={s["name"] for s in symbols.values() if s["kind"]!="data"},"function definitions and symbols differ")
+        require(set(out.sections.get("data",{}))=={s["name"] for s in symbols.values() if s["kind"]=="data"},"data definitions and symbols differ")
         for fn in out.functions.values():
             for inst in fn.code:
                 if inst.op!="call":continue
@@ -1458,7 +1644,75 @@ class Object:
                 require(target.kind in allowed,"§3.1: classical call tier violation (R may call only R)")
                 require(len(inst.args)-1==len(target.groups[0]) and len(inst.lhs)==len(target.groups[1]),"§4.1: call argument/result arity mismatch")
         out.validate_region_graph()
+        out.validate_register_views()
         return out
+
+    def validate_register_views(self):
+        """§3.3's lexical view rule on every CFG path, without executing it."""
+        def operands(inst):
+            op,args=inst.op,list(inst.args);controls=[]
+            while op in ["ctl","adj"]:
+                index=1 if op=="ctl" else 0
+                if index:controls.append(args[0])
+                op,args=args[index],args[index+1:]
+            if op=="action_call":
+                require(len(args)==5,"§4.7: incomplete action argument groups")
+                slots=[n for group in args[1:4] for n in list_operand(group)]
+                return controls+slots+list_operand(args[4]),controls+slots
+            if op=="oracle_call":
+                require(len(args)==7,"§4.7: incomplete oracle argument groups")
+                slots=list_operand(args[2])+args[3:5]+list_operand(args[5])
+                return controls+slots+[args[1]]+list_operand(args[6]),controls+slots
+            if op=="br":
+                values=[args[0]] if len(args)>1 else []
+                for label in args if len(args)==1 else args[1:]:
+                    match=re.fullmatch(r"\^([^ (]+)\((.*?)\)",label)
+                    require(match,"§4.1: malformed branch label")
+                    values+=list_operand("("+match[2]+")")
+                return values,[]
+            if op=="uncall":return list_operand(args[1])+list_operand(args[2]),[]
+            if op=="qreg.new":args=args[1:]
+            elif op in ["call","budget.mint","hostcall","effect"]:args=args[1:]
+            elif op.startswith("const."):args=[]
+            return args,[]
+        for fn in self.functions.values():
+            if fn.kind not in ["cc","r"]:continue
+            decoded={id(row):operands(row) for row in fn.code}
+            for row in fn.code:
+                _,slots=decoded[id(row)]
+                if row.op=="qreg.concat":slots=row.args
+                require(len(slots)==len(set(slots)),"§3.3: duplicate register operand name")
+            for block,(_,code) in fn.blocks.items():
+                for index,row in enumerate(code):
+                    if row.op!="qreg.slice":continue
+                    view,parent=row.lhs[0],row.args[0]
+                    pending=[(block,index+1,False)];visited=set()
+                    while pending:
+                        label,position,consumed=pending.pop()
+                        key=(label,position,consumed)
+                        if key in visited:continue
+                        visited.add(key)
+                        require(label in fn.blocks,"§4.1: branch names no block")
+                        params,body=fn.blocks[label]
+                        if position==0 and view in [n for n,ty,r in params]:
+                            require(consumed,"§3.3: live view overwritten at block entry")
+                            continue
+                        if position==len(body):
+                            require(consumed,"§3.3: view reaches function end unconsumed")
+                            continue
+                        current=body[position];uses,slots=decoded[id(current)]
+                        if view in current.lhs:
+                            require(consumed,"§3.3: live view overwritten before its call")
+                            continue
+                        if view in uses:
+                            require(not consumed and view in slots,"§3.3: view must be used by exactly one region call")
+                            consumed=True
+                        else:require(consumed or parent not in uses,"§3.3: view parent used before its region call")
+                        if current.op=="ret":
+                            require(consumed,"§3.3: view reaches ret unconsumed")
+                        elif current.op=="br":
+                            for target in current.args if len(current.args)==1 else current.args[1:]:pending.append((target[1:target.index("(")],0,consumed))
+                        elif current.op not in ["trap","fault"]:pending.append((label,position+1,consumed))
 
     def validate_region_graph(self):
         """§5.1 includes semantic calls in the complete lifted closure."""
@@ -2116,8 +2370,9 @@ class Ledger:
 
 class OrdinalCounter:
     """Count source leaf domains before target expansion; never retain gates."""
-    def __init__(self,catalog,schedule):
+    def __init__(self,catalog,schedule,admission=False):
         self.catalog,self.schedule=catalog,schedule
+        self.admission=admission
         self.require_exact=False;self.count_only=False
         self.domains={};self.records=[{}];self.cleanup_decisions=[]
 
@@ -2131,6 +2386,32 @@ class OrdinalCounter:
     def gate(self,op,operands,controls=(),**address):return self.record(**address)
     def allocate(self,b,**address):return self.record(**address)
     def release(self,b,**address):return self.record(**address)
+    def interface(self,slot,b,vertices=None):pass
+
+
+class Admission:
+    """K55 known-domain selector checks, before target realisation.
+
+    Records no gates or costs. Unknown token-forwarded oracle invocations
+    remain for the concrete ledger's prescribed operation-time checks.
+    """
+    def __init__(self,schedule):
+        self.schedule=schedule;self.admission=True
+        self.require_exact=False;self.count_only=False
+        self.records=[{}];self.cleanup_decisions=[]
+
+    def gate(self,op,wires,controls=(),params=None,**address):
+        for kind in ["gate","start"]:self.schedule.pick(kind,**address)
+        return Profile()
+
+    def allocate(self,b,**address):
+        for kind in ["alloc","start"]:self.schedule.pick(kind,**address)
+        return Profile()
+
+    def release(self,b,**address):
+        self.schedule.pick("start",**address)
+        return Profile()
+
     def interface(self,slot,b,vertices=None):pass
 
 
@@ -2149,6 +2430,12 @@ class Source:
 
     def region(self, name, args, budget, interface=None, controls=(), adjoint=False,raw_inverse=False):
         require(name not in self.calls, "§5.1: recursive region call graph")
+        if getattr(self.catalog.ledger,"admission",False) and self.calls and self.obj.functions[name].kind=="oracle":
+            # In Q source, every nested oracle token is forwarded from root
+            # parameters (possibly through lproc/action parameters). Minting
+            # is forbidden in that tier. K55 leaves those budgets unknown at
+            # admission even when the request provides concrete token values.
+            return Profile()
         previous_exact=self.catalog.require_exact
         self.calls.append(name)
         self.budgets.append(budget)
@@ -2202,7 +2489,7 @@ class Source:
         # Inherited controls can be scratch from the surrounding catalog.
         # A private dry traversal must not reuse those allocation identities.
         counter_catalog.serial=catalog.serial
-        counter=OrdinalCounter(counter_catalog,catalog.ledger.schedule);counter_catalog.ledger=counter
+        counter=OrdinalCounter(counter_catalog,catalog.ledger.schedule,admission=getattr(catalog.ledger,"admission",False));counter_catalog.ledger=counter
         counter_catalog.source_metadata=dict(catalog.source_metadata)
         for field in ["source_context","call_edges","root_step","root_phase"]:setattr(counter_catalog,field,getattr(catalog,field))
         counter_catalog.loop_coordinates=list(catalog.loop_coordinates)
@@ -2287,6 +2574,10 @@ class Source:
                 record["location_ids"][n]=descriptor["id"]
                 record["locations"].append(descriptor);locations.append(descriptor)
                 location_state.append((label,local[n]))
+        location_formal=next(f for f in self.catalog.recipes["lift.ret"]["parameters"] if f["name"]=="Globals")
+        global_records=self.catalog.bind([location_formal],[locations],{},())[0]["Globals"]
+        for record in instances:
+            record["locations"]=self.catalog.bind([location_formal],[record["locations"]],{},())[0]["Globals"]
         slot_widths = []
         layout=self.obj.sections.get("layout")
         require(len(instances)==1 or layout is not None,"§7.2: procedures require layout state")
@@ -2405,7 +2696,7 @@ class Source:
                 body=[invoke(op,[Dc,Sc,max(Sc,record_size.bit_length())+1,record_size,1<<integer(layout["S_cells"],0),K,P,Did,Fwidth,unsigned(budget[3]),unsigned(budget[2]),index+1,instance["location_ids"][w],state_wires["depth"],state_wires["sp"],state_wires["fp"],stack,displacement(m,Sc),displacement(m+1,Sc),displacement(m+2,Dc),flag,faulted,code,callee["locations"],captures])]
             elif op=="lift.ret":
                 stack=state_wires["stack"];K=stack.width//(1<<integer(layout["S_cells"],0))
-                body=[invoke(op,[Dc,Sc,1<<integer(layout["S_cells"],0),K,P,Did,Fwidth,slot_widths[0],widths[a[0]],state_wires["depth"],state_wires["fp"],stack,displacement(1,Sc),displacement(2,Dc),flag,faulted,code,a[0],displacement(0,slot_widths[0]),successor,instance["locations"],locations])]
+                body=[invoke(op,[Dc,Sc,1<<integer(layout["S_cells"],0),K,P,Did,Fwidth,slot_widths[0],widths[a[0]],state_wires["depth"],state_wires["fp"],stack,displacement(1,Sc),displacement(2,Dc),flag,faulted,code,a[0],displacement(0,slot_widths[0]),successor,instance["locations"],global_records])]
             elif op=="lift.free" or op=="lift.boundscheck" and not re.fullmatch(r"0|[1-9][0-9]*",a[1]):
                 require(layout is not None,"allocator-table row requires layout")
                 require(widths[a[0]]==self.obj.ptr,"allocator-table pointer width mismatch")
@@ -2629,18 +2920,64 @@ class Source:
         class MintedToken:
             identity:int
             budget:tuple
+        @dataclass(frozen=True)
+        class RegisterRef:
+            identity:int
+        @dataclass(frozen=True)
+        class RegisterId:
+            identity:int
+        registers={};physical={};register_states=WireVersions();quantum_occurrences=[];next_register=0
+        def create(parts,parent=None):
+            nonlocal next_register
+            next_register+=1
+            registers[next_register]={"parts":tuple(parts),"state":"live","parent":parent}
+            return (RegisterRef(next_register),"qreg")
+        def register_width(record):return sum(part.width for part in record["parts"])
+        def overlaps(a,b):
+            return any(x.identity==y.identity and x.offset<y.offset+y.width and y.offset<x.offset+x.width for x in a for y in b)
+        def transfer(ty,value):
+            if ty.startswith("qreg["):
+                if value[1]!="qreg":return False
+                record=registers.get(value[0].identity)
+                if record is None:return False
+                expected=ty[5:-1]
+                return expected=="*" or register_width(record)==int(expected)
+            return value[1]!=("qreg")
+        def identity_body(function):
+            # A sufficient source-level identity proof, never a basis run or
+            # expanded gate list. Unrecognised constructions stay unknown.
+            stack=[]
+            for row in function.code:
+                op,actual=row.op,tuple(row.args)
+                inverse=False;self_inverse=False
+                if op=="adj":op,actual=actual[0],actual[1:];inverse=True
+                if op in GATES and op not in ["rx","ry","rz"]:
+                    opposite=ADJOINT.get(op,op);canonical=min(op,opposite)
+                    inverse^=op!=canonical;self_inverse=op==opposite;op=canonical
+                elif op=="action_call":
+                    child=self.obj.functions[actual[0].removeprefix("@")]
+                    if identity_body(child):continue
+                else:return False
+                key=(op,actual)
+                if stack and stack[-1][0]==key and (self_inverse or stack[-1][1]!=inverse):stack.pop()
+                else:stack.append((key,inverse))
+            return not stack
         def equal_values(left,right):
             if len(left)!=len(right):return False
             for (x,wx),(y,wy) in zip(left,right):
                 if wx!=wy:return False
                 if wx==0 and isinstance(x,list) and isinstance(y,list) and x==y and x is not y:
                     raise ContractError("EST-CONTEXT-03: token identity aliasing is absent from tuple-only root arguments; an explicit conditional step bound is available")
+                if isinstance(x,RegisterId) != isinstance(y,RegisterId):
+                    require(x==0 or y==0,"opaque register id boundary comparison needs explicit binding evidence")
                 if x!=y:return False
             return True
         initial = {n:(v,type_width(ty,self.obj.ptr)) if ty!="token" else (list(v),0) for (n,ty,r),v in zip(fn.groups[0],parsed)}
         memory, allocations = {}, {}
         clock=0
         layout = self.obj.sections.get("layout",{})
+        image=bytes.fromhex(self.obj.sections.get("data",{}).get(layout.get("block_image"),""))
+        blocks={sector:tuple(image[sector*512:(sector+1)*512]) for sector in range(len(image)//512)}
         bump = integer(layout.get("heap_base",0),0)
         for n,g in layout.get("globals",{}).items():
             base = integer(g["base"],0)
@@ -2661,6 +2998,18 @@ class Source:
                 if n in env: return env[n]
                 if re.fullmatch(r"-?(0|[1-9][0-9]*)",n): return (int(n),self.obj.ptr)
                 raise ContractError(f"classical value has no current instance: {n}")
+            def register(n,view=False):
+                value=get(n)
+                if value[1]!="qreg":return None
+                record=registers.get(value[0].identity)
+                if record is None:return None
+                if record["state"]!="live" or record["parent"] is not None and not view:return None
+                return record
+            def unsigned64(n,literal_minimum=0):
+                if n.isdigit():return integer(n,literal_minimum)
+                value,w=get(n)
+                require(w==64,"§3.3: register size/index operand requires i64")
+                return value
             def jump(label):
                 m = re.fullmatch(r"\^([^ (]+)\((.*?)\)",label)
                 require(m and m[1] in function.blocks,"invalid branch label")
@@ -2668,6 +3017,7 @@ class Source:
                 actuals = m[2].split(", ") if m[2] else []
                 require(len(formals)==len(actuals),"branch argument arity")
                 resolved = [get(a) for a in actuals]
+                if not all(transfer(ty,value) for (n,ty,r),value in zip(formals,resolved)):return None
                 for (n,ty,r),value in zip(formals,resolved):put(n,value)
                 return m[1]
             while True:
@@ -2675,7 +3025,7 @@ class Source:
                 jumped = False
                 for inst in code:
                     op,a = inst.op,inst.args
-                    pure=op in ["br","add","sub","mul","and","or","xor","shl","lshr","ashr","udiv","urem","sdiv","srem","select","inttoptr"] or op.startswith(("const.i","icmp.","load.i","zext.i","sext.i","trunc.i","ptrtoint.i"))
+                    pure=op in ["br","add","sub","mul","and","or","xor","shl","lshr","ashr","udiv","urem","sdiv","srem","select","inttoptr","qreg.width","qreg.id","qreg.from_id"] or op.startswith(("const.i","icmp.","load.i","zext.i","sext.i","trunc.i","ptrtoint.i"))
                     frame_index=len(history);history.append({"active":True,"pure":pure,"marker":op=="uncall"})
                     p = p.then(Profile(time=rational(self.target.doc["capabilities"]["classical_step_time"])))
                     steps += 1
@@ -2684,6 +3034,11 @@ class Source:
                         width=integer(op[7:],1); result=(integer(a[0]) % (1<<width),width)
                     elif op in ["add","sub","mul","and","or","xor","shl","lshr","ashr","udiv","urem","sdiv","srem"] or op.startswith("icmp."):
                         (x,w),(y,v) = get(a[0]),get(a[1]); require(w==v,"classical operand width mismatch")
+                        if isinstance(x,RegisterId) or isinstance(y,RegisterId):
+                            require(op in ["icmp.eq","icmp.ne"] and (isinstance(x,RegisterId) and isinstance(y,RegisterId) or x==0 or y==0),"opaque register id bits cannot select an exact classical path")
+                            result=(int((x==y) if op=="icmp.eq" else (x!=y)),1)
+                            require(len(inst.lhs)==1,"classical result arity")
+                            put(inst.lhs[0],result);continue
                         def signed(x): return x-(1<<w) if x & (1<<(w-1)) else x
                         if op.startswith("icmp."):
                             pred=op[5:]
@@ -2703,26 +3058,32 @@ class Source:
                             result=(value % (1<<w),w)
                     elif op.startswith(("zext.i","sext.i","trunc.i","ptrtoint.i")) or op=="inttoptr":
                         x,w=get(a[0]); width=self.obj.ptr if op=="inttoptr" else int(op.split(".i")[-1])
+                        require(not isinstance(x,RegisterId),"opaque register id bit conversion needs explicit binding evidence")
                         if op.startswith("sext") and x & (1<<(w-1)): x-=1<<w
                         result=(x % (1<<width),width)
                     elif op=="select": result=get(a[1] if get(a[0])[0] else a[2])
                     elif op=="br":
                         block=jump(a[0] if len(a)==1 else a[1] if get(a[0])[0] else a[2]); jumped=True;break
-                    elif op=="ret": return p,steps,[get(n) for n in a],False
+                    elif op=="ret":
+                        results=[get(n) for n in a]
+                        if not all(transfer(ty,value) for (n,ty,r),value in zip(function.groups[1],results)):return p,steps,[],True
+                        return p,steps,results,False
                     elif op in ["trap","fault"]: return p,steps,[],True
                     elif op=="call":
                         callee=self.obj.functions[a[0].removeprefix("@")]
                         params=callee.groups[0]
                         require(len(params)==len(a)-1,"call argument arity")
                         actuals=[get(actual) for actual in a[1:]]
-                        before=(dict(memory),dict(allocations),bump,clock,atop)
+                        if not all(transfer(ty,value) for (n,ty,r),value in zip(params,actuals)):return p,steps,[],True
+                        before=(dict(memory),dict(allocations),bump,clock,atop,dict(blocks))
+                        before_registers=({identity:dict(record) for identity,record in registers.items()},dict(physical),dict(register_states.ranges))
                         previous={n:(env.get(n),versions.get(n)) for n in inst.lhs}
                         cp,cs,results,failed=execute(callee,{n:value for (n,ty,r),value in zip(params,actuals)})
                         p=p.then(cp);steps+=cs
                         if failed: return p,steps,[],True
                         require(len(results)==len(inst.lhs),"call result arity")
                         for n,value in zip(inst.lhs,results):put(n,value)
-                        segments.append({"name":callee.name,"args":actuals,"results":results,"start":frame_index,"end":len(history),"active":True,"before":before,"env":env,"versions":versions,"previous":previous,"produced":{n:versions[n] for n in inst.lhs}})
+                        segments.append({"name":callee.name,"args":actuals,"results":results,"start":frame_index,"end":len(history),"active":True,"before":before,"before_registers":before_registers,"quantum_gates":bool(cp.gates),"env":env,"versions":versions,"previous":previous,"produced":{n:versions[n] for n in inst.lhs}})
                         continue
                     elif op=="uncall":
                         require(len(a)==3,"uncall needs argument/result lists")
@@ -2731,8 +3092,18 @@ class Source:
                         segment=max(pending,key=lambda s:s["end"])
                         arguments=[get(n) for n in list_operand(a[1])];results=[get(n) for n in list_operand(a[2])]
                         if segment["name"]!=a[0].removeprefix("@") or any(f["active"] and not f["pure"] and not f["marker"] for f in history[segment["end"]:frame_index]) or not equal_values(segment["args"],arguments) or not equal_values(segment["results"],results):return p,steps,[],True
-                        old_memory,old_allocations,bump,clock,atop=segment["before"]
+                        require(not segment["quantum_gates"],"quantum segment-uncall reversal costs remain pending; no exact estimate emitted")
+                        old_registers,old_physical,old_states=segment["before_registers"]
+                        for identity in physical.keys()-old_physical.keys():
+                            b=physical[identity];p=p.then(space_profile(b.cls,"clean",-b.width))
+                        for identity in old_physical.keys()-physical.keys():
+                            b=old_physical[identity];p=p.then(space_profile(b.cls,"clean",b.width))
+                        registers.clear();registers.update({identity:dict(record) for identity,record in old_registers.items()})
+                        physical.clear();physical.update(old_physical)
+                        register_states.ranges.clear();register_states.ranges.update(old_states)
+                        old_memory,old_allocations,bump,clock,atop,old_blocks=segment["before"]
                         memory.clear();memory.update(old_memory);allocations.clear();allocations.update(old_allocations)
+                        blocks.clear();blocks.update(old_blocks)
                         for n,version in segment["produced"].items():
                             if segment["versions"].get(n)!=version:continue
                             value,prior_version=segment["previous"][n]
@@ -2754,10 +3125,17 @@ class Source:
                         if not any(base<=address and address+size<=base+n for base,(n,pinned) in allocations.items()): return p,steps,[],True
                         if op.startswith("load"):
                             require(all(memory.get(address+i,0) is not None for i in range(size)),"cost control depends on unresolved effect/measurement data; a path bound is required")
-                            result=(sum(memory.get(address+i,0)<<(8*i) for i in range(size)),width)
+                            content=[memory.get(address+i,0) for i in range(size)]
+                            if any(isinstance(byte,tuple) for byte in content):
+                                require(size==8 and all(byte==(content[0][0],i) for i,byte in enumerate(content)) and isinstance(content[0][0],RegisterId),"opaque register id partial load needs explicit binding evidence")
+                                result=(content[0][0],width)
+                            else:result=(sum(byte<<(8*i) for i,byte in enumerate(content)),width)
                         else:
                             value=get(a[1])[0]
-                            memory.update({address+i:(value>>(8*i))&255 for i in range(size)})
+                            if isinstance(value,RegisterId):
+                                require(size==8,"opaque register id partial store needs explicit binding evidence")
+                                memory.update({address+i:(value,i) for i in range(size)})
+                            else:memory.update({address+i:(value>>(8*i))&255 for i in range(size)})
                     elif op=="budget.mint":
                         require(len(a)==5 and a[0].startswith("@"),"budget.mint needs oracle and four i64 components")
                         name=a[0][1:]
@@ -2768,6 +3146,117 @@ class Source:
                         try:validate_budget(token,self.obj)
                         except ContractError:return p,steps,[],True
                         result=(MintedToken(frame_index,tuple(token)),0)
+                    elif op=="qreg.new":
+                        cls,n=a;size=unsigned64(n,1)
+                        choices=sorted(self.target.doc["classes"],key=lambda name:name.encode("utf-16-be")) if cls=="any" else [cls]
+                        require(all(c in self.target.doc["classes"] for c in choices),"unknown register class")
+                        def available(c):
+                            used=sum(b.width for b in physical.values() if b.cls==c)
+                            capacity=self.target.doc["classes"][c]["capacity"]
+                            return capacity=="unbounded" or used+size<=capacity
+                        selected=next((c for c in choices if available(c)),None)
+                        if selected is None:return p,steps,[],True
+                        parts=[]
+                        if size:
+                            b=self.fresh("register",size,selected);parts=[b]
+                            physical[b.identity]=b
+                            register_states.acquire(b)
+                            p=p.then(space_profile(selected,"clean",size))
+                        result=create(parts)
+                    elif op in ["qreg.width","qreg.id","qreg.free","qreg.slice","qreg.concat"]:
+                        record=register(a[0])
+                        if record is None:return p,steps,[],True
+                        if op=="qreg.width":result=(register_width(record),64)
+                        elif op=="qreg.id":result=(RegisterId(get(a[0])[0].identity),64)
+                        elif op=="qreg.free":
+                            require(all(clean for identity,lo,hi,version,clean in register_states.capture(record["parts"])),"register cleanliness needs source history evidence; no exact estimate emitted")
+                            for b in record["parts"]:
+                                # Concatenation preserves the original physical
+                                # allocations; a slice can never be freed.
+                                require(b.identity in physical,"register allocation identity is not live")
+                                del physical[b.identity]
+                                del register_states.ranges[b.identity]
+                                p=p.then(space_profile(b.cls,"clean",-b.width))
+                            record["state"]="consumed"
+                        elif op=="qreg.slice":
+                            lo,length=unsigned64(a[1]),unsigned64(a[2],1)
+                            if lo+length>register_width(record):return p,steps,[],True
+                            parts=[];offset=0
+                            for b in record["parts"]:
+                                begin,end=max(lo,offset),min(lo+length,offset+b.width)
+                                if begin<end:parts.append(Bundle(b.identity,end-begin,b.cls,b.offset+begin-offset,b.state))
+                                offset+=b.width
+                            result=create(parts,get(a[0])[0].identity);record["state"]="viewed"
+                        else:
+                            other=register(a[1])
+                            if other is None or other is record:return p,steps,[],True
+                            result=create(record["parts"]+other["parts"])
+                            record["state"]=other["state"]="consumed"
+                    elif op=="qreg.from_id":
+                        identity,w=get(a[0]);require(w==64,"qreg.from_id requires i64")
+                        require(isinstance(identity,RegisterId) or identity==0,"opaque register id lookup needs explicit binding evidence")
+                        identity=identity.identity if isinstance(identity,RegisterId) else 0
+                        record=registers.get(identity)
+                        if record is None or record["state"]!="live" or record["parent"] is not None:return p,steps,[],True
+                        result=(RegisterRef(identity),"qreg")
+                    elif op in ["action_call","oracle_call","adj","ctl"]:
+                        call_op,actual=op,list(a);controlled=[];control_records=[];source_adjoint=False
+                        while call_op in ["ctl","adj"]:
+                            index=1 if call_op=="ctl" else 0
+                            if index:
+                                control=register(actual[0],True)
+                                if control is None or register_width(control)!=1:return p,steps,[],True
+                                controlled+=control["parts"];control_records.append((control,True))
+                            else:source_adjoint=not source_adjoint
+                            call_op,actual=actual[index],actual[index+1:]
+                        require(call_op in ["action_call","oracle_call"],"invalid CC/R region call")
+                        child=self.obj.functions[actual[0].removeprefix("@")]
+                        if call_op=="action_call":actual_groups=[list_operand(x) for x in actual[1:]];tuple_=["0"]*4
+                        else:
+                            token,token_width=get(actual[1]);require(token_width==0,"oracle invocation requires token")
+                            tuple_=list(token.budget) if isinstance(token,MintedToken) else list(token)
+                            actual_groups=[list_operand(actual[2]),[actual[3]],[actual[4]],list_operand(actual[5]),list_operand(actual[6])]
+                        groups=child.groups[:5] if child.kind=="oracle" else child.groups[:4]
+                        require(all(len(g)==len(v) for g,v in zip(groups,actual_groups)),"region call argument arity")
+                        interface={};records=list(control_records);slots=[];encoded=[]
+                        for index,(group,actuals) in enumerate(zip(groups[:-1],actual_groups[:-1])):
+                            group_readonly=index==0 if child.kind=="oracle" else index==1
+                            for (name,ty,role),argument in zip(group,actuals):
+                                record=register(argument,True)
+                                if record is None or register_width(record)!=type_width(ty,self.obj.ptr):return p,steps,[],True
+                                readonly=group_readonly or ty.startswith("region[") and role=="in"
+                                parts=record["parts"]
+                                if any(overlaps(parts,prior) and not (readonly and read) for prior,read in slots) or not readonly and overlaps(parts,controlled):return p,steps,[],True
+                                slots.append((parts,readonly));records.append((record,readonly));interface[name]=list(parts)
+                        for (name,ty,role),argument in zip(groups[-1],actual_groups[-1]):
+                            value,w=get(argument)
+                            encoded.append(list(value.budget) if isinstance(value,MintedToken) else value if ty in ["f64","token"] else str(value))
+                        call_arguments=[get(argument) for argument in actual_groups[-1]]
+                        if call_op=="oracle_call":call_arguments.append((token,token_width))
+                        controls=tuple(bit for b in controlled for bit in bits([b]))
+                        cp=self.region(child.name,encoded,tuple_,interface,controls,source_adjoint)
+                        p=p.then(cp)
+                        identity=child.kind in ["action","perm_action"] and identity_body(child)
+                        # Source-call occurrences retain joint entry versions.
+                        # Only a matching inverse on every touched allocation
+                        # restores them; no gate or quantum-state list is kept.
+                        touched=[b for parts,_ in slots for b in parts]+controlled
+                        written=[b for parts,read in slots if not read for b in parts]
+                        if touched and not identity:
+                            state=register_states.capture(touched)
+                            active_versions={version for name,lo,hi,version,clean in state}
+                            key=(call_op,child.name,tuple(tuple((b.identity,b.offset,b.width) for b in parts) for parts,_ in slots),controls)
+                            previous=quantum_occurrences[next(iter(active_versions))-1] if len(active_versions)==1 and 0 not in active_versions else None
+                            if previous is not None and previous["key"]==key and (call_op=="oracle_call" or previous["adjoint"]!=source_adjoint) and equal_values(previous["arguments"],call_arguments):register_states.restore(previous["states"])
+                            else:
+                                quantum_occurrences.append({"key":key,"arguments":call_arguments,"adjoint":source_adjoint,"states":state})
+                                register_states.assign(touched,len(quantum_occurrences))
+                                register_states.assign(written,len(quantum_occurrences),False)
+                        for record,readonly in records:
+                            if record["parent"] is not None:
+                                record["state"]="consumed";registers[record["parent"]]["state"]="live"
+                    elif op=="measure" or op.startswith("measure.i"):
+                        raise ContractError("measurement-dependent path/cleanliness evidence remains pending; no exact estimate emitted")
                     elif op=="effect":
                         dev=a[0]
                         if dev not in ["clock.read","entropy.read","console.write","block.read","block.write"]: return p,steps,[],True
@@ -2778,6 +3267,13 @@ class Source:
                         if dev=="clock.read":
                             memory.update({ptr+i:(clock>>(8*i))&255 for i in range(8)})
                             clock=(clock+1)%(1<<64)
+                        elif dev in ["block.read","block.write"]:
+                            sector,sector_width=get(a[1])
+                            require(sector_width==64,"§7.3: block sector requires i64")
+                            require(isinstance(sector,int),"opaque register id cannot resolve a block-sector address")
+                            if dev=="block.read":memory.update({ptr+i:byte for i,byte in enumerate(blocks.get(sector,(0,)*512))})
+                            else:blocks[sector]=tuple(memory.get(ptr+i,0) for i in range(512))
+                        elif dev=="entropy.read" and size==0:continue
                         else:
                             raise ContractError(f"exact classical effect-state binding pending: {dev}; use an explicit conditional step bound")
                     else: raise ContractError(f"classical source binding not implemented: {op}; no exact estimate emitted")
@@ -2785,8 +3281,21 @@ class Source:
                         require(len(inst.lhs)==1,"classical result arity")
                         put(inst.lhs[0],result)
                 require(jumped,"classical block has no terminator")
-        p,steps,_,_=execute(fn,initial)
+                if block is None:return p,steps,[],True
+        p,steps,_,failed=execute(fn,initial)
+        self.classical_status="FAILED" if failed else "COMPLETED"
         return p,steps
+
+    @staticmethod
+    def binding_types(env,regions):
+        inactive=env.get(_SOURCE_INACTIVE,())
+        result={}
+        for name,value in env.items():
+            if not isinstance(name,str) or name.startswith("$") or name in inactive:continue
+            parts=[value] if isinstance(value,Bundle) else value
+            if isinstance(parts,(list,tuple)) and parts and all(isinstance(part,Bundle) for part in parts):
+                result[name]=("region",*regions[name][:2]) if name in regions else ("wire",sum(part.width for part in parts))
+        return result
 
     def source_loop(self,inst,env,regions,controls,depth,adjoint,n):
         """Finite binding transitions; repeat source templates, never gates.
@@ -2802,16 +3311,19 @@ class Source:
             inactive=values.get(_SOURCE_INACTIVE,())
             return tuple(sorted((key,b.identity,b.width,b.cls,b.offset,b.state,key in inactive) for key,b in values.items() if isinstance(key,str) and not key.startswith("$") and isinstance(b,Bundle)))
         initial=snapshot(env);current=snapshot(env)
+        entry_types=self.binding_types(initial,regions)
         variants=[];states=[initial];seen={};prefix=cycle=0
         if not n:
             # Check the body without changing the zero-visit exit bindings.
             self.action_nodes(inst.body,current,regions,controls,depth+1,adjoint)
+            require(self.binding_types(current,regions)==entry_types,"§4.6: qloop entry/exit live names and types must agree")
         while len(variants)<n:
             key=state(current)
             if key in seen:
                 prefix=seen[key];cycle=len(variants)-prefix;break
             seen[key]=len(variants)
             body=self.action_nodes(inst.body,current,regions,controls,depth+1,adjoint)
+            require(self.binding_types(current,regions)==entry_types,"§4.6: qloop entry/exit live names and types must agree")
             variants.append(Captured(body,snapshot(current),controls))
             states.append(snapshot(current))
         else:prefix=len(variants)
@@ -2825,7 +3337,10 @@ class Source:
                 try:
                     for index in range(n-1,-1,-1) if reverse else range(n):
                         selected=index if index<prefix else prefix+(index-prefix)%cycle
-                        variant=variants[selected];catalog.loop_coordinates=coordinates+[index]
+                        variant=variants[selected]
+                        # Source-adjoint formation has a new forward loop;
+                        # raw inversion retains that loop's forward indices.
+                        catalog.loop_coordinates=coordinates+[n-1-index if adjoint else index]
                         out=out.then(catalog.body(variant.body,variant.env,joined,inverse))
                 finally:catalog.loop_coordinates=coordinates
                 return out
@@ -2841,6 +3356,64 @@ class Source:
                     profile=profile.then(catalog.body(variant.body,variant.env,joined,inverse))
                 out=out.then(profile.repeat(count))
             return out
+        return Captured([],{},controls,builder=expand,loop_plan=(n,prefix,cycle,tuple(variants),adjoint))
+
+    def conditional_loop(self,captured,condition,controls):
+        n,prefix,cycle,variants,adjoint=captured.loop_plan
+        require(sum(part.width for part in condition)==n,"§4.6: qloop while selector width mismatch")
+        body_name=f"$while_visit:{self.serial}";self.serial+=1
+        def visit(joined,inverse,call_env):
+            iteration=call_env["$iteration" if adjoint else "i"]
+            index=n-1-iteration if adjoint else iteration
+            selected=index if index<prefix else prefix+(index-prefix)%cycle
+            variant=variants[selected]
+            return self.catalog.body(variant.body,variant.env,joined,inverse)
+        body=Captured([],{},controls,builder=visit)
+        def expand(joined,inverse,call_env):
+            catalog=self.catalog
+            if catalog.ledger is None and catalog.closed_form and not catalog.target.doc.get("topology") and len(condition)==1 and not isinstance(condition[0],RecordField) and not any(identity==condition[0].identity for identity,_,_ in joined):
+                flags=self.fresh("while_flags",n,catalog.default_class)
+                init=catalog.body([{"gate":"cx","wires":[condition[0].bit(0),flags.bit(0)]}],{},joined) if n else Profile()
+                advance=catalog.body([{"gate":"ccx","wires":[flags.bit(0),condition[0].bit(1),flags.bit(1)]}],{},joined) if n>1 else Profile()
+                body_controls=tuple(dict.fromkeys(joined+bits([flags.bit(0)]))) if n else joined
+                body_profiles={}
+                def body_profile(index):
+                    if index not in body_profiles:
+                        variant=variants[index]
+                        body_profiles[index]=catalog.body(variant.body,variant.env,body_controls,inverse)
+                    return body_profiles[index]
+                def compose(limit,reverse=False,before=False,after=False):
+                    segments=[(range(min(prefix,limit)),1)]
+                    if limit>prefix:
+                        repeats,remainder=divmod(limit-prefix,cycle)
+                        segments.extend([(range(prefix,prefix+cycle),repeats),(range(prefix,prefix+remainder),1)])
+                    result=Profile()
+                    for indices,count in reversed(segments) if reverse else segments:
+                        if not count:continue
+                        part=Profile()
+                        for index in reversed(indices) if reverse else indices:
+                            visit=body_profile(index)
+                            if before:visit=advance.then(visit)
+                            if after:visit=visit.then(advance)
+                            part=part.then(visit)
+                        result=result.then(part.repeat(count))
+                    return result
+                result=space_profile(flags.cls,"clean",n).then(init)
+                if n:
+                    last=n-1 if n-1<prefix else prefix+(n-1-prefix)%cycle
+                    if adjoint:
+                        result=result.then(advance.repeat(n-1)).then(compose(n,reverse=not inverse)).then(advance.repeat(n-1))
+                    elif inverse:
+                        result=result.then(advance.repeat(n-1)).then(body_profile(last)).then(compose(n-1,reverse=True,before=True))
+                    else:
+                        result=result.then(compose(n-1,after=True)).then(body_profile(last)).then(advance.repeat(n-1))
+                    result=result.then(init)
+                return result.then(space_profile(flags.cls,"clean",-n))
+            local={"N":n,"cond":condition,body_name:body}
+            if not adjoint:return self.catalog.recipe("qloop.while",[n,condition,body_name],local,joined,inverse)
+            recipe=self.catalog.recipes["qloop.while"]["body"]
+            nodes=[recipe[0],*recipe[3]["body"],{"for":"$iteration","from":0,"to":n,"body":[{"under":"flags[[\"-\",[\"-\",\"N\",1],\"$iteration\"]]","body":[{"splice":body_name}]}]},recipe[3],recipe[4]]
+            return self.catalog.body(nodes,local,joined,inverse)
         return Captured([],{},controls,builder=expand)
 
     def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False,function_name=None):
@@ -2921,8 +3494,10 @@ class Source:
                 name = a[-1]
                 require(name in env and isinstance(env[name],Bundle),"release of unknown bundle")
                 require(name not in inactive,"release of inactive source binding")
-                inactive.add(name)
                 b = env[name]
+                require(lifetimes.get((name,b.width,b.cls,b.state))==b,"§4.3: release requires a locally owned allocation")
+                require((b.state=="borrowed")== (op=="qreturn"),"§4.3: release kind differs from clean/borrowed allocation")
+                inactive.add(name)
                 if adjoint:emit({"acquire":name},False)
                 if op == "quncopy": emit({"invoke":"bind.qxor","args":[b.width,a[0],name]})
                 if op == "qunload":
@@ -2941,43 +3516,31 @@ class Source:
             elif op == "qloop":
                 n=env.get(a[0],int(a[0]) if a[0].isdigit() else None)
                 require(isinstance(n,int) and n>=0,"invalid qloop bound")
-                if len(a)==1:
-                    entry=dict(env)
-                    entry[_SOURCE_INACTIVE]=set(inactive)
-                    captured=self.source_loop(inst,env,regions,controls,depth,adjoint,n)
-                    inactive=env[_SOURCE_INACTIVE]
-                    if out and any(isinstance(b,Bundle) and env.get(key)!=b for key,b in entry.items()):
-                        prefix=[node for fragment in reversed(fragments) for node in fragment] if adjoint else list(out)
-                        capture=f"$before_loop:{self.serial}";self.serial+=1
-                        env[capture]=Captured(prefix,entry,controls)
-                        wrapper={"splice":capture};out=[wrapper];fragments=[[wrapper]];beginning=1
-                    capture=f"$source_loop:{self.serial}";self.serial+=1
-                    env[capture]=captured;emit({"splice":capture})
-                    fragments.append(out[beginning:])
-                    continue
-                body = self.action_nodes(inst.body,env,regions,controls,depth+1,adjoint)
-                if len(a)==1: emit({"for":"$iteration","from":0,"to":n,"body":body})
-                else:
-                    require(a[1]=="while" and len(a)==3,"qloop while syntax")
-                    # Captured body holds immutable source bundle descriptors.
-                    captured = Captured(body,dict(env),controls)
-                    body_name = f"$body{self.serial}";env[body_name]=captured
-                    if not adjoint:emit({"invoke":"qloop.while","args":[n,a[2],body_name]})
-                    else:
-                        # §5.3 computes flags forward, visits adjoint bodies
-                        # from n down to 1, then uncomputes those flags.
-                        recipe=self.catalog.recipes["qloop.while"]["body"]
-                        flag=f"$adjflags:{self.serial}";env[f"$adjN:{self.serial}"]=n
-                        local=dict(env,N=n,cond=wire(a[2],env))
-                        prep=recipe[3]["body"]
-                        nodes=[recipe[0],*prep,{"for":"$iteration","from":0,"to":n,"body":[{"under":"flags[[\"-\",[\"-\",\"N\",1],\"$iteration\"]]","body":[{"splice":body_name}]}]},recipe[3],recipe[4]]
-                        local[body_name]=captured
-                        env[flag]=Captured(nodes,local,controls)
-                        emit({"splice":flag})
+                require(len(a)==1 or len(a)==3 and a[1]=="while","qloop while syntax")
+                entry=dict(env);entry[_SOURCE_INACTIVE]=set(inactive)
+                captured=self.source_loop(inst,env,regions,controls,depth,adjoint,n)
+                if len(a)==3:captured=self.conditional_loop(captured,wire(a[2],entry),controls)
+                inactive=env[_SOURCE_INACTIVE]
+                if out and any(isinstance(b,Bundle) and env.get(key)!=b for key,b in entry.items()):
+                    prefix=[node for fragment in reversed(fragments) for node in fragment] if adjoint else list(out)
+                    capture=f"$before_loop:{self.serial}";self.serial+=1
+                    env[capture]=Captured(prefix,entry,controls)
+                    wrapper={"splice":capture};out=[wrapper];fragments=[[wrapper]];beginning=1
+                capture=f"$source_loop:{self.serial}";self.serial+=1
+                env[capture]=captured;emit({"splice":capture})
             elif op == "qif":
+                entry=dict(env);entry[_SOURCE_INACTIVE]=set(inactive)
                 then = self.action_nodes(inst.body,env,regions,controls,depth)
+                then_name=f"$then:{self.serial}";self.serial+=1
+                env[then_name]=Captured(then,dict(env),controls)
                 otherwise = self.action_nodes(inst.otherwise,env,regions,controls,depth)
-                emit({"under":a[0],"body":then})
+                if out and any(isinstance(b,Bundle) and env.get(key)!=b for key,b in entry.items()):
+                    prefix=[node for fragment in reversed(fragments) for node in fragment] if adjoint else list(out)
+                    capture=f"$before_if:{self.serial}";self.serial+=1
+                    env[capture]=Captured(prefix,entry,controls)
+                    wrapper={"splice":capture};out=[wrapper];fragments=[[wrapper]];beginning=1
+                inactive=env[_SOURCE_INACTIVE]
+                emit({"under":a[0],"body":[{"splice":then_name}]})
                 emit({"gate":"x","wires":[a[0]]})
                 emit({"under":a[0],"body":otherwise})
                 emit({"gate":"x","wires":[a[0]]})
@@ -3161,6 +3724,11 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
             effective_schedule=schedule
     source = Source(obj,target,catalog)
     fn = obj.functions[region]
+    if effective_schedule["entries"] and fn.kind in ["action","perm_action","oracle"]:
+        admission_catalog=Catalog(catalog.text,target)
+        admission_catalog.ledger=Admission(Schedule(effective_schedule,obj,region))
+        admission_controls=tuple(("inherited",i,admission_catalog.default_class) for i in range(inherited_controls))
+        Source(obj,target,admission_catalog).region(region,args,budget,controls=admission_controls)
     ledger=None
     default_share=F(0)
     finite_capacity=any(c["capacity"]!="unbounded" for c in target.doc["classes"].values())
@@ -3255,6 +3823,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
     if step_bound is not None:
         result["bound_assumptions"]=[f"classical execution terminates within {steps} source instructions, including callees"]
         result["rational_upper_bounds"]=result.pop("exact_resources")
+    elif fn.kind in ["cc","r"]:result["classical_status"]=source.classical_status
     if fn.kind=="oracle":result["padded_steps"]={"forward":budget[0],"inverse":budget[0]}
     if ledger is not None:
         result["resolved_default_epsilon_share"]={"numerator":str(ledger.default_share.numerator),"denominator":str(ledger.default_share.denominator)}
@@ -3308,6 +3877,7 @@ class Certificate:
     @classmethod
     def domain(cls,domain,inherited_controls=0):
         keys(domain,["bundles","borrowed","regions"],["args"],"domain")
+        require(len(cls.array(domain["bundles"]))>=inherited_controls,"K69: domain omits inherited control positions")
         for group in ["bundles","borrowed","args"]:
             names=set()
             for position,component in enumerate(cls.array(domain.get(group,[]))):
@@ -3320,6 +3890,7 @@ class Certificate:
                     names.add(component["name"])
                 width=cls.count(component["width"]);lo=cls.count(component["lo"]);hi=cls.count(component["hi"])
                 require(width>0 and lo<=hi and hi.bit_length()<=width,"K72: domain width/range mismatch")
+                if group=="bundles" and position<inherited_controls:require(width==1,"K69: inherited control width must be one")
         names=set()
         for region in cls.array(domain["regions"]):
             keys(region,["name","cells"],context="domain region");cls.name(region["name"])
@@ -3377,6 +3948,7 @@ class Certificate:
         if "domain" in claim:
             controls=cls.count(claim["subject"].get("inherited_controls",0)) if isinstance(claim.get("subject"),dict) else 0
             cls.domain(claim["domain"],controls);cls.expected(claim["expected"],kind)
+            require("args" not in claim["domain"] or claim["expected"]=="inverse_pair","§12.2: only inverse-pair domains quantify args")
         if "subject" in claim:
             subject=claim["subject"]
             keys(subject,["closure_hash","variant","inherited_controls"],["schedule_hash"],"subject")

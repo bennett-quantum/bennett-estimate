@@ -34,16 +34,44 @@ def make_object(text,signature):
     return make_program(text,{"root":signature})
 
 
-def make_program(text,signatures,data=None,layout=None,ptr=32):
+def make_program(text,signatures,data=None,layout=None,ptr=32,devices=None):
+    signatures={**signatures,**{name:{"abi":"0.9","tier":"-","kind":"data","size":len(image)//2} for name,image in (data or {}).items() if name not in signatures}}
     records={str(i):{"name":name,"kind":sig["kind"],"signature":sig,"interface_hash":"0"*64} for i,(name,sig) in enumerate(signatures.items())}
     header=f"bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width={ptr}\n\nsection symbols\n"
-    def document():return header+e.jcs(records)+"\n\nsection functions\n"+text+"\n"+("\nsection data\n"+"\n".join(n+" "+v for n,v in data.items())+"\n" if data else "")+("\nsection layout\n"+e.jcs(layout)+"\n" if layout else "")
+    def document():return header+e.jcs(records)+"\n\nsection functions\n"+text+"\n"+("\nsection data\n"+"\n".join(n+" "+v for n,v in data.items())+"\n" if data else "")+("\nsection devices\n"+e.jcs(devices)+"\n" if devices else "")+("\nsection layout\n"+e.jcs(layout)+"\n" if layout else "")
     obj=e.Object.read(document())
     for record in records.values():record["interface_hash"]=obj.identities()[record["name"]]
     return e.Object.read(document())
 
 
 class Selectors(unittest.TestCase):
+    def test_captured_record_arrays_reuse_validation_without_rebinding_fields(self):
+        class Counting(e.Catalog):
+            field_bindings=0
+            def bind(self,formals,*args,**kw):
+                if len(formals)==1 and isinstance(formals[0],dict) and formals[0].get("name")=="location":self.field_bindings+=1
+                return super().bind(formals,*args,**kw)
+        c=Counting((ROOT/"data/ref-0.9.json").read_text(),target())
+        descriptor={"name":"Records","type":"records","fields":["id","width",{"name":"location","type":"wire","width":"width"}],"order":["id"]}
+        q=e.Bundle("original",3,"data");records=[{"id":0,"width":3,"location":"q"}]
+        bound,_=c.bind([descriptor],[records],{"q":q},())
+        captured=bound["Records"];self.assertEqual(c.field_bindings,1)
+        with self.assertRaises(TypeError):captured[0]["id"]=1
+        with self.assertRaises(TypeError):captured[0]["location"][0]=e.Bundle("replacement",3,"data")
+        records[0]["width"]=1
+        for _ in range(20):
+            forwarded,_=c.bind([descriptor],[captured],{"q":e.Bundle("other",3,"data")},())
+            self.assertEqual(e.bits(e.wire(forwarded["Records"][0]["location"],{})),e.bits([q]))
+        self.assertEqual(c.field_bindings,1)
+        changed={**descriptor,"fields":["id","width",{"name":"location","type":"wire","width":2}]}
+        with self.assertRaises(e.ContractError):c.bind([changed],[captured],{},())
+        descriptor["fields"][-1]["width"]=2
+        with self.assertRaises(e.ContractError):c.bind([descriptor],[captured],{},())
+        dependent={"name":"R","type":"records","fields":["id",{"name":"location","type":"wire","width":"N"}],"order":["id"]}
+        N={"name":"N","type":"integer"}
+        captured=c.bind([N,dependent],[3,[{"id":0,"location":q}]],{},())[0]["R"]
+        with self.assertRaises(e.ContractError):c.bind([N,dependent],[2,captured],{},())
+
     def test_record_fields_capture_wire_ids_and_validate_unvisited_entries(self):
         c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),target())
         descriptor={"name":"Records","type":"records","fields":["id","width",{"name":"location","type":"wire","width":"width"}],"order":["id"]}
@@ -196,32 +224,415 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
-    def test_loop_reallocation_carries_changed_width_to_the_next_visit(self):
+    def test_cc_register_ids_are_opaque_except_equality_and_zero(self):
+        sig={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        body="fn cc @root () () () () ()\n^entry():\nq = qreg.new data 1\nid = qreg.id q\nc = const.i64 {literal}\np = icmp.eq id c\nbr p ^yes() ^no()\n^yes():\ntrap\n^no():\nqreg.free q\nret"
+        obj=make_object(body.format(literal=1),sig)
+        with self.assertRaisesRegex(e.ContractError,"opaque register id"):
+            e.estimate(obj,target(),"root",[],["0"]*4)
+        result=e.estimate(make_object(body.format(literal=0),sig),target(),"root",[],["0"]*4)
+        self.assertEqual(result["classical_steps"],"7")
+        self.assertEqual(result["resources"]["qubit_second[data]"],"5")
+
+    def test_cc_register_id_memory_roundtrip_and_freshness_after_uncall(self):
+        root={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        create={**root,"results":["qreg[2]"]}
+        layout={"ptr_width":32,"H":5,"A_tab":2,"S_cells":0,"globals":{},"interface_regions":{},"heap_base":1,"heap_limit_max":16,"null_size":1}
+        text="fn cc @root () () () () ()\n^entry():\nn = const.i64 8\np = alloc n\nq = call @create\nold = qreg.id q\nuncall @create () (q)\na = call @create\nnew = qreg.id a\nsame = icmp.eq old new\nbr same ^bad() ^good()\n^bad():\ntrap\n^good():\nstore.i64 p new\nloaded = load.i64 p\nb = qreg.from_id loaded\nqreg.free b\nstale = qreg.width a\nret\nfn cc @create () (q:qreg[2]) () () ()\n^entry():\nq = qreg.new data 2\nret q"
+        obj=make_program(text,{"root":root,"create":create},layout=layout)
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual(result["classical_steps"],"18")
+        self.assertEqual(result["resources"]["peak_qubits[data]"],"2")
+        self.assertEqual(result["resources"]["qubit_second[data]"],"22")
+
+    def test_reader_checks_register_result_and_operand_arities(self):
+        sig={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        for row in ["qreg.new data 2","qreg.width q","qreg.id q","qreg.from_id id","qreg.slice q 0 1","qreg.concat q q", "x = qreg.free q"]:
+            with self.subTest(row=row),self.assertRaisesRegex(e.ContractError,"result arity"):
+                make_object("fn cc @root () () () () ()\n^entry():\n"+row+"\nret",sig)
+        for row in ["q = qreg.new data", "q = qreg.new data 0", "x = qreg.slice q 0 0"]:
+            with self.subTest(row=row),self.assertRaises(e.ContractError):
+                make_object("fn cc @root () () () () ()\n^entry():\n"+row+"\nret",sig)
+
+    def test_cc_matching_region_inverse_restores_register_entry_versions(self):
+        cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        main="fn cc @root () () () () ()\n^entry():\nq = qreg.new data 1\naction_call @flip (q) () () ()\nadj action_call @flip (q) () () ()\nqreg.free q\nret"
+        flip="\nperm_action @flip (t:wire) () () () ()\n^entry():\nx t"
+        obj=make_program(main+flip,{"root":cc,"flip":action})
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual(result["resources"],{"gate_count":"2","peak_qubits[data]":"1","qubit_second[data]":"5","time":"7"})
+        obj=make_program(main.replace("adj action_call @flip (q) () () ()\n","")+flip,{"root":cc,"flip":action})
+        with self.assertRaisesRegex(e.ContractError,"cleanliness.*evidence"):
+            e.estimate(obj,target(),"root",[],["0"]*4)
+
+    def test_reader_enforces_the_published_static_register_view_rules(self):
+        cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        identity={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        child="\nperm_action @identity (t:wire) () () () ()\n^entry():"
+        prefix="fn cc @root () () () () ()\n^entry():\nq = qreg.new data 2\ns = qreg.slice q 0 1\n"
+        cases=["n = qreg.width s\naction_call @identity (s) () () ()\nret", "n = qreg.width q\naction_call @identity (s) () () ()\nret", "ret", "br ^work(s)\n^work(v:qreg[1]):\naction_call @identity (v) () () ()\nret", "action_call @identity (s) () () ()\naction_call @identity (s) () () ()\nret", "br ^work()\n^work():\nbr ^end()\n^end():\nret"]
+        for body in cases:
+            with self.subTest(body=body),self.assertRaisesRegex(e.ContractError,"§3.3.*view"):
+                make_program(prefix+body+child,{"root":cc,"identity":identity})
+        obj=make_program(prefix+"br ^work()\n^work():\naction_call @identity (s) () () ()\nqreg.free q\nret"+child,{"root":cc,"identity":identity})
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual((result["classical_steps"],result["resources"]["qubit_second[data]"]),("6","8"))
+
+    def test_cc_control_views_are_consumed_once_by_wrapped_region_calls(self):
+        cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        identity={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        template="fn cc @root () () () () ()\n^entry():\nq = qreg.new data 2\nt = qreg.new data 1\ns = qreg.slice q 0 1\n{wrapper} action_call @identity (t) () () ()\nqreg.free q\nqreg.free t\nret\nperm_action @identity (t:wire) () () () ()\n^entry():\nx t\nx t"
+        for wrapper in ["ctl s","adj ctl s","ctl s adj"]:
+            obj=make_program(template.format(wrapper=wrapper),{"root":cc,"identity":identity})
+            result=e.estimate(obj,target(),"root",[],["0"]*4)
+            self.assertEqual(result["classical_status"],"COMPLETED")
+            self.assertEqual(result["classical_steps"],"7")
+            self.assertEqual(result["resources"],{"gate_count":"2","peak_qubits[data]":"3","qubit_second[data]":"18","time":"9"})
+
+    def test_block_effects_bind_images_zero_sectors_and_segment_reversal(self):
+        r={"abi":"0.9","tier":"r","kind":"r","params":[],"results":[]}
+        layout={"ptr_width":32,"H":11,"A_tab":2,"S_cells":0,"globals":{},"interface_regions":{},"heap_base":1,"heap_limit_max":1024,"null_size":1}
+        devices={"models":{"block":{"version":"0.9"}},"services":{}}
+        code="fn r @root () () () () ()\n^entry():\nn = const.i64 512\np = alloc n\ns = const.i64 {sector}\neffect block.read s p\nv = load.i8 p\nz = const.i8 0\nc = icmp.eq v z\nbr c ^zero() ^nonzero()\n^zero():\nret\n^nonzero():\nx = const.i8 1\nret"
+        for sector,steps in [(0,10),(1,9)]:
+            obj=make_program(code.format(sector=sector),{"root":r},layout={**layout,"block_image":"disk"},data={"disk":"ff"*512},devices=devices)
+            result=e.estimate(obj,target(),"root",[],["0"]*4)
+            self.assertEqual((result["classical_status"],result["classical_steps"],result["resources"]["time"]),("COMPLETED",str(steps),str(steps)))
+        writer={**r,"params":["i64","ptr"]}
+        code="fn r @root () () () () ()\n^entry():\nn = const.i64 512\np = alloc n\ns = const.i64 0\nv = const.i8 9\nstore.i8 p v\ncall @writer s p\nuncall @writer (s, p) ()\neffect block.read s p\nx = load.i8 p\nz = const.i8 0\nc = icmp.eq x z\nbr c ^zero() ^nonzero()\n^zero():\nret\n^nonzero():\nbad = const.i8 1\nret\nfn r @writer (s:i64, p:ptr) () () () ()\n^entry():\neffect block.write s p\nret"
+        obj=make_program(code,{"root":r,"writer":writer},layout=layout,devices=devices)
+        self.assertEqual(e.estimate(obj,target(),"root",[],["0"]*4)["classical_steps"],"15")
+
+    def test_reader_rejects_partial_block_sector_images_before_execution(self):
+        r={"abi":"0.9","tier":"r","kind":"r","params":[],"results":[]}
+        layout={"ptr_width":32,"H":0,"A_tab":0,"S_cells":0,"globals":{},"interface_regions":{},"heap_base":0,"heap_limit_max":0,"null_size":1,"block_image":"disk"}
+        for size in [1,511,513,1023]:
+            with self.subTest(size=size),self.assertRaisesRegex(e.ContractError,"K10.*512"):
+                make_program("fn r @root () () () () ()\n^entry():\nret",{"root":r},layout=layout,data={"disk":"00"*size})
+
+    def test_reader_requires_each_data_line_to_have_its_own_symbol(self):
+        r={"abi":"0.9","tier":"r","kind":"r","params":[],"results":[]}
+        obj=make_program("fn r @root () () () () ()\n^entry():\nret",{"root":r},data={"image":"01"})
+        symbols=e.jcs({key:value for key,value in obj.sections["symbols"].items() if value["kind"]!="data"})
+        text=obj.text.replace(e.jcs(obj.sections["symbols"]),symbols)
+        with self.assertRaisesRegex(e.ContractError,"data.*symbols"):
+            e.Object.read(text)
+
+    def test_reader_checks_device_declarations_and_zero_entropy_needs_no_tape(self):
+        r={"abi":"0.9","tier":"r","kind":"r","params":[],"results":[]}
+        layout={"ptr_width":32,"H":2,"A_tab":1,"S_cells":0,"globals":{},"interface_regions":{},"heap_base":1,"heap_limit_max":1,"null_size":1}
+        code="fn r @root () () () () ()\n^entry():\nn = const.i64 1\np = alloc n\nz = const.i64 0\neffect entropy.read p z\nret"
+        with self.assertRaisesRegex(e.ContractError,"§9.1.*model"):
+            make_program(code,{"root":r},layout=layout)
+        with self.assertRaisesRegex(e.ContractError,"§9.1.*model"):
+            make_program(code,{"root":r},layout=layout,devices={"models":{"unknown":{"version":"0.9"}},"services":{}})
+        obj=make_program(code,{"root":r},layout=layout,devices={"models":{"entropy":{"version":"0.9"}},"services":{}})
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual((result["classical_status"],result["classical_steps"]),("COMPLETED","5"))
+        with self.assertRaisesRegex(e.ContractError,"§9.1.*service"):
+            make_program("fn cc @root () () () () ()\n^entry():\np = const.i32 0\nn = const.i64 0\nr = hostcall example.service p n\nret",{"root":{**r,"tier":"cc","kind":"cc"}},layout=layout)
+
+    def test_source_releases_match_local_clean_or_borrowed_allocations(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[1],"mem":[],"args":[],"bounds":[]}
+        for body in ["b = qborrow any 1\nqfree b", "b = qalloc any 1\nqreturn b", "b = qborrow any 1\nquncopy s b", "qreturn s", "qfree s"]:
+            obj=make_object("perm_action @root () (s:wire in) () () ()\n^entry():\n"+body,sig)
+            with self.subTest(body=body),self.assertRaisesRegex(e.ContractError,"§4.3.*release"):
+                e.estimate(obj,target(),"root",[],["0"]*4)
+
+    def test_cc_inverse_pairs_on_disjoint_slices_restore_independent_versions(self):
+        cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        text="fn cc @root () () () () ()\n^entry():\nq = qreg.new data 2\na = qreg.slice q 0 1\naction_call @flip (a) () () ()\nb = qreg.slice q 1 1\naction_call @flip (b) () () ()\na = qreg.slice q 0 1\nadj action_call @flip (a) () () ()\nb = qreg.slice q 1 1\nadj action_call @flip (b) () () ()\nqreg.free q\nret\nperm_action @flip (t:wire) () () () ()\n^entry():\nx t"
+        for n in [2,1<<40]:
+            obj=make_program(text.replace("qreg.new data 2",f"qreg.new data {n}"),{"root":cc,"flip":action})
+            result=e.estimate(obj,target(),"root",[],["0"]*4)
+            self.assertEqual((result["classical_status"],result["classical_steps"]),("COMPLETED","11"))
+            self.assertEqual(result["resources"],{"gate_count":"4","peak_qubits[data]":str(n),"qubit_second[data]":str(13*n),"time":"15"})
+            self.assertLess(result["summary_operations"],1000)
+
+    def test_cc_joint_call_inverse_requires_every_current_output_version(self):
+        cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        joint={**action,"mut":[1,1]}
+        text="fn cc @root () () () () ()\n^entry():\na = qreg.new data 1\nb = qreg.new data 1\naction_call @joint (a, b) () () ()\naction_call @flip (a) () () ()\nadj action_call @flip (a) () () ()\nadj action_call @joint (a, b) () () ()\nqreg.free a\nqreg.free b\nret\nperm_action @joint (a:wire, b:wire) () () () ()\n^entry():\nswap a b\nperm_action @flip (a:wire) () () () ()\n^entry():\nx a"
+        obj=make_program(text,{"root":cc,"joint":joint,"flip":action})
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual(result["resources"],{"gate_count":"4","peak_qubits[data]":"2","qubit_second[data]":"20","time":"13"})
+        text=text.replace("adj action_call @flip (a) () () ()\nadj action_call @joint (a, b) () () ()", "adj action_call @joint (a, b) () () ()\nadj action_call @flip (a) () () ()")
+        obj=make_program(text,{"root":cc,"joint":joint,"flip":action})
+        with self.assertRaisesRegex(e.ContractError,"cleanliness.*evidence"):
+            e.estimate(obj,target(),"root",[],["0"]*4)
+
+    def test_cc_region_inverse_pair_keeps_classical_token_identities(self):
+        cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":["token"],"bounds":[]}
+        oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        body="fn cc @root () () () () ()\n^entry():\nz = const.i64 0\na = budget.mint @o z z z z\nb = budget.mint @o z z z z\nq = qreg.new data 1\naction_call @flip (q) () () (a)\nadj action_call @flip (q) () () ({token})\nqreg.free q\nret\nperm_action @flip (q:wire) () () (tk:token) ()\n^entry():\nx q\noracle @o (x:wire in) (t:wire) (f:wire[4]) () ()\nregs {{  }}\n^entry():\nlift.retval x"
+        signatures={"root":cc,"flip":action,"o":oracle}
+        obj=make_program(body.format(token="b"),signatures)
+        with self.assertRaisesRegex(e.ContractError,"cleanliness.*evidence"):
+            e.estimate(obj,target(),"root",[],["0"]*4)
+        result=e.estimate(make_program(body.format(token="a"),signatures),target(),"root",[],["0"]*4)
+        self.assertEqual(result["resources"],{"gate_count":"2","peak_qubits[data]":"1","qubit_second[data]":"5","time":"10"})
+
+    def test_wire_version_ranges_scale_with_source_boundaries(self):
+        states=e.WireVersions();q=e.Bundle("allocation",1<<70,"data")
+        states.acquire(q);initial=states.capture([q]);saved=dict(states.ranges)
+        states.assign([q.bit(0)],1,False)
+        states.assign([q.bit(q.width-1)],2,False)
+        self.assertEqual(len(states.ranges[q.identity]),3)
+        self.assertEqual(saved[q.identity],((0,1<<70,0,True),))
+        self.assertEqual(states.capture([q.bit(0),q.slice(0,2)]),((q.identity,0,1,1,False),(q.identity,1,2,0,True)))
+        states.restore(initial)
+        self.assertEqual(states.ranges,saved)
+        with self.assertRaisesRegex(e.ContractError,"inactive wire range"):
+            states.capture([e.Bundle(q.identity,1,"data",q.width)])
+
+    def test_classical_and_quantum_segment_reversal_charge_active_frames(self):
+        obj=e.Object.read((ROOT/".tmp/sol-estimate/tmp/quantum-uncall.bisa").read_text())
+        result=e.estimate(obj,target(),"main",[],["0"]*4)
+        self.assertEqual((result["classical_steps"],result["reversed_classical_steps"]),("6","4"))
+        self.assertEqual(result["resources"],{"gate_count":"2","peak_qubits[data]":"1","qubit_second[data]":"8","time":"12"})
+        cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        obj=make_program("fn cc @root () () () () ()\n^entry():\ncall @worker\nuncall @worker () ()\nret\nfn cc @worker () () () () ()\n^entry():\nz = const.i8 1\nret",{"root":cc,"worker":cc})
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual((result["classical_steps"],result["reversed_classical_steps"]),("5","3"))
+        self.assertEqual(result["resources"]["time"],"8")
+        bound=e.estimate(obj,target(),"root",[],["0"]*4,step_bound=5)
+        self.assertEqual(bound["resources"]["time"],"10")
+        self.assertIn("reversed", " ".join(bound["bound_assumptions"]))
+
+    def test_cc_register_program_matches_complete_native_vm_ledger(self):
+        obj=e.Object.read((ROOT/"examples/native-pair-program.bisa").read_text())
+        result=e.estimate(obj,target(),"main",[],["0"]*4)
+        self.assertEqual(result["label"],"exact")
+        self.assertEqual(result["classical_steps"],"7")
+        self.assertEqual(result["resources"],{"gate_count":"8","peak_qubits[data]":"4","qubit_second[data]":"84","time":"25"})
+
+    def test_cc_dynamic_register_width_zero_capacity_and_alias_lifetimes(self):
+        sig={"abi":"0.9","tier":"cc","kind":"cc","params":["i64"],"results":[]}
+        obj=make_object("fn cc @root (n:i64) () () () ()\n^entry():\nq = qreg.new data n\nid = qreg.id q\na = qreg.from_id id\nw = qreg.width a\nqreg.free q\nstale = qreg.width a\nret",sig)
+        for n in [0,2,1<<40]:
+            result=e.estimate(obj,target(),"root",[str(n)],["0"]*4)
+            self.assertEqual(result["classical_steps"],"6")  # stale alias traps before ret
+            self.assertEqual(result["resources"]["time"],"6")
+            self.assertEqual(result["resources"]["peak_qubits[data]"],str(n))
+            self.assertEqual(result["resources"]["qubit_second[data]"],str(4*n))
+        doc=e.loads(e.jcs(target().doc));doc["classes"]["data"]["capacity"]=1
+        result=e.estimate(obj,e.Target.read(e.jcs(doc)),"root",["2"],["0"]*4)
+        self.assertEqual(result["classical_steps"],"1")
+        self.assertEqual(result["resources"]["peak_qubits[data]"],"0")
+
+    def test_cc_register_call_alias_and_uncall_restores_ledger_without_reusing_ids(self):
+        root={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        create={**root,"results":["qreg[2]"]}
+        text="fn cc @root () () () () ()\n^entry():\nq = call @create\nid = qreg.id q\nuncall @create () (q)\nstale = qreg.from_id id\nret\nfn cc @create () (q:qreg[2]) () () ()\n^entry():\nq = qreg.new data 2\nret q"
+        obj=make_program(text,{"root":root,"create":create})
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual(result["classical_steps"],"6")
+        self.assertEqual(result["resources"],{"gate_count":"0","peak_qubits[data]":"2","qubit_second[data]":"6","time":"6"})
+        echo={**root,"params":["qreg[*]"],"results":["qreg[*]"]}
+        obj=make_program("fn cc @root () () () () ()\n^entry():\nq = qreg.new data 2\na = call @echo q\nqreg.free a\nstale = qreg.width q\nret\nfn cc @echo (q:qreg[*]) (r:qreg[*]) () () ()\n^entry():\nret q",{"root":root,"echo":echo})
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual(result["classical_steps"],"5")
+        self.assertEqual(result["resources"]["qubit_second[data]"],"6")
+
+    def test_cc_register_slice_concat_and_transfer_width_faults(self):
+        root={"abi":"0.9","tier":"r","kind":"r","params":[],"results":[]}
+        identity={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        code="fn r @root () () () () ()\n^entry():\na = qreg.new data 2\nb = qreg.new data 1\nq = qreg.concat a b\ns = qreg.slice q 1 1\naction_call @identity (s) () () ()\nn = qreg.width q\nqreg.free q\nret\nperm_action @identity (x:wire) () () () ()\n^entry():\nx x\nx x"
+        obj=make_program(code,{"root":root,"identity":identity})
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual(result["classical_steps"],"8")
+        self.assertEqual(result["resources"],{"gate_count":"2","peak_qubits[data]":"3","qubit_second[data]":"23","time":"10"})
+        # A dynamic width mismatch is a terminal failed prefix, before the call.
+        dynamic={**root,"params":["i64"]}
+        obj=make_program("fn r @root (n:i64) () () () ()\n^entry():\nq = qreg.new data n\naction_call @identity (q) () () ()\nret\nperm_action @identity (x:wire) () () () ()\n^entry():",{"root":dynamic,"identity":identity})
+        result=e.estimate(obj,target(),"root",["2"],["0"]*4)
+        self.assertEqual((result["classical_steps"],result["gates"]),("2",{}))
+        self.assertEqual(result["resources"]["qubit_second[data]"],"2")
+
+
+    def test_trillion_visit_while_summary_preserves_class_and_flag_timing(self):
+        n=2**40
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[n],"mem":[],"args":[],"bounds":[n]}
+        body=f"perm_action @child () (cond:wire[{n}] in) () () ()\nregs {{  }} bounds {{ {n} }}\n^entry():\nc = qalloc data 1\nqloop {n} while cond {{\nx c[0]\nx c[0]\nqfree c\nc = qalloc special 1\n}}\nqfree c"
+        doc=e.loads(e.jcs(target().doc));doc["classes"]["special"]=dict(doc["classes"]["data"]);t=e.Target.read(e.jcs(doc));original=e.Catalog
+        class BoundedWork(original):
+            def body(self,*args,**kw):
+                if self.visits>1000:raise AssertionError("while iterations were enumerated")
+                return super().body(*args,**kw)
+        duration=14*n-10
+        for adjoint,data_extra,special_area in [(False,3,duration-3),(True,6*n-3,8*n-7)]:
+            text=f"perm_action @root () (cond:wire[{n}] in) () () ()\n^entry():\n"+("adj " if adjoint else "")+"action_call @child () (cond) () ()\n"+body
+            obj=make_program(text,{"root":{**sig,"bounds":[]},"child":sig})
+            with patch.object(e,"Catalog",BoundedWork):result=e.estimate(obj,t,"root",[],["0"]*4)
+            self.assertEqual(result["resources"]["time"],str(duration))
+            self.assertEqual(result["resources"]["qubit_second[data]"],str(2*n*duration+data_extra))
+            self.assertEqual(result["resources"]["qubit_second[special]"],str(special_area))
+            self.assertEqual(result["gates"],{"ccx":str(2*(n-1)),"cx":"2","x":str(2*n)})
+            self.assertLess(result["summary_operations"],1000)
+
+    def test_while_loop_carries_bindings_and_keeps_its_adjoint_flag_order(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[3],"mem":[],"args":[],"bounds":[3]}
+        body="perm_action @child () (cond:wire[3] in) () () ()\nregs {  } bounds { 3 }\n^entry():\nc = qalloc data 1\nqloop 3 while cond {\nx c[0]\nx c[0]\nqfree c\nc = qalloc special 1\n}\nqfree c"
+        doc=e.loads(e.jcs(target().doc));doc["classes"]["special"]=dict(doc["classes"]["data"]);t=e.Target.read(e.jcs(doc))
+        for adjoint,data_area,special_area in [(False,"195","29"),(True,"207","17")]:
+            root="perm_action @root () (cond:wire[3] in) () () ()\n^entry():\n"+("adj " if adjoint else "")+"action_call @child () (cond) () ()\n"
+            obj=make_program(root+body,{"root":{**sig,"bounds":[]},"child":sig})
+            analytic=e.estimate(obj,t,"root",[],["0"]*4);actual=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
+            self.assertEqual(actual["exact_resources"],analytic["exact_resources"])
+            self.assertEqual(actual["resources"]["time"],"32")
+            self.assertEqual(actual["resources"]["qubit_second[data]"],data_area)
+            self.assertEqual(actual["resources"]["qubit_second[special]"],special_area)
+            self.assertEqual(actual["gates"],{"ccx":"4","cx":"2","x":"6"})
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);ledger=e.Ledger(t,e.Schedule(schedule()));c.ledger=ledger
+        e.Source(obj,t,c).region("child",[],["0"]*4,{"cond":e.Bundle("condition",3,"data")},raw_inverse=True)
+        rows=ledger.finish();self.assertEqual(rows["qubit_second[data]"],195)
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t)
+        profile=e.Source(obj,t,c).region("child",[],["0"]*4,{"cond":e.Bundle("condition",3,"data")},raw_inverse=True)
+        self.assertEqual(profile.resources(t,{"data":3}),rows)
+
+    def test_while_summary_counts_scheme_workspace_borrow_and_accuracy(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[3],"mem":[],"args":[],"bounds":[3]}
+        obj=make_object("perm_action @root () (cond:wire[3] in) () () ()\nregs {  } bounds { 3 }\n^entry():\nqloop 3 while cond {\nb = qborrow special 1\nx b\nx b\nqreturn b\n}",sig)
+        doc=e.loads(e.jcs(target().doc));doc["classes"]["special"]={**doc["classes"]["data"],"dirty_rate":2}
+        next(g for g in doc["gates"] if g["op"]=="x")["controls"]["min"]=2
+        doc["schemes"]=[{"name":"controlled-x","realises":{"op":"x","controls":{"min":1,"max":1}},"ancillae":{"count":2,"class":"special","state":"clean"},"template":[{"gate":"cx","wires":["c[0]","t"]}]}]
+        t=e.Target.read(e.jcs(doc))
+        summary=e.estimate(obj,t,"root",[],["0"]*4,epsilon="0.1")
+        replay=e.estimate(obj,t,"root",[],["0"]*4,epsilon="0.1",include_frame=True)
+        self.assertEqual(summary["exact_resources"],replay["exact_resources"])
+        self.assertEqual(summary["gates"],replay["gates"])
+        self.assertEqual(summary["resources"]["qubit_second[data]"],"192")
+        self.assertEqual(summary["resources"]["qubit_second[special]"],"24")
+        self.assertEqual(summary["resources"]["peak_qubits[special]"],"3")
+        self.assertEqual(summary["resolved_default_epsilon_share"],{"numerator":"1","denominator":"60"})
+
+    def test_qif_reallocations_keep_each_arm_and_outer_lifetime_bindings(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        body="perm_action @child (q:wire) () () () ()\n^entry():\nc = qalloc data 1\nqif q {\nqfree c\nc = qalloc special 2\nx c[1]\nx c[1]\n} {\nqfree c\nc = qalloc data 3\nx c[2]\nx c[2]\n}\nqfree c"
+        doc=e.loads(e.jcs(target().doc));doc["classes"]["special"]=dict(doc["classes"]["data"]);t=e.Target.read(e.jcs(doc))
+        for adjoint in [False,True]:
+            text="perm_action @root (q:wire) () () () ()\n^entry():\n"+("adj " if adjoint else "")+"action_call @child (q) () () ()\n"+body
+            obj=make_program(text,{"root":sig,"child":sig});analytic=e.estimate(obj,t,"root",[],["0"]*4)
+            actual=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
+            self.assertEqual(actual["exact_resources"],analytic["exact_resources"])
+            self.assertEqual(actual["resources"]["time"],"6")
+            self.assertEqual(actual["resources"]["qubit_second[data]"],"15")
+            self.assertEqual(actual["resources"]["qubit_second[special]"],"6")
+            widths=[r["width"] for r in actual["frame"]["scratch"]]
+            self.assertEqual(widths,[3,2,1] if adjoint else [1,2,3])
+
+    def test_analytic_predicate_depth_matches_replay_admission(self):
+        sig={"abi":"0.9","tier":"q","kind":"action","mut":[1,1,1],"in":[],"mem":[],"args":[],"bounds":[]}
+        obj=make_object("action @root (a:wire, b:wire, t:wire) () () () ()\n^entry():\nqpred a\nqpred b\nx t\nqunpred b\nqunpred a",sig)
+        doc=e.loads(e.jcs(target().doc));doc["capabilities"]["max_predicate_depth"]=1;t=e.Target.read(e.jcs(doc))
+        for replay in [False,True]:
+            with self.assertRaisesRegex(e.ContractError,"max_predicate_depth"):
+                e.estimate(obj,t,"root",[],["0"]*4,include_frame=replay)
+
+    def test_many_procedure_returns_validate_global_locations_only_linearly(self):
+        count=32
+        root={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        child={"abi":"0.9","tier":"q","kind":"lproc","params":[1],"result":1,"tokens":[],"args":[],"mem":[]}
+        text="oracle @root (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { "+", ".join(f"r{i}:reg[1]" for i in range(count))+" }\n^entry():\n"+"\n".join(f"r{i} = lift.call @f{i} (x) () () ()" for i in range(count))+f"\nlift.retval r{count-1}\n"+"\n".join(f"lproc @f{i} (a:reg[1]) (r:reg[1]) () () ()\n^entry():\nlift.ret a" for i in range(count))
+        layout={"ptr_width":32,"H":1,"A_tab":0,"S_cells":4,"globals":{},"interface_regions":{},"heap_base":1,"heap_limit_max":0,"null_size":1}
+        obj=make_program(text,{"root":root,**{f"f{i}":child for i in range(count)}},layout=layout)
+        original=e.Catalog;bindings=[]
+        class Counting(original):
+            def bind(self,formals,*args,**kw):
+                if len(formals)==1 and isinstance(formals[0],dict) and formals[0].get("name")=="location":bindings.append(1)
+                return super().bind(formals,*args,**kw)
+        with patch.object(e,"Catalog",Counting):result=e.estimate(obj,target(),"root",[],["1","0","16","1"])
+        self.assertEqual(result["label"],"exact")
+        self.assertLessEqual(len(bindings),4*(3*count))
+
+    def test_known_domain_ties_reject_before_any_realisation(self):
+        sig={"abi":"0.9","tier":"q","kind":"action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        full=target();doc=e.loads(e.jcs(full.doc));doc["gates"]=[g for g in doc["gates"] if g["op"]!="h"];limited=e.Target.read(e.jcs(doc))
+        for kind,body,at,payload in [
+            ("gate","h q\nx q","entry:1",{"realisation":"native"}),
+            ("start","h q\nx q","entry:1",{"time":0}),
+            ("alloc","h q\nd = qalloc any 1\nqfree d","entry:1",{"class":"data"}),
+            ("cleanup","h q\nd = qcopy q\nquncopy q d","entry:2",{"realisation":"reverse"})]:
+            with self.subTest(kind=kind):
+                obj=make_object("action @root (q:wire) () () () ()\n^entry():\n"+body,sig)
+                bound=e.estimate(obj,full,"root",[],["0"]*4)["effective_schedule"]
+                bound["bindings"]["target_hash"]=limited.hash
+                selected=entry(kind,path=[point(obj.symbol("root")["interface_hash"],at)],**payload)
+                bound["entries"]=[selected,selected];obj.sections["schedule"]=bound
+                attempts=[];original=e.Ledger
+                class Recording(original):
+                    def gate(self,*args,**kw):attempts.append(args[0]);return super().gate(*args,**kw)
+                with patch.object(e,"Ledger",Recording):
+                    with self.assertRaisesRegex(e.ContractError,"E_SCHEDULE_INFEASIBLE:.*multiple maximal matching"):
+                        e.estimate(obj,limited,"root",[],["0"]*4)
+                self.assertEqual(attempts,[])
+
+    def test_nested_token_ties_keep_the_concrete_validation_stage(self):
+        sig={"abi":"0.9","tier":"q","kind":"action","mut":[1,1,4],"in":[],"mem":[],"args":["token"],"bounds":[]}
+        child={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        text="action @root (q:wire, t:wire, f:wire[4]) () () (tk:token) ()\n^entry():\nh q\noracle_call @child tk (q) t f () ()\noracle @child (x:wire in) (t:wire) (f:wire[4]) () ()\nregs {  }\n^entry():\nlift.retval x"
+        obj=make_program(text,{"root":sig,"child":child});full=target();args=[["3","0","0","0"]]
+        bound=e.estimate(obj,full,"root",args,["0"]*4)["effective_schedule"]
+        selected=entry(path=[point(obj.symbol("root")["interface_hash"],"entry:1"),point(obj.symbol("child")["interface_hash"])],step=3,phase="fwd",realisation="native")
+        bound["entries"]=[selected,selected];obj.sections["schedule"]=bound
+        doc=e.loads(e.jcs(full.doc));doc["gates"]=[g for g in doc["gates"] if g["op"]!="h"];limited=e.Target.read(e.jcs(doc))
+        bound["bindings"]["target_hash"]=limited.hash
+        with self.assertRaisesRegex(e.ContractError,"E_GATE_UNSUPPORTED"):
+            e.estimate(obj,limited,"root",args,["0"]*4)
+        bound["bindings"]["target_hash"]=full.hash
+        with self.assertRaisesRegex(e.ContractError,"multiple maximal matching"):
+            e.estimate(obj,full,"root",args,["0"]*4)
+        args=[["2","0","0","0"]];bound["bindings"]["params_hash"]=e.digest(e.jcs(args))
+        self.assertEqual(e.estimate(obj,full,"root",args,["0"]*4)["label"],"exact")
+
+    def test_admission_checks_nested_actions_and_respects_covering_entries(self):
+        sig={"abi":"0.9","tier":"q","kind":"action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        text="action @root (q:wire) () () () ()\n^entry():\naction_call @child (q) () () ()\naction @child (q:wire) () () () ()\n^entry():\nh q\nx q"
+        obj=make_program(text,{"root":sig,"child":sig});full=target()
+        bound=e.estimate(obj,full,"root",[],["0"]*4)["effective_schedule"]
+        low=entry(realisation="native");path=[point(obj.symbol("root")["interface_hash"]),point(obj.symbol("child")["interface_hash"])]
+        first=entry(path=path,realisation="native")
+        second=entry(path=[path[0],point(path[1]["symbol"],"entry:1")],realisation="native")
+        bound["entries"]=[low,low,first,second];obj.sections["schedule"]=bound
+        self.assertEqual(e.estimate(obj,full,"root",[],["0"]*4)["gates"],{"h":"1","x":"1"})
+        bound["entries"].pop()
+        doc=e.loads(e.jcs(full.doc));doc["gates"]=[g for g in doc["gates"] if g["op"]!="h"];limited=e.Target.read(e.jcs(doc))
+        bound["bindings"]["target_hash"]=limited.hash
+        with self.assertRaisesRegex(e.ContractError,"multiple maximal matching"):
+            e.estimate(obj,limited,"root",[],["0"]*4)
+
+    def test_loop_reallocation_carries_changed_class_to_the_next_visit(self):
         sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[3]}
-        text="perm_action @root (q:wire) () () () ()\nregs {  } bounds { 3 }\n^entry():\nc = qalloc any 1\nqloop 3 {\nx c[0]\nx c[0]\nqfree c\nc = qalloc any 2\n}\nqfree c"
-        obj=make_object(text,sig);t=target()
+        text="perm_action @root (q:wire) () () () ()\nregs {  } bounds { 3 }\n^entry():\nc = qalloc data 1\nqloop 3 {\nx c[0]\nx c[0]\nqfree c\nc = qalloc special 1\n}\nqfree c"
+        obj=make_object(text,sig);doc=e.loads(e.jcs(target().doc));doc["classes"]["special"]=dict(doc["classes"]["data"]);t=e.Target.read(e.jcs(doc))
         analytic=e.estimate(obj,t,"root",[],["0"]*4);actual=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
         self.assertEqual(actual["exact_resources"],analytic["exact_resources"])
         self.assertEqual(actual["gates"],{"x":"6"})
-        self.assertEqual(actual["resources"]["qubit_second[data]"],"16")
-        self.assertEqual([r["width"] for r in actual["frame"]["scratch"]],[1,2,2,2])
+        self.assertEqual(actual["resources"]["qubit_second[data]"],"8")
+        self.assertEqual(actual["resources"]["qubit_second[special]"],"4")
+        self.assertEqual([r["class"] for r in actual["frame"]["scratch"]],["data","special","special","special"])
         huge=2**40;large=make_object(text.replace('3',str(huge)),{**sig,"bounds":[huge]})
         summary=e.estimate(large,t,"root",[],["0"]*4)
-        self.assertEqual(int(summary["resources"]["qubit_second[data]"]),6*huge-2)
-        self.assertEqual(summary["resources"]["peak_qubits[data]"],"3")
+        self.assertEqual(int(summary["resources"]["qubit_second[data]"]),2*huge+2)
+        self.assertEqual(int(summary["resources"]["qubit_second[special]"]),2*huge-2)
+        self.assertEqual(summary["resources"]["peak_qubits[data]"],"2")
         self.assertLess(summary["summary_operations"],100)
 
     def test_zero_visit_loop_keeps_the_entry_binding(self):
         sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[0]}
-        obj=make_object("perm_action @root (q:wire) () () () ()\nregs {  } bounds { 0 }\n^entry():\nc = qalloc any 1\nqloop 0 {\nqfree c\nc = qalloc any 2\n}\nqfree c",sig)
-        t=target();actual=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
+        obj=make_object("perm_action @root (q:wire) () () () ()\nregs {  } bounds { 0 }\n^entry():\nc = qalloc data 1\nqloop 0 {\nqfree c\nc = qalloc special 1\n}\nqfree c",sig)
+        doc=e.loads(e.jcs(target().doc));doc["classes"]["special"]=dict(doc["classes"]["data"]);t=e.Target.read(e.jcs(doc));actual=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
         self.assertEqual([r["width"] for r in actual["frame"]["scratch"]],[1])
         self.assertEqual(actual["resources"]["peak_qubits[data]"],"2")
 
-    def test_changed_width_loop_keeps_iteration_addresses_and_inverse_lifetimes(self):
+    def test_changed_class_loop_keeps_iteration_addresses_and_inverse_lifetimes(self):
         sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[3]}
-        text="perm_action @child (q:wire) () () () ()\nregs {  } bounds { 3 }\n^entry():\nc = qalloc any 1\nqloop 3 {\nx c[0]\nx c[0]\nqfree c\nc = qalloc any 2\n}\nqfree c"
-        t=target();events=[];original=e.Ledger
+        text="perm_action @child (q:wire) () () () ()\nregs {  } bounds { 3 }\n^entry():\nc = qalloc data 1\nqloop 3 {\nx c[0]\nx c[0]\nqfree c\nc = qalloc special 1\n}\nqfree c"
+        doc=e.loads(e.jcs(target().doc));doc["classes"]["special"]=dict(doc["classes"]["data"]);t=e.Target.read(e.jcs(doc));events=[];original=e.Ledger
         class Recording(original):
             def gate(self,op,wires,controls=(),**kw):
                 events.append((kw["chain"][-1]["point"],kw["chain"][-1]["iteration"]))
@@ -231,14 +642,26 @@ class Accounting(unittest.TestCase):
         analytic=e.estimate(obj,t,"root",[],["0"]*4)
         with patch.object(e,"Ledger",Recording):actual=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
         self.assertEqual(actual["exact_resources"],analytic["exact_resources"])
-        self.assertEqual(actual["resources"]["qubit_second[data]"],"16")
-        self.assertEqual([r["width"] for r in actual["frame"]["scratch"]],[2,2,2,1])
-        self.assertEqual(events,[(point,[i]) for i in [2,1,0] for point in ["entry:3","entry:2"]])
-        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);ledger=e.Ledger(t,e.Schedule(schedule()))
+        self.assertEqual(actual["resources"]["qubit_second[data]"],"8")
+        self.assertEqual(actual["resources"]["qubit_second[special]"],"4")
+        self.assertEqual([r["class"] for r in actual["frame"]["scratch"]],["special","special","special","data"])
+        self.assertEqual(events,[(point,[i]) for i in [0,1,2] for point in ["entry:3","entry:2"]])
+        events.clear()
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);ledger=Recording(t,e.Schedule(schedule()))
         c.ledger=ledger;q=e.Bundle("input",1,"data")
         e.Source(obj,t,c).region("child",[],["0"]*4,{"q":q},raw_inverse=True)
-        self.assertEqual(ledger.finish()["qubit_second[data]"],16)
-        self.assertEqual([r["width"] for r in ledger.frame()["scratch"]],[2,2,2,1])
+        self.assertEqual(ledger.finish()["qubit_second[data]"],8)
+        self.assertEqual([r["class"] for r in ledger.frame()["scratch"]],["special","special","special","data"])
+        self.assertEqual(events,[(point,[i]) for i in [2,1,0] for point in ["entry:3","entry:2"]])
+
+    def test_loop_entry_exit_live_names_and_types_must_agree(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[3]}
+        for n in [0,3,2**40]:
+            for body in ["qfree c\nc = qalloc any 2","qfree c","d = qalloc any 1"]:
+                text=f"perm_action @root (q:wire) () () () ()\nregs {{  }} bounds {{ {n} }}\n^entry():\nc = qalloc any 1\nqloop {n} {{\n{body}\n}}\nqfree c"
+                obj=make_object(text,{**sig,"bounds":[n]})
+                with self.assertRaisesRegex(e.ContractError,"entry/exit live names and types"):
+                    e.estimate(obj,target(),"root",[],["0"]*4)
 
     def test_reallocated_source_name_keeps_each_lifetime_shape_inside_loops(self):
         sig={"abi":"0.9","tier":"q","kind":"action","mut":[2],"in":[],"mem":[],"args":[],"bounds":[2]}
