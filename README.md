@@ -51,7 +51,9 @@ published JSON catalog. It needs no installed source tree at runtime. Python
 arbitrary-precision integers and `Fraction` implement the cost algebra; integer
 costs stay integral and division remains exact. Gates
 and state vectors are never materialised. Structured repetitions and padded
-memoryless oracle budgets use multiplication of cost summaries. The catalog
+oracle budgets use multiplication of cost summaries. Literal words use exact
+set-bit counts, including signed words wider than 2^53 bits; data images are
+counted in small byte chunks. The catalog
 is contract data, not code copied from another implementation. Tests match all
 86 published K82 leaf digests and compare every complete literal profile with
 its closed-form summary.
@@ -59,19 +61,22 @@ its closed-form summary.
 Current source coverage includes structured gates, allocation/borrowing,
 copy/XOR/exchange, predication, loops, local-region images and linear coherent
 memory, controlled action/oracle calls and qinplace, plus padded arithmetic/control
-oracles, lifted allocation with all four history slots, lifted free and
+oracles, recursive lifted procedure activation with fixed-binding instances,
+lifted allocation with all four history slots, lifted free and
 location-length bounds checking, lifted oracle/permutation
 calls and intrinsic oracle-uncall recompute, and layout-state/global-address
 construction. Each nested oracle retains
 its own resolved token. Unused resolved arguments retain their typed invocation
-bindings. Full lifted memory/activation rows, complete cleanup
+bindings. Remaining lifted memory rows and published source-binding gaps, complete cleanup
 partitioning, remaining register/effect histories and certificate proof checking still require work.
 Unsupported paths fail explicitly; they remain requirements.
 
 Full exact source coverage needs the published decisions described in
 [CONTRACT_GAPS.md](docs/CONTRACT_GAPS.md): physical wire binding of classical
 pseudo-locations and canonical widths for implicit/literal memory lengths.
-The source witnesses are admitted by the VM; varying the currently unspecified
+The source witnesses are admitted by the VM. Return delivery width and
+heterogeneous jump widths expose additional published recipe conflicts. Literal
+allocator lengths share the existing length-carrier gap. Varying the currently unspecified
 length width changes exact workspace costs. Proposed text is queued for the
 orchestrator to file in the spec tracker; it has not been adopted here.
 
@@ -82,7 +87,11 @@ of the reference cost calculation; the full rung-4 Grover estimate is pending.
 `--include-frame` reconstructs a B5 descriptor with distinct allocation
 lifetimes and nested invocation records. Concrete schedule/frame reconstruction
 visits dynamic leaves and retains allocation endpoints, never a gate list;
-its work can grow with the budget. The default analytic path retains its
+its work can grow with the budget. Root oracle results expose `padded_steps` for both passes. VM logical execution
+steps can stop earlier; the lifted-call witness agrees at its B=4 boundary and
+stays below the padded count at B=5.
+
+The default analytic path retains its
 closed-form scaling on finite-capacity targets whenever its sequential peak
 proves that the default class choices fit. It also counts the default accuracy
 population algebraically, before target scheme expansion. Class fallback,

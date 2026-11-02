@@ -249,3 +249,29 @@ estimator currently reports EST-SOURCE-04/pending evidence for generated
 rows requiring this missing adapter; B=0 has no such generated row and
 its construction/commit estimate remains available. Independent work
 continues, without changing the legal source width rule.
+
+### EST-SOURCE-02 additional witness: literal allocator length
+
+`tests/fixtures/literal-alloc-source-gap.bisa` has `p = lift.alloc 1`.
+Section 3.3 explicitly permits that literal, but ref lift.alloc takes a
+wire[N] length and provides no literal carrier. Its object hash is
+d4edf113cb68a6350ef4e58f60f4a2615bec1250bfac5ab9e7db0dbd6e5f2f28;
+the published VM returns payload1/code0/steps2 at tuple 2,1,0,0.
+This is the same unresolved physical length-carrier policy, not a new
+permission to choose a width. The estimator reports EST-SOURCE-02.
+
+Extend the proposed (UNADOPTED) §11.1 literal-length paragraph exactly:
+
+> For a literal n of lift.alloc, bind its length width to
+> L=max(1,ceil(log2(n+1))). Publish a lift.alloc.literal adapter with
+> the existing lift.alloc integer/wire/record formals, replacing its
+> length wire by integer n. The adapter unconditionally allocates a
+> fresh clean any-class len[L], prepares n using value.literal under
+> the row's effective controls, invokes lift.alloc with that len and
+> the original source-derived state/frame actuals, reverses the literal
+> preparation under the same controls, and releases len unconditionally.
+> This private carrier is not a source location or a persistent State
+> entry, and has no independent cleanup carrier.
+
+This proposal also needs amended catalog bytes/envelope identity before
+adoption. No adapter or length-width rule has been silently implemented.

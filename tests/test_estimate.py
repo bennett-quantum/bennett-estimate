@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import unittest
+from unittest.mock import patch
 import tempfile
 from fractions import Fraction as F
 
@@ -113,6 +114,35 @@ class Profiles(unittest.TestCase):
 
 
 class Catalog(unittest.TestCase):
+    def test_image_inverse_reverses_bits_with_empty_effective_controls(self):
+        events=[];original=e.Catalog
+        class Recording(original):
+            def gate_event(self,op,wires,controls=(),**kw):
+                events.append((wires[0].offset,controls));return super().gate_event(op,wires,controls,**kw)
+        c=Recording((ROOT/"data/ref-0.9.json").read_text(),self.t);c.closed_form=False
+        env={"I":"81","t":e.Bundle("t",8,"data")};body=[{"image":"I","wires":"t"}]
+        c.body(body,env,(("control",0,"data"),));self.assertEqual(events,[(0,()),(7,())])
+        events.clear();c.body(body,env,(("control",0,"data"),),True)
+        self.assertEqual(events,[(7,()),(0,())])
+
+    def test_image_summary_counts_bytes_and_preserves_class_boundaries(self):
+        original=e.Catalog
+        class BoundedWork(original):
+            events=0
+            def gate_event(self,*args,**kw):
+                self.events+=1
+                if self.events>10:raise AssertionError("image gates were enumerated")
+                return super().gate_event(*args,**kw)
+        image="ff00a5"*4096;c=BoundedWork((ROOT/"data/ref-0.9.json").read_text(),self.t)
+        p=c.body([{"image":"I","wires":"t"}],{"I":image,"t":e.Bundle("image",len(image)*4,"data")})
+        self.assertEqual(p.gates,{"x":12*4096});self.assertEqual(p.time,12*4096)
+        doc=e.loads(e.jcs(self.t.doc));doc["classes"]["special"]=dict(doc["classes"]["data"])
+        doc["gates"].insert(0,{"op":"x","classes":["special"],"controls":{"min":0,"max":0},"epsilon":0,"cost":{"time":3,"gate_count":1}})
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),e.Target.read(e.jcs(doc)))
+        env={"I":"aa5c","t":[e.Bundle("a",3,"data"),e.Bundle("b",13,"special")]};body=[{"image":"I","wires":"t"}]
+        c.closed_form=False;literal=c.body(body,env)
+        c.closed_form=True;self.assertEqual(c.body(body,env),literal);self.assertEqual(literal.time,22)
+
     def test_literal_summary_counts_set_bits_without_visiting_zero_bits(self):
         original=e.Catalog
         class BoundedWork(original):
@@ -209,6 +239,29 @@ class Catalog(unittest.TestCase):
 
 
 class Objects(unittest.TestCase):
+    def test_literal_allocator_length_uses_the_existing_length_binding_gap(self):
+        obj=e.Object.read((ROOT/"tests/fixtures/literal-alloc-source-gap.bisa").read_text())
+        t=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+        with self.assertRaisesRegex(e.ContractError,"EST-SOURCE-02"):
+            e.estimate(obj,t,"root",[],["2","1","0","0"])
+
+    def test_wide_zero_and_signed_words_keep_constant_summary_work(self):
+        n=2**53+1
+        sig={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        t=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text());original=e.Catalog
+        class BoundedWork(original):
+            def body(self,*args,**kw):
+                if self.visits>500:raise AssertionError("wide constant was enumerated")
+                return super().body(*args,**kw)
+        results=[]
+        for value in [0,-1]:
+            obj=object_with_signatures(f"oracle @root (x:wire in) (t:wire) (f:wire[4]) () ()\nregs {{ w:reg[{n}] }}\n^entry():\nw = lift.const.i{n} {value}\nlift.retval x",{"root":sig})
+            with patch.object(e,"Catalog",BoundedWork):result=e.estimate(obj,t,"root",[],["1","0","0","0"])
+            self.assertLess(result["summary_operations"],500)
+            self.assertEqual(int(result["gates"]["swap"]),2*n+8)
+            results.append(result)
+        self.assertEqual(int(results[1]["gates"]["x"])-int(results[0]["gates"]["x"]),2*n)
+
     def test_signed_lifted_literals_match_unsigned_encoding(self):
         sig={"abi":"0.9","tier":"q","kind":"oracle","in":[],"tgt":8,"fault":4,"mem":[],"args":[]}
         def obj(value):return object_with_signatures(f"oracle @root () (t:wire[8]) (f:wire[4]) () ()\nregs {{ w:reg[8] }}\n^entry():\nw = lift.const.i8 {value}\nlift.retval w",{"root":sig})
@@ -217,6 +270,7 @@ class Objects(unittest.TestCase):
             first=e.estimate(obj(signed),t,"root",[],budget);second=e.estimate(obj(unsigned),t,"root",[],budget)
             self.assertEqual(first["exact_resources"],second["exact_resources"])
             self.assertEqual(first["gates"],second["gates"])
+            if signed==-1:self.assertEqual(e.estimate(obj(signed),t,"root",[],budget,include_frame=True)["exact_resources"],first["exact_resources"])
         for invalid in [-129,256]:
             with self.assertRaisesRegex(e.ContractError,"literal"):
                 e.estimate(obj(invalid),t,"root",[],budget)
@@ -432,7 +486,7 @@ class CommandLine(unittest.TestCase):
     def test_contract_dependent_outputs_are_pending_evidence(self):
         binary=os.environ["BENNETT_ESTIMATE_BIN"]
         target=str(ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json")
-        cases=[("parameter-source-gap.bisa","parameter",'["0"]',"EST-SOURCE-01"),("implicit-length-source-gap.bisa","read_byte","[]","EST-SOURCE-02"),("token-alias-source-gap.bisa","root",'[["1","0","0","0"],["1","0","0","0"]]',"EST-CONTEXT-03"),("ret-delivery-source-gap.bisa","root","[]","EST-SOURCE-03"),("jump-width-source-gap.bisa","root","[]","EST-SOURCE-04")]
+        cases=[("parameter-source-gap.bisa","parameter",'["0"]',"EST-SOURCE-01"),("implicit-length-source-gap.bisa","read_byte","[]","EST-SOURCE-02"),("token-alias-source-gap.bisa","root",'[["1","0","0","0"],["1","0","0","0"]]',"EST-CONTEXT-03"),("ret-delivery-source-gap.bisa","root","[]","EST-SOURCE-03"),("jump-width-source-gap.bisa","root","[]","EST-SOURCE-04"),("literal-alloc-source-gap.bisa","root","[]","EST-SOURCE-02")]
         for file,region,args,code in cases:
             command=[binary,str(ROOT/"tests/fixtures"/file),"--target",target,"--region",region,"--params",args,"--budget","2,0,0,0"]
             actual=subprocess.run(command,capture_output=True,text=True,timeout=30)

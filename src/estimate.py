@@ -136,6 +136,10 @@ def loads(text):
         raise ContractError(f"invalid JSON: {ex}") from ex
 
 
+def is_image(value):
+    return isinstance(value,str) and len(value)%2==0 and re.fullmatch(r"[0-9a-f]*",value) is not None
+
+
 @lru_cache(maxsize=4096)
 def jcs_string(value):
     require(not any(0xD800 <= ord(c) <= 0xDFFF for c in value), "JCS: lone surrogate")
@@ -172,6 +176,23 @@ def jcs(value):
 
 def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+_BYTE_POPCOUNTS=bytes(value.bit_count() for value in range(256))
+
+
+def image_ones(image,start,end):
+    """Count a bit interval in input-sized chunks, never an emitted gate list."""
+    if start==end:return 0
+    first,low=divmod(start,8);last,high=divmod(end,8)
+    if first==last:return ((int(image[2*first:2*first+2],16)>>low)&((1<<(end-start))-1)).bit_count()
+    total=0
+    if low:
+        total+=(int(image[2*first:2*first+2],16)>>low).bit_count();first+=1
+    if high:total+=(int(image[2*last:2*last+2],16)&((1<<high)-1)).bit_count()
+    for offset in range(2*first,2*last,8192):
+        total+=sum(bytes.fromhex(image[offset:min(offset+8192,2*last)]).translate(_BYTE_POPCOUNTS))
+    return total
 
 
 def expression(expr, env, tables):
@@ -732,7 +753,7 @@ class Catalog:
             elif kind in ["angle", "image", "symbol", "class", "event", "allocation", "value", "arguments", "region"]:
                 value = caller.get(actual, actual) if isinstance(actual, str) else actual
                 if kind == "allocation": require(isinstance(value, Bundle), "K27: invalid allocation handle")
-                if kind == "image": require(isinstance(value, str) and re.fullmatch(r"(?:[0-9a-f]{2})*", value), "K21: invalid image")
+                if kind == "image": require(is_image(value), "K21: invalid image")
                 if kind == "angle": require(isinstance(value, str) and re.fullmatch(r"0x[0-9a-f]{16}", value) and (int(value[2:],16)>>52)&2047 != 2047, "K20: invalid angle")
                 if kind == "region":
                     require(isinstance(value, dict), "K26: invalid region")
@@ -1097,21 +1118,26 @@ class Catalog:
             elif "image" in node:
                 keys(node, ["image", "wires"], context="image")
                 image = env.get(node["image"], node["image"])
-                require(isinstance(image,str) and re.fullmatch(r"(?:[0-9a-f]{2})*",image), "K21: malformed image")
+                require(is_image(image), "K21: malformed image")
                 bundle = wire(node["wires"], env)
                 require(not image or sum(b.width for b in bundle) == len(image)*4, "K21: image width mismatch")
                 p = Profile()
-                offset = 0
-                for byte in bytes.fromhex(image):
-                    for i in range(8):
-                        if byte & (1 << i):
-                            cursor = offset+i
-                            for b in bundle:
-                                if cursor < b.width:
-                                    p=p.then(self.gate_event("x",[b.bit(cursor)]))
-                                    break
-                                cursor -= b.width
-                    offset += 8
+                if self.ledger is None and self.closed_form:
+                    offset=0
+                    for b in bundle:
+                        count=image_ones(image,offset,offset+b.width) if image else 0
+                        if count:p=p.then(self.gate_event("x",[b.bit(0)]).repeat(count))
+                        offset+=b.width
+                else:
+                    data=bytes.fromhex(image)
+                    for index in range(len(data)-1,-1,-1) if inverse else range(len(data)):
+                        for bit in range(7,-1,-1) if inverse else range(8):
+                            if data[index] & (1<<bit):
+                                cursor=index*8+bit
+                                for b in bundle:
+                                    if cursor<b.width:
+                                        p=p.then(self.gate_event("x",[b.bit(cursor)]));break
+                                    cursor-=b.width
             elif "declare" in node:
                 keys(node, ["declare", "width", "class", "state", "body"], context="declare")
                 cls = env.get(node["class"], node["class"]) if isinstance(node["class"],str) else node["class"]
@@ -2336,6 +2362,7 @@ class Source:
                 body=[invoke(op,[width,Fwidth,*a,slot,w,flag,faulted,code])]
             elif op=="lift.alloc":
                 require(width==self.obj.ptr,"lift.alloc destination must be ptr width")
+                require(not re.fullmatch(r"0|[1-9][0-9]*",a[0]),"EST-SOURCE-02: published lift.alloc has no physical binding for a literal length; see docs/CONTRACT_GAPS.md")
                 nwidth=widths[a[0]];used_width=integer(layout["H"],0)+2;top_width=integer(layout["A_tab"],0)+1
                 extended=max(nwidth,used_width)+1
                 displacements=[];cursor=P
@@ -2378,9 +2405,9 @@ class Source:
                 count=1<<integer(layout["A_tab"],0);entry_width=2*self.obj.ptr+2
                 table=state_wires["alloctab"]
                 fields=[RecordField(table.identity,count*w,table.cls,table.offset+offset,table.state,w,entry_width) for offset,w in [(0,self.obj.ptr),(self.obj.ptr,self.obj.ptr),(2*self.obj.ptr,1),(2*self.obj.ptr+1,1)]]
-                # The free recipe never reads its legacy n/L/E formals. An
-                # empty view binds n without inventing any physical length.
-                length_width,length=(0,[]) if op=="lift.free" else (widths[a[1]],a[1])
+                # The free recipe never reads its legacy n/L/E formals.
+                # Alias its unused n to the existing pointer, adding no wire.
+                length_width,length=(self.obj.ptr,a[0]) if op=="lift.free" else (widths[a[1]],a[1])
                 body=[invoke(op,[self.obj.ptr,length_width,max(self.obj.ptr,length_width)+1,count,integer(layout["A_tab"],0)+1,Fwidth,a[0],length,*fields,state_wires["atop"],flag,faulted,code])]
             elif op in ["lift.oracle_call","lift.oracle_uncall","lift.perm_call"]:
                 if op=="lift.perm_call":

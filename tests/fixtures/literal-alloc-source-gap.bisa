@@ -1,0 +1,14 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"b8d708ae3eba1f4088d12ea84c6510a49378ee6ec4ebd292f5c50759cab145be","kind":"oracle","name":"root","signature":{"abi":"0.9","args":[],"fault":4,"in":[],"kind":"oracle","mem":[],"tgt":32,"tier":"q"}}}
+
+section functions
+oracle @root () (t:wire[32]) (f:wire[4]) () ()
+regs { p:reg[32] }
+^entry():
+p = lift.alloc 1
+lift.retval p
+
+section layout
+{"A_tab":0,"H":1,"S_cells":0,"globals":{},"heap_base":1,"heap_limit_max":1,"interface_regions":{},"null_size":1,"ptr_width":32}
