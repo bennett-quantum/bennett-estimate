@@ -415,6 +415,15 @@ class Target:
             for a in expr["args"]: Target.validate_expr(a, bound, tables)
 
     def native_gate(self,op,classes,controls,eps,own):
+        values=self._native_values(op,tuple(classes),controls,rational(eps),own)
+        if values is None:return None
+        duration,counts,achieved=values
+        return Profile(time=duration,counts=dict(counts),gates={op:1},error=achieved)
+
+    @lru_cache(maxsize=4096)
+    def _native_values(self,op,classes,controls,eps,own):
+        # The target is validated/hash-bound and immutable during an estimate.
+        # Cache scalar values, not mutable Profile maps returned to callers.
         env={"k":F(own),"c":F(controls),"eps":rational(eps)}
         for g in self.doc["gates"]:
             if not self.covers(g,op,controls):continue
@@ -425,7 +434,7 @@ class Target:
             if achieved>eps:continue
             costs={n:expression(x,env,self.doc["tables"]) for n,x in g["cost"].items()}
             require(all(v>=0 for v in costs.values()),"§8.1: negative evaluated cost")
-            return Profile(time=costs["time"],counts={n:v for n,v in costs.items() if self.doc["resources"][n]["kind"]=="count"},gates={op:1},error=achieved)
+            return costs["time"],tuple((n,v) for n,v in costs.items() if self.doc["resources"][n]["kind"]=="count"),achieved
         return None
 
     @staticmethod
@@ -434,6 +443,10 @@ class Target:
         return entry["op"]==op and controls>=integer(r["min"],0) and (r["max"]=="unbounded" or controls<=integer(r["max"],0))
 
     def exact_native(self,op,classes,controls,own):
+        return self._exact_native(op,tuple(classes),controls,own)
+
+    @lru_cache(maxsize=4096)
+    def _exact_native(self,op,classes,controls,own):
         for g in self.doc["gates"]:
             if not self.covers(g,op,controls) or self.epsilon_dependent(g["epsilon"]):continue
             pattern=g["classes"]
@@ -2979,6 +2992,17 @@ def main(argv=None):
         return 0
     except (ContractError,OSError,ValueError,KeyError,TypeError,RecursionError) as ex:
         print(f"bennett-estimate: {ex}",file=sys.stderr)
+        code=str(ex).split(":",1)[0]
+        if isinstance(ex,ContractError) and code in ["EST-SOURCE-01","EST-SOURCE-02","EST-CONTEXT-03"]:
+            # The request remains concrete/reviewable while the missing
+            # published binding is tracked. No resource number is invented.
+            pending={"schema":"bennett-estimate/0.1","label":"pending evidence","object_hash":obj.hash,"target_hash":target.hash,
+                     "region":region,"variant":a.variant,"inherited_controls":a.inherited_controls,
+                     "invocation":{"args":params,"budget":budget},"params_hash":digest(jcs(params)),
+                     "epsilon":exact_decimal(decimal_value(a.epsilon)),
+                     "pending":[{"code":code,"reason":str(ex).split(":",1)[1].strip(),"bead":"bennett-estimate-bph.5" if code=="EST-CONTEXT-03" else "bennett-estimate-bph.4"}]}
+            print(jcs(pending))
+            return 3
         return 1
 
 

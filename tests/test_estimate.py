@@ -372,6 +372,23 @@ class Certificates(unittest.TestCase):
 
 
 class CommandLine(unittest.TestCase):
+    def test_contract_dependent_outputs_are_pending_evidence(self):
+        binary=os.environ["BENNETT_ESTIMATE_BIN"]
+        target=str(ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json")
+        cases=[("parameter-source-gap.bisa","parameter",'["0"]',"EST-SOURCE-01"),("implicit-length-source-gap.bisa","read_byte","[]","EST-SOURCE-02"),("token-alias-source-gap.bisa","root",'[["1","0","0","0"],["1","0","0","0"]]',"EST-CONTEXT-03")]
+        for file,region,args,code in cases:
+            command=[binary,str(ROOT/"tests/fixtures"/file),"--target",target,"--region",region,"--params",args,"--budget","2,0,0,0"]
+            actual=subprocess.run(command,capture_output=True,text=True,timeout=30)
+            self.assertEqual(actual.returncode,3,actual.stderr)
+            result=json.loads(actual.stdout)
+            self.assertEqual(result["label"],"pending evidence")
+            self.assertEqual(result["pending"][0]["code"],code)
+            self.assertNotIn("resources",result)
+            self.assertNotIn("exact_resources",result)
+            self.assertIn(code,actual.stderr)
+            repeated=subprocess.run(command,capture_output=True,text=True,timeout=30)
+            self.assertEqual(repeated.stdout,actual.stdout)
+
     def test_k12_certificate_write_and_independent_recheck(self):
         fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
         binary=os.environ["BENNETT_ESTIMATE_BIN"]
