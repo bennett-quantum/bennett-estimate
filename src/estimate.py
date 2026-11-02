@@ -600,6 +600,7 @@ class Catalog:
         self.recipes = {r["kind"]: r for r in doc["recipes"]}
         require(len(self.recipes) == 219, "incomplete expansion catalog")
         self.target, self.visits, self.serial = target, 0, 0
+        self.text=text
         self.stack = []
         self.symbols = {}
         self.eps = F(0)
@@ -611,6 +612,8 @@ class Catalog:
         self.loop_coordinates=[]
         self.source_ordinals={}
         self.reverse_limits=None
+        self.raw_limits=None;self.raw_cursors={}
+        self.region_raw=False;self.region_oracle=False
         self.root_step=None;self.root_phase=None
         self.binding_serial=0
         self.allocation_scopes={}
@@ -831,9 +834,21 @@ class Catalog:
         previous,count=self.source_ordinals.get(id(meta),(None,0))
         if previous!=key:count=0
         self.source_ordinals[id(meta)]=(key,count+1)
-        ordinal=count if self.reverse_limits is None else self.reverse_limits[id(meta)]-1-count
+        if self.raw_limits is not None:
+            require(key in self.raw_limits,"raw inverse emitted a point outside its forward domain")
+            size,sign=self.raw_limits[key]
+            position=self.raw_cursors.get(key,0);self.raw_cursors[key]=position+1
+            require(position<size,"raw inverse exceeded its forward point domain")
+            ordinal=position if sign>0 else size-1-position
+        else:ordinal=count if self.reverse_limits is None else self.reverse_limits[id(meta)]-1-count
         require(ordinal>=0,"inverse exceeded its forward ordinal space")
         return {"chain":chain,"ordinal":ordinal,"step":self.root_step,"phase":self.root_phase}
+
+    def ordinal_sign(self):
+        phase=self.root_phase
+        for edge in self.call_edges:
+            if "entered_invocation" in edge:phase=edge["entered_invocation"][1]
+        return (-1 if self.region_raw else 1)*(-1 if self.region_oracle and phase=="rev" else 1)
 
     def space_event(self,b,acquire):
         if acquire:self.used_allocations.add(b.identity)
@@ -1862,6 +1877,26 @@ class Ledger:
         return result
 
 
+class OrdinalCounter:
+    """Count source leaf domains before target expansion; never retain gates."""
+    def __init__(self,catalog,schedule):
+        self.catalog,self.schedule=catalog,schedule
+        self.require_exact=False;self.count_only=False
+        self.domains={};self.records=[{}];self.cleanup_decisions=[]
+
+    def record(self,chain=(),ordinal=0,step=None,phase=None,**unused):
+        key=(jcs(list(chain)),step,phase);sign=self.catalog.ordinal_sign()
+        count,prior=self.domains.get(key,(0,sign))
+        require(prior==sign,"one point domain has conflicting inverse orientations")
+        self.domains[key]=(count+1,sign)
+        return Profile()
+
+    def gate(self,op,operands,controls=(),**address):return self.record(**address)
+    def allocate(self,b,**address):return self.record(**address)
+    def release(self,b,**address):return self.record(**address)
+    def interface(self,slot,b,vertices=None):pass
+
+
 class Source:
     def __init__(self, obj, target, catalog):
         self.obj, self.target, self.catalog = obj, target, catalog
@@ -1875,7 +1910,7 @@ class Source:
         self.serial += 1
         return Bundle(f"source:{self.serial}:{name}", width, cls or ("any" if self.catalog.ledger is not None else self.cls), state=state)
 
-    def region(self, name, args, budget, interface=None, controls=(), adjoint=False):
+    def region(self, name, args, budget, interface=None, controls=(), adjoint=False,raw_inverse=False):
         require(name not in self.calls, "§5.1: recursive region call graph")
         self.calls.append(name)
         self.budgets.append(budget)
@@ -1890,7 +1925,7 @@ class Source:
                     if n not in env: env[n] = self.fresh(n,type_width(ty,self.obj.ptr))
             arg_group = fn.groups[4] if fn.kind == "oracle" else fn.groups[3]
             env.update({n:(raw if ty=="f64" else v) for (n,ty,r),v,raw in zip(arg_group,parsed,args)})
-            self.invocations.append({"region":name,"invocation":{"args":args,"budget":budget},"inherited_controls":len(set((b[0],b[1]) for b in controls)),"source_adjoint":adjoint,"path":[{k:v for k,v in edge.items() if k!="entered_invocation"} for edge in self.catalog.call_edges]})
+            self.invocations.append({"region":name,"invocation":{"args":args,"budget":budget},"inherited_controls":len(set((b[0],b[1]) for b in controls)),"source_adjoint":adjoint,"raw_inverse":raw_inverse,"path":[{k:v for k,v in edge.items() if k!="entered_invocation"} for edge in self.catalog.call_edges]})
             if self.catalog.ledger is not None and len(self.calls)==1:
                 for bit in controls:self.catalog.ledger.interface(f"control:{bit[1]}",Bundle(bit[0],1,bit[2],bit[1]))
                 names=["in","tgt","fault","mem"] if fn.kind=="oracle" else ["mut","in","mem"]
@@ -1904,14 +1939,42 @@ class Source:
                     m=re.fullmatch(r"region\[([0-9]+),([0-9]+)\]",ty)
                     regions[n]=(int(m[1]),int(m[2]),env[n])
                 nodes=self.action_construction(fn,env,regions,controls,adjoint)
-                p=self.catalog.body(nodes,env,controls)
+                p=self.expand_region(lambda reverse:self.catalog.body(nodes,env,controls,reverse),raw_inverse,False)
                 require(all(v == 0 for v in p.delta.values()),"§5.1: unmatched allocation/release in action")
                 return p
             require(fn.kind == "oracle", "root region must be action, oracle, CC or R")
-            return self.oracle(fn,env,budget,controls)
+            return self.expand_region(lambda reverse:self.oracle(fn,env,budget,controls,raw_inverse=reverse),raw_inverse,True)
         finally:
             self.calls.pop()
             self.budgets.pop()
+
+    def expand_region(self,expand,raw_inverse,oracle):
+        catalog=self.catalog
+        def run(reverse):
+            active=self.catalog;saved=active.region_raw,active.region_oracle
+            active.region_raw,active.region_oracle=reverse,oracle
+            try:return expand(reverse)
+            finally:active.region_raw,active.region_oracle=saved
+        if not raw_inverse or catalog.ledger is None or isinstance(catalog.ledger,OrdinalCounter) or catalog.raw_limits is not None:return run(raw_inverse)
+        # A dry traversal counts per-point domains, including nested calls.
+        # Only counts/orientations survive; no gate or circuit list is built.
+        counter_catalog=Catalog(catalog.text,self.target)
+        counter=OrdinalCounter(counter_catalog,catalog.ledger.schedule);counter_catalog.ledger=counter
+        counter_catalog.source_metadata=dict(catalog.source_metadata)
+        for field in ["source_context","call_edges","root_step","root_phase"]:setattr(counter_catalog,field,getattr(catalog,field))
+        counter_catalog.loop_coordinates=list(catalog.loop_coordinates)
+        serial,invocations=self.serial,len(self.invocations)
+        try:
+            self.catalog=counter_catalog;run(False)
+        finally:
+            self.catalog=catalog;self.serial=serial;del self.invocations[invocations:]
+        previous=catalog.raw_limits,catalog.raw_cursors
+        catalog.raw_limits={key:(size,-sign) for key,(size,sign) in counter.domains.items()};catalog.raw_cursors={}
+        try:
+            result=run(True)
+            require(all(catalog.raw_cursors.get(key,0)==size for key,(size,sign) in catalog.raw_limits.items()),"raw inverse omitted part of its forward domain")
+            return result
+        finally:catalog.raw_limits,catalog.raw_cursors=previous
 
     def action_construction(self,fn,env,regions,controls=(),adjoint=False):
         """Local-region lifetimes enclose the whole invocation, under calls too."""
@@ -1945,7 +2008,7 @@ class Source:
         nodes = self.action_nodes(nodes,env,regions,controls)
         return self.catalog.body(nodes,env,controls)
 
-    def oracle(self, fn, env, budget, controls=()):
+    def oracle(self, fn, env, budget, controls=(),raw_inverse=False):
         require(self.obj.versions["isa"] == "0.9", "0.8 has no published complete expansion library; exact padded cost requires 0.9")
         B = unsigned(budget[0])
         rows = fn.code
@@ -2055,7 +2118,7 @@ class Source:
                 meta={"symbol":self.obj.symbol(fn.name)["interface_hash"],"point":f"{row.block}:{row.ordinal}","depth":0,"kind":row.op,"exact":True}
                 for node in body+nxt:self.catalog.source_metadata[id(node)]=(node,meta)
         if self.catalog.ledger is not None:
-            return self.oracle_stream(fn,env,budget,controls,P,N,Q,Fwidth,T,pc,nextpc,faulted,code,result,row_templates,next_templates,state)
+            return self.oracle_stream(fn,env,budget,controls,P,N,Q,Fwidth,T,pc,nextpc,faulted,code,result,row_templates,next_templates,state,raw_inverse)
         step=self.catalog.recipe("step",[P,N,Q,pc,nextpc,frame,row_templates,next_templates],env,controls)
         require(all(v==0 for v in step.delta.values()),"unbalanced step workspace")
         target=env[fn.groups[1][0][0]];fault=env[fn.groups[2][0][0]]
@@ -2077,7 +2140,7 @@ class Source:
         work=step.repeat(B).then(commit).then(step.repeat(B))
         return prefix.then(work).then(suffix)
 
-    def oracle_stream(self,fn,env,budget,controls,P,N,Q,Fwidth,T,pc,nextpc,faulted,code,result,rows,next_rows,state):
+    def oracle_stream(self,fn,env,budget,controls,P,N,Q,Fwidth,T,pc,nextpc,faulted,code,result,rows,next_rows,state,raw_inverse=False):
         """Replay catalog steps against allocation endpoints, preserving K64.
 
         The analytic path above remains constant work in B. A concrete
@@ -2095,7 +2158,8 @@ class Source:
             else:catalog.root_step,catalog.root_phase=step,phase
         out=Profile();frames=[]
         try:
-            catalog.source_context=support["$construct"]
+            catalog.reverse_limits=None
+            catalog.source_context=support["$release" if raw_inverse else "$construct"]
             for record in state:
                 b=record["storage"]
                 out=out.then(catalog.space_event(b,True))
@@ -2107,7 +2171,7 @@ class Source:
                     out=out.then(catalog.body([{"image":"I","wires":"cells"}],{"I":image,"cells":chunk}))
             step_args=[P,N,Q,pc,nextpc,None,rows,next_rows]
             for index,frame in enumerate(frames,1):
-                catalog.source_context=support["$step"];step_context(index,"fwd")
+                catalog.source_context=support["$step"];step_context(index,"rev" if raw_inverse else "fwd")
                 step_args[5]=frame
                 out=out.then(catalog.recipe("step",step_args,env,controls))
             # All steps have the same forward point domains. Retain counts,
@@ -2115,13 +2179,13 @@ class Source:
             limits={key:value[1] for key,value in catalog.source_ordinals.items()}
             catalog.source_context=support["$commit"];step_context()
             commit_env=dict(env,P=P,N=N,F=Fwidth,T=T,pc=pc,next=nextpc,faulted=faulted,code=code,result=result,tgt=env[fn.groups[1][0][0]],fr=env[fn.groups[2][0][0]])
-            out=out.then(catalog.body(catalog.recipes["oracle.construct"]["body"][2:-2],commit_env,controls))
+            out=out.then(catalog.body(catalog.recipes["oracle.construct"]["body"][2:-2],commit_env,controls,inverse=raw_inverse))
             for index in range(len(frames),0,-1):
-                catalog.source_context=support["$step"];step_context(index,"rev");catalog.reverse_limits=limits
+                catalog.source_context=support["$step"];step_context(index,"fwd" if raw_inverse else "rev");catalog.reverse_limits=limits
                 step_args[5]=frames[index-1]
                 out=out.then(catalog.recipe("step",step_args,env,controls,inverse=True))
             catalog.reverse_limits=None
-            catalog.source_context=support["$release"];step_context()
+            catalog.source_context=support["$construct" if raw_inverse else "$release"];step_context()
             for record in reversed(state):
                 b=record["storage"]
                 for byte_base,image in reversed(record["images"]):
@@ -2517,7 +2581,7 @@ class Source:
                     child[n]=env[actual]
                 arguments=[child[n] if ty in ["token","f64"] else str(child[n]) for n,ty,r in fn.groups[3]]
                 def invoke_action(joined,inverse,call_env,name=name,values=arguments,tuple_=list(self.budgets[-1]),interface=dict(child),source_adjoint=adjoint):
-                    return self.region(name,values,tuple_,interface,joined,source_adjoint!=inverse)
+                    return self.region(name,values,tuple_,interface,joined,source_adjoint,raw_inverse=inverse)
                 self.serial+=1
                 capture=f"$call:{self.serial}"
                 env[capture]=Captured([],{},controls,builder=invoke_action)
@@ -2546,7 +2610,7 @@ class Source:
                     require(caller_types.get(actual)==ty,"oracle call classical argument type mismatch")
                     arguments.append(env[actual] if ty in ["token","f64"] else str(env[actual]))
                 def invoke_oracle(joined,inverse,call_env,name=callee,values=arguments,tuple_=list(token),interface=dict(child)):
-                    return self.region(name,values,tuple_,interface,joined)
+                    return self.region(name,values,tuple_,interface,joined,raw_inverse=inverse)
                 self.serial+=1;capture=f"$oracle:{self.serial}"
                 env[capture]=Captured([],{},controls,builder=invoke_oracle)
                 emit({"splice":capture})
@@ -2580,7 +2644,7 @@ class Source:
                         child={fn.groups[0][0][0]:wire("x",call_env),fn.groups[1][0][0]:wire("t",call_env),fn.groups[2][0][0]:wire("f",call_env)}
                         child.update({n:ws for (n,ty,role),ws in zip(fn.groups[0][1:],inputs)})
                         child.update({n:b for (n,ty,role),b in zip(fn.groups[3],memories)})
-                        return self.region(name,values,tuple_,child,joined)
+                        return self.region(name,values,tuple_,child,joined,raw_inverse=inverse)
                     self.serial+=1;capture=f"$qinplace:{self.serial}";env[capture]=Captured([],{},controls,builder=invoke_pair)
                     node={"splice":capture}
                     if self.catalog.ledger is not None:self.catalog.source_metadata[id(node)]=(node,{**meta,"call":True,"oracle_call":True,"call_index":call_index})

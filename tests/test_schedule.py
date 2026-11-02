@@ -167,6 +167,59 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_raw_inverse_oracle_swaps_support_partition_and_step_traversal(self):
+        action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1,4],"in":[1,1],"mem":[],"args":["token"],"bounds":[]}
+        oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        text="perm_action @root (t:wire, f:wire[4]) (p:wire in, x:wire in) () (tk:token) ()\n^entry():\nadj action_call @outer (t, f) (p, x) () (tk)\nperm_action @outer (t:wire, f:wire[4]) (p:wire in, x:wire in) () (tk:token) ()\n^entry():\nqif p {\noracle_call @identity tk (x) t f () ()\n} {\noracle_call @identity tk (x) t f () ()\n}\noracle @identity (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x"
+        obj=make_program(text,{"root":action,"outer":action,"identity":oracle});t=target()
+        args=[["1","0","0","0"]]
+        baseline=e.estimate(obj,t,"root",args,["0"]*4)
+        events=[];original=e.Ledger;symbol=obj.symbol("identity")["interface_hash"]
+        class Recording(original):
+            def event(self,kind,kw):
+                step,phase=kw["step"],kw["phase"]
+                for edge in kw["chain"][:-1]:
+                    if "entered_invocation" in edge:step,phase=edge["entered_invocation"]
+                if kw["chain"][-1]["symbol"]==symbol:events.append((kind,kw["chain"][-1]["point"],step,phase,kw["ordinal"]))
+            def allocate(self,b,**kw):self.event("alloc",kw);return super().allocate(b,**kw)
+            def release(self,b,**kw):self.event("release",kw);return super().release(b,**kw)
+            def gate(self,op,wires,controls=(),**kw):self.event(op,kw);return super().gate(op,wires,controls,**kw)
+        with patch.object(e,"Ledger",Recording):result=e.estimate(obj,t,"root",args,["0"]*4,include_frame=True)
+        self.assertEqual(result["exact_resources"],baseline["exact_resources"])
+        self.assertEqual(events[0][0:2],("alloc","$release"))
+        self.assertEqual(events[-1][0:2],("release","$construct"))
+        support=[v for v in events if v[1]=="$step"]
+        first=[v for v in support if v[3]=="rev"]
+        half=len(first)//2
+        self.assertEqual([v[4] for v in first[:half]],list(range(half)))
+        forward=[v for v in support if v[3]=="fwd"]
+        self.assertEqual([v[4] for v in forward[:half]],list(range(half-1,-1,-1)))
+        self.assertEqual(support[0][3],"rev")
+        for budget in [0,2]:
+            values=[[str(budget),"0","0","0"]];events.clear()
+            baseline=e.estimate(obj,t,"root",values,["0"]*4)
+            with patch.object(e,"Ledger",Recording):actual=e.estimate(obj,t,"root",values,["0"]*4,include_frame=True)
+            self.assertEqual(actual["exact_resources"],baseline["exact_resources"])
+            coordinates=[]
+            for event in events:
+                if event[1]=="$step" and (not coordinates or coordinates[-1]!=event[2:4]):coordinates.append(event[2:4])
+            expected=[(step,phase) for phase,steps in [("rev",range(1,budget+1)),("fwd",range(budget,0,-1))] for step in steps]
+            self.assertEqual(coordinates,expected*2)
+
+    def test_raw_inverse_calls_keep_forward_ordinals_and_reverse_bit_order(self):
+        root={"abi":"0.9","tier":"q","kind":"perm_action","mut":[2],"in":[1,2],"mem":[],"args":[],"bounds":[]}
+        leaf={**root,"in":[2]}
+        text="perm_action @root (t:wire[2]) (p:wire in, s:wire[2] in) () () ()\n^entry():\nadj action_call @outer (t) (p, s) () ()\nperm_action @outer (t:wire[2]) (p:wire in, s:wire[2] in) () () ()\n^entry():\nqif p {\naction_call @leaf (t) (s) () ()\n} {\naction_call @leaf (t) (s) () ()\n}\nperm_action @leaf (t:wire[2]) (s:wire[2] in) () () ()\n^entry():\nqxor s t"
+        obj=make_program(text,{"root":root,"outer":root,"leaf":leaf})
+        events=[];original=e.Ledger;symbol=obj.symbol("leaf")["interface_hash"]
+        class Recording(original):
+            def gate(self,op,wires,controls=(),**kw):
+                if kw["chain"][-1]["symbol"]==symbol:events.append((kw["ordinal"],wires[-1].offset))
+                return super().gate(op,wires,controls,**kw)
+        with patch.object(e,"Ledger",Recording):result=e.estimate(obj,target(),"root",[],["0"]*4,include_frame=True)
+        self.assertEqual(events,[(1,1),(0,0),(1,1),(0,0)])
+        self.assertEqual(result["gates"],{"cx":"4","x":"2"})
+
     def test_fresh_mints_keep_identity_even_for_equal_budget_tuples(self):
         cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
         oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
