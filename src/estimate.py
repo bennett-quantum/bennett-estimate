@@ -136,6 +136,12 @@ def loads(text):
         raise ContractError(f"invalid JSON: {ex}") from ex
 
 
+@lru_cache(maxsize=4096)
+def jcs_string(value):
+    require(not any(0xD800 <= ord(c) <= 0xDFFF for c in value), "JCS: lone surrogate")
+    return json.dumps(value,ensure_ascii=False,separators=(",",":"))
+
+
 def jcs(value):
     """RFC 8785 key order and ECMAScript finite number spelling.
 
@@ -145,9 +151,7 @@ def jcs(value):
     if value is None: return "null"
     if value is True: return "true"
     if value is False: return "false"
-    if isinstance(value, str):
-        require(not any(0xD800 <= ord(c) <= 0xDFFF for c in value), "JCS: lone surrogate")
-        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if isinstance(value,str):return jcs_string(value)
     if isinstance(value,int):
         return str(value) if abs(value)<2**53 else jcs(Decimal(value))
     if isinstance(value, (Decimal, float)):
@@ -222,6 +226,7 @@ class Profile:
     area: dict = field(default_factory=dict)
     gates: dict = field(default_factory=dict)
     error: F = F(0)
+    inexact_operations: int = 0
 
     def __post_init__(self):
         self.time = rational(self.time)
@@ -238,7 +243,7 @@ class Profile:
                        add_maps(self.delta, other.delta),
                        {k: max(self.peak.get(k, 0), self.delta.get(k, 0) + other.peak.get(k, 0)) for k in space},
                        {k: self.area.get(k, 0) + other.area.get(k, 0) + self.delta.get(k, 0) * other.time for k in space},
-                       add_maps(self.gates, other.gates), self.error + other.error)
+                       add_maps(self.gates, other.gates), self.error + other.error,self.inexact_operations+other.inexact_operations)
 
     def repeat(self, n):
         n = integer(n, 0)
@@ -247,7 +252,7 @@ class Profile:
                        {k: v*n for k,v in self.delta.items()},
                        {k: v + max(0, (n-1)*self.delta.get(k, 0)) for k,v in self.peak.items()},
                        {k: self.area.get(k, 0)*n + v*self.time*(n*(n-1)//2) for k,v in self.delta.items()},
-                       {k: v*n for k,v in self.gates.items()}, self.error*n)
+                       {k: v*n for k,v in self.gates.items()}, self.error*n,self.inexact_operations*n)
 
     def resources(self, target, interface=None):
         interface = interface or {}
@@ -600,6 +605,12 @@ def scalar(x, env):
     return {"+":lambda:a+b, "-":lambda:a-b, "*":lambda:a*b, "div":lambda:a//b, "mod":lambda:a%b}[op]()
 
 
+@lru_cache(maxsize=2048)
+def wire_index(text):
+    # Subscript ASTs are read-only interpreter input, never environment maps.
+    return loads(text)
+
+
 def wire(x, env):
     if isinstance(x, Bundle): return [x]
     if isinstance(x, list): return [w for part in x for w in wire(part, env)]
@@ -616,7 +627,7 @@ def wire(x, env):
     match = re.fullmatch(r"([^\[]+)\[(.*)\]", x)
     if match:
         b = wire(match[1], env)
-        index = scalar(loads(match[2]), env)
+        index = scalar(wire_index(match[2]), env)
         require(index >= 0, "negative wire index")
         for part in b:
             if index < part.width: return [part.bit(index)]
@@ -650,6 +661,8 @@ class Catalog:
         self.stack = []
         self.symbols = {}
         self.eps = F(0)
+        self.count_only=False
+        self.require_exact=False
         self.closed_form = True
         self.ledger=None
         self.source_metadata={}
@@ -779,11 +792,12 @@ class Catalog:
         base=space_profile(counter.cls,"clean",A).then(space_profile(eq.cls,"clean",1)).then(compare).then(data).then(compare).then(space_profile(eq.cls,"clean",-1)).then(space_profile(counter.cls,"clean",-A))
         p=base.repeat(C)
         ones=sum((C>>(b+1))*(1<<b)+max(0,C% (1<<(b+1))-(1<<b)) for b in range(A))
-        literals=self.target.gate("x",[w[2] for w in controls]+[counter.cls],len(controls),self.eps,own=0).repeat(2*ones)
+        literals=self.gate_event("x",[counter.bit(0)],controls,own=0).repeat(2*ones) if ones else Profile()
         p.time+=literals.time
         p.counts=add_maps(p.counts,literals.counts)
         p.gates=add_maps(p.gates,literals.gates)
         p.error+=literals.error
+        p.inexact_operations+=literals.inexact_operations
         p.area[(counter.cls,"clean")]=p.area.get((counter.cls,"clean"),0)+A*literals.time
         p.area[(counter.cls,"total")]=p.area.get((counter.cls,"total"),0)+A*literals.time
         return p
@@ -924,7 +938,13 @@ class Catalog:
         actual=bits(operands)
         k={"cx":1,"ccx":2,"mcx":len(actual)-1}.get(op,0) if own is None else own
         effective=tuple(dict.fromkeys(actual[:k]+controls))
-        return self.target.gate(op,[w[2] for w in effective+actual[k:]],len(effective),self.eps,own=k,theta=params[0] if params else None)
+        classes=[w[2] for w in effective+actual[k:]]
+        exact=self.target.exact_native(op,classes,len(effective),k)
+        if self.count_only:return Profile(inexact_operations=0 if exact else 1)
+        p=self.target.gate(op,classes,len(effective),0 if exact else self.eps,own=k,theta=params[0] if params else None)
+        require(not self.require_exact or p.error==0,"E_GATE_UNSUPPORTED: permutation region requires exact gates")
+        p.inexact_operations=0 if exact else 1
+        return p
 
     def body(self, nodes, env, controls=(), inverse=False):
         require(isinstance(nodes, list), "K19: constructor body must be array")
@@ -952,7 +972,8 @@ class Catalog:
             if "gate" in node:
                 keys(node, ["gate", "wires"], ["params"], "gate constructor")
                 op = ADJOINT.get(node["gate"], node["gate"]) if inverse else node["gate"]
-                operands = bits(wire(node["wires"], env))
+                resolved=wire(node["wires"],env)
+                operands = bits(resolved)
                 require(len(operands) == len(set(operands)), "K19: coincident gate operands")
                 require(op in GATES and len(operands) == GATES[op] or op == "mcx" and len(operands) >= 1, "K19: gate arity/opcode")
                 own = {"cx": 1, "ccx": 2, "mcx": len(operands)-1}.get(op, 0)
@@ -966,7 +987,7 @@ class Catalog:
                         if isinstance(value,str) and value.startswith("0x"):value="0x"+format(int(value[2:],16)^(1<<63),"016x")
                         else:value=-float(value)
                     params.append(value)
-                p=self.gate_event(op,wire(node["wires"],env),controls,own,params)
+                p=self.gate_event(op,resolved,controls,own,params)
             elif "alloc" in node or "release" in node or "acquire" in node or "relinquish" in node:
                 key = next(k for k in ["alloc", "release", "acquire", "relinquish"] if k in node)
                 if key == "alloc": keys(node, ["alloc", "width", "class", "state"], context="allocation")
@@ -1540,7 +1561,9 @@ class Schedule:
         for n in b["budget"]:integer(n,0)
         require(decimal_value(b["epsilon"])>=0,"negative schedule accuracy")
         keys(b["scheduler"],["name","version"],context="scheduler")
-        if "expansion" in b:keys(b["expansion"],["name","version","hash"],context="expansion")
+        if "expansion" in b:
+            keys(b["expansion"],["name","version","hash"],context="expansion")
+            require(b["expansion"]=={"name":"ref","version":"0.9","hash":"5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197"},"E_SCHEDULE_INFEASIBLE: bound expansion library is unavailable")
         require(isinstance(doc["entries"],list),"schedule entries must be array")
         self.entries=doc["entries"]
         for entry in self.entries:
@@ -1971,10 +1994,12 @@ class Source:
 
     def region(self, name, args, budget, interface=None, controls=(), adjoint=False,raw_inverse=False):
         require(name not in self.calls, "§5.1: recursive region call graph")
+        previous_exact=self.catalog.require_exact
         self.calls.append(name)
         self.budgets.append(budget)
         try:
             fn = self.obj.functions[name]
+            self.catalog.require_exact=previous_exact or fn.kind in ["oracle","perm_action"]
             sig = self.obj.symbol(name)["signature"]
             parsed = resolved_arguments(sig.get("args",sig.get("params",[])), args, self.obj)
             env = dict(interface or {})
@@ -2004,6 +2029,7 @@ class Source:
             require(fn.kind == "oracle", "root region must be action, oracle, CC or R")
             return self.expand_region(lambda reverse:self.oracle(fn,env,budget,controls,raw_inverse=reverse),raw_inverse,True)
         finally:
+            self.catalog.require_exact=previous_exact
             self.calls.pop()
             self.budgets.pop()
 
@@ -2829,8 +2855,11 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
     source = Source(obj,target,catalog)
     fn = obj.functions[region]
     ledger=None
+    default_share=F(0)
+    finite_capacity=any(c["capacity"]!="unbounded" for c in target.doc["classes"].values())
+    summarize=fn.kind in ["action","perm_action","oracle"] and not (include_frame or effective_schedule["entries"] or "interface_vertices" in effective_schedule or "topology" in target.doc)
     replay=bool(include_frame or effective_schedule["entries"] or "interface_vertices" in effective_schedule or "topology" in target.doc or accuracy or any(c["capacity"]!="unbounded" for c in target.doc["classes"].values()))
-    if replay and fn.kind in ["action","perm_action","oracle"]:
+    if replay and not summarize and fn.kind in ["action","perm_action","oracle"]:
         ledger=Ledger(target,Schedule(effective_schedule,obj,region),exact=fn.kind in ["perm_action","oracle"],count_only=bool(accuracy))
         catalog.ledger=ledger
     elif effective_schedule["entries"] or "interface_vertices" in effective_schedule:
@@ -2861,7 +2890,32 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
         interface = {}
     else:
         controls = tuple(("inherited",i,source.cls) for i in range(inherited_controls))
-        p = source.region(region,args,budget,controls=controls)
+        sig = obj.symbol(region)["signature"]
+        widths = list(sig.get("in",[]))+list(sig.get("mut",[]))+([sig["tgt"],sig["fault"]] if fn.kind=="oracle" else [])
+        widths += [(1<<integer(m["A"],0))*integer(m["W"],1) for m in sig.get("mem",[])]
+        interface = {source.cls:sum(integer(w,1) for w in widths)+inherited_controls}
+        if summarize:
+            try:
+                if accuracy:
+                    # K58 counts source expansion operations before schemes.
+                    # The population composes through the same loop algebra.
+                    catalog.count_only=True
+                    population=source.region(region,args,budget,controls=controls).inexact_operations
+                    default_share=F(accuracy)/population if population else F(0)
+                    catalog=Catalog(catalog.text,target);catalog.eps=default_share
+                    source=Source(obj,target,catalog)
+                p=source.region(region,args,budget,controls=controls)
+                # This is also a proof of the default class decisions: if the
+                # sequential peak fits, an any allocation never needs fallback.
+                fits=all(desc["capacity"]=="unbounded" or interface.get(cls,0)+p.peak.get((cls,"total"),0)<=desc["capacity"] for cls,desc in target.doc["classes"].items())
+            except ContractError as ex:
+                if not (finite_capacity and str(ex).startswith("E_GATE_UNSUPPORTED")):raise
+                fits=False
+            if not fits:
+                catalog=Catalog(catalog.text,target)
+                ledger=Ledger(target,Schedule(effective_schedule,obj,region),exact=fn.kind in ["perm_action","oracle"],count_only=bool(accuracy))
+                catalog.ledger=ledger;source=Source(obj,target,catalog)
+        if ledger is not None or not summarize:p=source.region(region,args,budget,controls=controls)
         if ledger is not None and ledger.count_only:
             count=ledger.nonexact_native_operations
             seen=set()
@@ -2876,10 +2930,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
                 if ledger.nonexact_native_operations==count:break
                 count=ledger.nonexact_native_operations
             require(ledger.error<=accuracy,"E_SCHEDULE_INFEASIBLE: achieved error exceeds request accuracy")
-        sig = obj.symbol(region)["signature"]
-        widths = list(sig.get("in",[]))+list(sig.get("mut",[]))+([sig["tgt"],sig["fault"]] if fn.kind=="oracle" else [])
-        widths += [(1<<integer(m["A"],0))*integer(m["W"],1) for m in sig.get("mem",[])]
-        interface = {source.cls:sum(integer(w,1) for w in widths)+inherited_controls}
+        if accuracy and ledger is None:require(p.error<=accuracy,"E_SCHEDULE_INFEASIBLE: achieved error exceeds request accuracy")
         steps = None
     rows=ledger.finish() if ledger is not None else p.resources(target,interface)
     for cls,desc in target.doc["classes"].items():
@@ -2902,6 +2953,8 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
         result["frame"]=ledger.frame()
         result["cleanup_decisions"]=ledger.cleanup_decisions
         result["invocation_contexts"]=source.invocations
+    elif accuracy:
+        result["resolved_default_epsilon_share"]={"numerator":str(default_share.numerator),"denominator":str(default_share.denominator)}
     return result
 
 

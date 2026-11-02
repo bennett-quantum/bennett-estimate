@@ -1,40 +1,25 @@
 #!/usr/bin/env bash
-# The runner/orchestrator invokes this hook. Test the pushed commit(s), never a
-# dirty checkout. Sibling fixture paths require a worktree BESIDE the repository.
+# Push gate (no CI). Runs the [[check]]s of gate.toml on the pushed sha in a clean detached
+# worktree, with siblings at the shas pinned there. See bennett/tools/gate_README.md in the
+# meta repo. The tool is run, never imported: it is a dev tool at a pinned commit, like cargo.
 set -euo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS BROWSER
-script_dir="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+# Development/runner entry: deliberately precedes every git operation.
 if [[ "${1:-}" == --working-tree ]]; then
+  script_dir="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
   exec "$script_dir/check"
 fi
-vcs="${BENNETT_GATE_GIT:-git}"
-root="$("$vcs" -C "$script_dir" rev-parse --show-toplevel)"
-shas=()
-had_refs=0
-if [[ ! -t 0 ]]; then
-  while read -r -t 10 _ref sha _remote_ref _remote_sha; do
-    had_refs=1
-    [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'pre-push: malformed local SHA' >&2; exit 1; }
-    [[ "$sha" == 0000000000000000000000000000000000000000 ]] || shas+=("$sha")
-  done
+root="$(git -C "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" rev-parse --show-toplevel)"
+if [ "${BENNETT_GATE_HOOK_PROBE:-}" = 1 ]; then echo "bennett-gate-hook-chained $root"; exit 0; fi
+pin="$(git -C "$root" show HEAD:gate.toml 2>/dev/null)" || { echo "pre-push: HEAD has no gate.toml" >&2; exit 3; }
+tool_sha="$(sed -n 's/^tool_sha = "\([0-9a-f]\{40\}\)"$/\1/p' <<<"$pin")"
+[ -n "$tool_sha" ] || { echo "pre-push: gate.toml has no full tool_sha" >&2; exit 3; }
+common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)"
+meta="${BENNETT_GATE_WORKSPACE:-$(dirname "$(dirname "$common")")}/bennett"
+tool="$root/.tmp/gate/tool/gate_run-$tool_sha.py"
+if [ ! -s "$tool" ]; then
+  mkdir -p "$(dirname "$tool")"
+  git -C "$meta" show "$tool_sha:tools/gate_run.py" >"$tool.$$"
+  mv "$tool.$$" "$tool"
 fi
-# An explicit deletion-only push has no code to test.
-if [[ "${#shas[@]}" == 0 && "$had_refs" == 1 ]]; then exit 0; fi
-if [[ "${#shas[@]}" == 0 ]]; then shas=("$("$vcs" -C "$root" rev-parse HEAD)"); fi
-declare -A seen=()
-for candidate in "${shas[@]}"; do
-  sha="$("$vcs" -C "$root" rev-parse --verify "${candidate}^{commit}")"
-  [[ -z "${seen[$sha]:-}" ]] || continue
-  seen[$sha]=1
-  wt="$(mktemp -d "$(dirname -- "$root")/.bennett-estimate-gate.XXXXXXXX")"
-  cleanup() {
-    "$vcs" -C "$root" worktree remove --force "$wt"
-  }
-  trap cleanup EXIT
-  "$vcs" -C "$root" worktree add --detach "$wt" "$sha"
-  echo "pre-push: checking $sha in $wt" >&2
-  mkdir -p -- "$wt/.tmp/gate/tmp" "$root/.tmp/gate-target"
-  TMPDIR="$wt/.tmp/gate/tmp" CARGO_TARGET_DIR="$root/.tmp/gate-target" "$wt/scripts/check"
-  cleanup
-  trap - EXIT
-done
+exec python3 -I "$tool" run --repo "$root" --tool-sha "$tool_sha" "$@"

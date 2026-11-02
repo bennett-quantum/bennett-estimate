@@ -1,15 +1,42 @@
-"""Exercise hook orchestration with an explicit VCS test double: no git runs."""
+"""Validate pinned hook configuration and its git-free development entry."""
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 import importlib.util
+import tomllib
 
 ROOT=Path(__file__).resolve().parents[1]
 
 
 class Hook(unittest.TestCase):
+    def test_pinned_sibling_hook_configuration_and_git_free_working_tree(self):
+        config=tomllib.loads((ROOT/"gate.toml").read_text())
+        self.assertEqual(config["schema"],1)
+        self.assertRegex(config["tool_sha"],r"^[0-9a-f]{40}$")
+        self.assertEqual(config["check"],[{"name":"scripts/check","argv":["scripts/check"]}])
+        self.assertEqual(set(config["siblings"]),{"bennett-isa-spec","bennett-targets","bennett-conformance","bennett-vm"})
+        for sibling in config["siblings"].values():self.assertRegex(sibling["sha"],r"^[0-9a-f]{40}$")
+        self.assertEqual(config["env"]["BENNETT_VM_BIN"],"{sibling:bennett-vm}/target/debug/bennett-vm")
+        self.assertIn("target/debug/bennett-vm",config["siblings"]["bennett-vm"]["build"][0]["outputs"])
+        source=(ROOT/"scripts/pre-push").read_text()
+        self.assertIn('tools/gate_run.py',source)
+        self.assertIn('show HEAD:gate.toml',source)
+        self.assertIn('run --repo "$root" --tool-sha "$tool_sha"',source)
+        self.assertLess(source.index('--working-tree'),source.index('$(git'))
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            scripts=Path(directory)/"scripts";scripts.mkdir()
+            hook=scripts/"pre-push";hook.write_text(source);hook.chmod(0o755)
+            marker=Path(directory)/"checked"
+            check=scripts/"check"
+            check.write_text('#!/usr/bin/env bash\nset -eu\nprintf checked > "$TEST_CHECK_MARKER"\nexit "${TEST_CHECK_EXIT:-0}"\n');check.chmod(0o755)
+            env=dict(os.environ,TEST_CHECK_MARKER=str(marker))
+            done=subprocess.run([str(hook),"--working-tree"],env=env,capture_output=True,text=True,timeout=10)
+            self.assertEqual(done.returncode,0,done.stderr);self.assertEqual(marker.read_text(),"checked")
+            env["TEST_CHECK_EXIT"]="7"
+            self.assertEqual(subprocess.run([str(hook),"--working-tree"],env=env,capture_output=True,timeout=10).returncode,7)
+
     def test_parallel_suites_partition_every_discovered_case_once(self):
         location=Path(__file__).with_name("run_suite.py")
         spec=importlib.util.spec_from_file_location("suite_runner",location)
@@ -21,44 +48,6 @@ class Hook(unittest.TestCase):
         self.assertEqual(sorted(selected),sorted(t.id() for t in tests))
         self.assertEqual(len(selected),len(set(selected)))
 
-    def test_sha_selection_deletion_and_failure_cleanup(self):
-        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
-            base=Path(directory);repo=base/"repo";repo.mkdir()
-            log=base/"calls";fake=base/"vcs-double"
-            fake.write_text('''#!/usr/bin/python3
-import os,pathlib,shutil,sys
-a=sys.argv[3:]
-root=pathlib.Path(os.environ["TEST_ROOT"])
-log=pathlib.Path(os.environ["TEST_LOG"])
-if a[:2]==["rev-parse","--show-toplevel"]: print(root)
-elif a[:2]==["rev-parse","HEAD"]: print("1"*40)
-elif a[:2]==["rev-parse","--verify"]: print(a[2].split("^")[0])
-elif a[:2]==["worktree","add"]:
- p=pathlib.Path(a[3]);sha=a[4];(p/"scripts").mkdir(parents=True)
- check=p/"scripts/check"
- check.write_text('#!/bin/bash\\necho "check:'+sha+'" >> "$TEST_LOG"\\nexit "${TEST_FAIL:-0}"\\n')
- check.chmod(0o755)
-elif a[:2]==["worktree","remove"]:
- shutil.rmtree(a[3]);log.open("a").write("cleanup\\n")
-else: raise RuntimeError(repr(a))
-''')
-            fake.chmod(0o755)
-            env=dict(os.environ,BENNETT_GATE_GIT=str(fake),TEST_ROOT=str(repo),TEST_LOG=str(log))
-            sha="2"*40;zero="0"*40
-            line=f"refs/heads/main {sha} refs/heads/main {zero}\n"
-            done=subprocess.run([str(ROOT/"scripts/pre-push")],input=line+line,capture_output=True,text=True,env=env,timeout=15)
-            self.assertEqual(done.returncode,0,done.stderr)
-            self.assertEqual(log.read_text().splitlines(),["check:"+sha,"cleanup"])
-            self.assertEqual(list(base.glob(".bennett-estimate-gate.*")),[])
-            log.write_text("")
-            deleted=subprocess.run([str(ROOT/"scripts/pre-push")],input=f"ref {zero} ref {sha}\n",capture_output=True,text=True,env=env,timeout=15)
-            self.assertEqual(deleted.returncode,0,deleted.stderr)
-            self.assertEqual(log.read_text(),"")
-            env["TEST_FAIL"]="7"
-            failed=subprocess.run([str(ROOT/"scripts/pre-push")],input=line,capture_output=True,text=True,env=env,timeout=15)
-            self.assertEqual(failed.returncode,7,failed.stderr)
-            self.assertEqual(log.read_text().splitlines(),["check:"+sha,"cleanup"])
-            self.assertEqual(list(base.glob(".bennett-estimate-gate.*")),[])
 
 
 if __name__=="__main__": unittest.main()

@@ -28,11 +28,12 @@ certificate output enriches supplied proof metadata for the same invocation;
 correctness claims and nested composition are not verified or invented.
 
 Verified: headless `timeout 180 scripts/pre-push --working-tree` exited 0 with
-89 tests in four disjoint cargo test groups (138.64 seconds for tests), Rust fmt,
+97 tests in four disjoint cargo test groups (43.15 seconds for tests), Rust fmt,
 strict Clippy and shell syntax. The internal test timeout remains 180 seconds. This includes backdated release
 peaks, fixed scheme ancilla classes, K12 production/recheck/determinism, native
-inventory/signature rejection and widths above 2^53. Hook orchestration uses a
-VCS double; actual pushed-SHA clean-worktree execution belongs to the runner.
+inventory/signature rejection and widths above 2^53. The public pinned gate stub and orchestrator-owned gate.toml now select clean
+pushed-SHA worktrees and pinned sibling data/VM builds. Manifest/stub/development
+entry tests pass. Actual pushed-SHA execution and hook-check belong to the runner.
 
 Differential evidence: rung-3 sum inputs 0/1/3/7/255 match VM steps/time
 6/11/21/41/1281. Three faulting entries match 3-step prefixes. Nested/impure
@@ -55,10 +56,21 @@ unadopted and queued under COMMON rule 14 in .tmp/sol-estimate/cross-repo-beads.
 Open work is bennett-estimate-bph and .1/.2/.3 (in progress), plus .4 for the
 published decisions, `.5` for token alias context and independent consumer b8o.
 The CLI reports affected requests as pending evidence with no resource rows and
-exit code 3. New m6p tracks pinned-sibling gate adoption; its required root
-gate.toml is outside this job’s explicit write allowlist. Full activation/link/type,
+exit code 3. m6p retains runner hook-check/pushed-SHA verification; the owned migration is
+implemented and locally tested. The orchestrator installed gate.toml; it was not
+modified by this job. Full activation/link/type,
 register/effect paths, K55 admission, K81 release-ended/independent-call cleanup partitioning,
 changed-shape loop bindings, remaining adjoint cases, borrow-owner accounting and
 nested certificate composition remain. Continue independent work now. Upstream
 I2 b-isa-spec-r51 and missing rung artifacts do not remove the full 2^20-row
 Grover/SQLite requirement. Worklog is orchestrator-owned.
+
+The prioritized review queue is adjudicated in docs/REVIEW_FINDINGS.md. Closed
+bst/4mr/3p2 after regression tests confirmed the published K57/K58 defaults;
+closed w8f after rejecting unavailable libraries during schedule admission;
+closed xng after finite-capacity/accuracy summaries passed 2^40-iteration
+bounded-work tests and resource/error agreement with ledger replay. Default
+class feasibility is proved by sequential peaks; required fallback retains
+replay. RecordField views now bind lifted free and location-length boundscheck
+to the packed allocation table without extra wire/history storage. Large table
+scan-loop summaries still need work.

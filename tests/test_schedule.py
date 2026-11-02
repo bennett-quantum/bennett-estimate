@@ -167,6 +167,107 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_default_summary_matches_replay_with_scheme_workspace_and_accuracy(self):
+        sig={"abi":"0.9","tier":"q","kind":"action","mut":[3],"in":[],"mem":[],"args":[],"bounds":[3]}
+        obj=make_object("action @root (q:wire[3]) () () () ()\nregs {  } bounds { 3 }\n^entry():\nqloop 3 {\nrz 0.5 q[0]\nmcx (q[0], q[1]) q[2]\n}",sig)
+        doc=e.loads(e.jcs(target().doc));doc["classes"]["data"]["capacity"]=5
+        doc["gates"]=[g for g in doc["gates"] if g["op"]!="mcx"]
+        next(g for g in doc["gates"] if g["op"]=="rz")["epsilon"]={"var":"eps"}
+        doc["schemes"]=[{"name":"exact-mcx","realises":{"op":"mcx","controls":{"min":2,"max":2}},"ancillae":{"count":2,"class":"data","state":"clean"},"template":[{"gate":"ccx","wires":["c[0]","c[1]","t"]}]}]
+        t=e.Target.read(e.jcs(doc));budget=["0"]*4
+        summarized=e.estimate(obj,t,"root",[],budget,epsilon="0.1")
+        replay=e.estimate(obj,t,"root",[],budget,epsilon="0.1",include_frame=True)
+        for field in ["exact_resources","gates","error_bound","resolved_default_epsilon_share"]:self.assertEqual(summarized[field],replay[field],field)
+        self.assertEqual(summarized["resources"]["peak_qubits[data]"],"5")
+        self.assertEqual(summarized["resolved_default_epsilon_share"],{"numerator":"1","denominator":"60"})
+
+    def test_capacity_class_fallback_retries_an_unsupported_summary_class(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        obj=make_object("perm_action @root (q:wire) () () () ()\n^entry():\nx q",sig)
+        doc=e.loads(e.jcs(target().doc));desc={"qubit_second":1,"dirty_rate":1}
+        doc["classes"]={"A":{**desc,"capacity":0},"B":{**desc,"capacity":1}}
+        doc["gates"]=[{**g,"classes":["B"]} for g in doc["gates"] if g["op"]=="x"]
+        doc["schemes"]=[]
+        result=e.estimate(obj,e.Target.read(e.jcs(doc)),"root",[],["0"]*4)
+        self.assertEqual(result["resources"]["peak_qubits[A]"],"0")
+        self.assertEqual(result["resources"]["peak_qubits[B]"],"1")
+        self.assertEqual(result["resources"]["time"],"1")
+
+    def test_finite_capacity_and_accuracy_keep_trillion_iteration_summaries(self):
+        n=2**40
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[n]}
+        obj=make_object(f"perm_action @root (q:wire) () () () ()\nregs {{  }} bounds {{ {n} }}\n^entry():\nqloop {n} {{\nx q\n}}",sig)
+        doc=e.loads(e.jcs(target().doc));doc["classes"]["data"]["capacity"]=1
+        t=e.Target.read(e.jcs(doc));original=e.Catalog
+        class BoundedWork(original):
+            def body(self,*args,**kw):
+                if self.visits>100:raise AssertionError("resource summary grew with loop count")
+                return super().body(*args,**kw)
+        for epsilon in ["0","0.1"]:
+            with patch.object(e,"Catalog",BoundedWork):result=e.estimate(obj,t,"root",[],["0"]*4,epsilon=epsilon)
+            self.assertEqual(result["resources"]["time"],str(n))
+            self.assertEqual(result["resources"]["gate_count"],str(n))
+            self.assertEqual(result["resources"]["peak_qubits[data]"],"1")
+            self.assertLess(result["summary_operations"],10)
+
+    def test_approximate_loop_summary_keeps_exact_population_and_error(self):
+        n=2**40
+        sig={"abi":"0.9","tier":"q","kind":"action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[n]}
+        obj=make_object(f"action @root (q:wire) () () () ()\nregs {{  }} bounds {{ {n} }}\n^entry():\nqloop {n} {{\nrz 0.5 q\n}}",sig)
+        doc=e.loads(e.jcs(target().doc));doc["classes"]["data"]["capacity"]=1
+        gate=next(g for g in doc["gates"] if g["op"]=="rz")
+        gate["epsilon"]={"var":"eps"};gate["cost"]["time"]={"var":"eps"}
+        original=e.Catalog
+        class BoundedWork(original):
+            def body(self,*args,**kw):
+                if self.visits>100:raise AssertionError("accuracy population was enumerated")
+                return super().body(*args,**kw)
+        with patch.object(e,"Catalog",BoundedWork):result=e.estimate(obj,e.Target.read(e.jcs(doc)),"root",[],["0"]*4,epsilon="0.1")
+        self.assertEqual(result["resolved_default_epsilon_share"],{"numerator":"1","denominator":str(10*n)})
+        self.assertEqual(result["exact_resources"]["time"],{"numerator":"1","denominator":"10"})
+        self.assertEqual(F(result["error_bound"]),F(1,10))
+        self.assertEqual(result["gates"],{"rz":str(n)})
+
+    def test_k58_exact_native_default_is_zero_but_explicit_share_keeps_array_order(self):
+        sig={"abi":"0.9","tier":"q","kind":"action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        obj=make_object("action @root (q:wire) () () () ()\n^entry():\nh q\nh q",sig)
+        doc=e.loads(e.jcs(target().doc));doc["gates"]=[{"op":"h","classes":["data"],"controls":{"min":0,"max":0},"epsilon":error,"cost":{"time":cost,"gate_count":1}} for error,cost in [(e.Decimal("0.001"),1),(0,100)]]
+        t=e.Target.read(e.jcs(doc));result=e.estimate(obj,t,"root",[],["0"]*4,epsilon="0.01")
+        self.assertEqual(result["resources"]["time"],"200")
+        self.assertEqual(result["resolved_default_epsilon_share"],{"numerator":"0","denominator":"1"})
+        obj.sections["schedule"]=result["effective_schedule"]
+        obj.sections["schedule"]["entries"]=[entry(epsilon_share="0.005")]
+        explicit=e.estimate(obj,t,"root",[],["0"]*4,epsilon="0.01")
+        self.assertEqual(explicit["resources"]["time"],"2")
+        self.assertEqual(F(explicit["error_bound"]),F(1,500))
+
+    def test_k58_exact_scheme_still_counts_before_target_expansion(self):
+        sig={"abi":"0.9","tier":"q","kind":"action","mut":[3],"in":[],"mem":[],"args":[],"bounds":[]}
+        obj=make_object("action @root (q:wire[3]) () () () ()\n^entry():\nh q[0]\nmcx (q[0], q[1]) q[2]",sig)
+        doc=e.loads(e.jcs(target().doc));doc["gates"]=[g for g in doc["gates"] if g["op"] not in ["h","mcx"]]
+        doc["gates"].append({"op":"h","classes":["data"],"controls":{"min":0,"max":0},"epsilon":e.Decimal("0.01"),"cost":{"time":1,"gate_count":1}})
+        doc["schemes"]=[{"name":"exact-mcx","realises":{"op":"mcx","controls":{"min":2,"max":2}},"ancillae":{"count":0,"class":"data","state":"clean"},"template":[{"gate":"ccx","wires":["c[0]","c[1]","t"]}]}]
+        t=e.Target.read(e.jcs(doc))
+        with self.assertRaisesRegex(e.ContractError,"E_GATE_UNSUPPORTED"):
+            e.estimate(obj,t,"root",[],["0"]*4,epsilon="0.01")
+        result=e.estimate(obj,t,"root",[],["0"]*4,epsilon="0.02")
+        self.assertEqual(result["resolved_default_epsilon_share"],{"numerator":"1","denominator":"100"})
+        self.assertEqual(F(result["error_bound"]),F(1,100))
+
+    def test_omitted_expansion_resolves_ref_but_foreign_libraries_reject(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        obj=make_object("perm_action @root (q:wire) () () () ()\n^entry():\nx q",sig);t=target()
+        base=e.estimate(obj,t,"root",[],["0"]*4)
+        obj.sections["schedule"]=e.loads(e.jcs(base["effective_schedule"]))
+        obj.sections["schedule"]["bindings"].pop("expansion")
+        obj.sections["schedule"]["entries"]=[entry("start",generated=0,time=3)]
+        omitted=e.estimate(obj,t,"root",[],["0"]*4)
+        self.assertEqual(omitted["resources"]["time"],"4")
+        for library in [{"name":"other","version":"0.9","hash":"a"*64},{**base["effective_schedule"]["bindings"]["expansion"],"hash":"b"*64}]:
+            obj.sections["schedule"]["bindings"]["expansion"]=library
+            with self.assertRaisesRegex(e.ContractError,"E_SCHEDULE_INFEASIBLE.*library"):
+                e.estimate(obj,t,"root",[],["0"]*4)
+
     def test_lifted_table_fields_share_packed_storage_and_add_no_history_slots(self):
         sig={"abi":"0.9","tier":"q","kind":"oracle","in":[2,1],"tgt":2,"fault":4,"mem":[],"args":[]}
         layout={"ptr_width":2,"H":1,"A_tab":1,"S_cells":0,"globals":{},"interface_regions":{},"heap_base":1,"heap_limit_max":1,"null_size":1}
@@ -185,7 +286,7 @@ class Accounting(unittest.TestCase):
             with patch.object(e,"Ledger",Recording):streamed=e.estimate(obj,t,"root",[],budget,include_frame=True)
             self.assertEqual(streamed["exact_resources"],baseline["exact_resources"],opcode)
             self.assertEqual([r["width"] for r in streamed["frame"]["history"]],[5])
-            self.assertEqual(touched,{0,1,4,5,6,7,10,11} if opcode=="lift.free" else set(range(12)))
+            self.assertEqual(touched,{0,1,4,5,6,7,10,11} if opcode=="lift.free" else set(range(12))-{5,11})
             self.assertEqual(written,{4,10} if opcode=="lift.free" else set())
 
     def test_lifted_oracle_uncall_has_whole_cleanup_recompute_carrier(self):

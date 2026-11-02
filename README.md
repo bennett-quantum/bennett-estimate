@@ -7,7 +7,7 @@ coverage](docs/PLAN.md) and [handoff](HANDOFF.md) before relying on an estimate.
 The remaining source, scheduling and verification work is tracked in Beads
 under `bennett-estimate-bph`; the complete requested estimator is not yet delivered.
 
-Build with Rust and Python 3.10 or newer (standard library only):
+Build with Rust and Python 3.11 or newer (standard library only):
 
 ```sh
 cargo build --offline --locked -j4
@@ -59,7 +59,8 @@ its closed-form summary.
 Current source coverage includes structured gates, allocation/borrowing,
 copy/XOR/exchange, predication, loops, local-region images and linear coherent
 memory, controlled action/oracle calls and qinplace, plus padded arithmetic/control
-oracles, lifted allocation with all four history slots, lifted oracle/permutation
+oracles, lifted allocation with all four history slots, lifted free and
+location-length bounds checking, lifted oracle/permutation
 calls and intrinsic oracle-uncall recompute, and layout-state/global-address
 construction. Each nested oracle retains
 its own resolved token. Unused resolved arguments retain their typed invocation
@@ -82,7 +83,10 @@ of the reference cost calculation; the full rung-4 Grover estimate is pending.
 lifetimes and nested invocation records. Concrete schedule/frame reconstruction
 visits dynamic leaves and retains allocation endpoints, never a gate list;
 its work can grow with the budget. The default analytic path retains its
-closed-form scaling.
+closed-form scaling on finite-capacity targets whenever its sequential peak
+proves that the default class choices fit. It also counts the default accuracy
+population algebraically, before target scheme expansion. Class fallback,
+explicit schedules, topology and requested frame reconstruction use replay.
 
 `--certificate file` reads a JCS 0.9 certificate and checks K12 bindings,
 resource rows and root frame requirements against a rebuilt supported estimate.
@@ -110,6 +114,7 @@ env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u BROWSER \
 The tests require the sibling published target/conformance data and the VM
 binary at `../bennett-vm/target/debug/bennett-vm` (override with
 `BENNETT_VM_BIN`). They never import sibling implementation code. The ordinary
-pre-push hook tests each pushed SHA in a clean detached worktree beside the
-repo; the job runner owns git operations. The working-tree form performs no git
+pre-push hook uses the public gate tool pinned in gate.toml. It tests each pushed
+SHA in a clean worktree with sibling data and the VM binary at their pinned
+commits; the job runner owns git operations. The working-tree form performs no git
 operation and is for development, not evidence about a pushed SHA.
