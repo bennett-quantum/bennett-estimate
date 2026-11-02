@@ -1,69 +1,59 @@
 # Handoff
 
-Status: partial implementation; full source coverage needs the published binding
-decisions in [CONTRACT_GAPS.md](docs/CONTRACT_GAPS.md). ISA 0.9 is pinned in
-SPEC_VERSIONS.toml. The runner
-owns commits; no git command was run by this job. Worklog is orchestrator-owned.
+Status: partial ISA 0.9 implementation. All requested north-star scope remains
+required. Source cases reading classical pseudo-locations or implicit/literal
+memory lengths await the published decisions in docs/CONTRACT_GAPS.md; other
+work continues. Runner owns commits; no git process or Dolt remote sync was run.
 
-Implemented: exact rational expressions and K9/K12 arithmetic; independent
-object and certificate readers; all ten normative object identity vectors;
-published catalog traversal into composable cost summaries; structured source
-primitives; padded arithmetic/control oracles, root layout-state/global-address
-construction and unused typed parameter bindings; pure classical
-control-path costing and conditional step bounds; deterministic JSON CLI.
+Implemented: independent object/certificate readers; exact rational cost algebra;
+all ten normative interface identities; 219-recipe catalog and closed-form
+loops/dispatch/padded arithmetic-control oracles; root layout state and four-slot
+lifted allocation. Structured action/oracle calls, local-region callees, per-call
+tokens and qinplace preserve invocation paths. K62 primitive/call adjoints,
+intrinsic copy/load recompute and same-shape loop lifetime carry-over are present.
+Classical execution supports cancellation-aware uncall, clock effects, integer
+control, calls and failed prefixes. Reader checks include instruction tiers,
+locations, interface roles, bounds and terminators.
 
-Verified: headless `timeout 180 scripts/pre-push --working-tree` exited 0:
-31 estimator tests, one hook orchestration test, Rust formatting, Clippy with
-warnings denied and shell syntax checks passed. The hook test uses an explicit
-VCS double; no git process was invoked. It verifies pushed-SHA selection,
-deduplication, deletion-only pushes and failed-check cleanup. The runner must
-still invoke the normal hook against a real committed SHA.
+Schedules: independent per-kind specificity/ties, exact accuracy defaults,
+native/template choices, rational starts/dependencies, class fallback/capacity,
+parallel and topology checks. K64 support/row points preserve inverse forward
+ordinals. B5 descriptors include distinct allocation occurrences and exact large
+width expressions. Root certificate reconstruction checks bindings, kind,
+signature, bounds, native inventory, exact rows and frame requirements. CLI
+certificate output enriches supplied proof metadata for the same invocation;
+correctness claims and nested composition are not verified or invented.
 
-Additional scaling evidence: the source object in
-`examples/memory-lookup-2pow20.bisa` has 2^20 eight-bit cells and 1024 repeated
-load/XOR/unload operations. Its summary uses fewer than 1000 constructor visits.
-The dispatch formula agrees exactly with literal catalog traversal on small
-address spaces. This is a reference-cost scaling fixture, not the full Grover
-or SQLite rung. Indexed-control/middle-alias tests guard loop folding, and the
-published controlled-action fixture exercises default controlled action calls.
+Verified checkpoint: headless `timeout 180 scripts/pre-push --working-tree`
+passed 69 tests, fmt, strict Clippy and shell syntax checks. Later focused tests
+cover backdated release peaks, fixed scheme ancilla classes, K12 certificate
+production/recheck/determinism, native inventory/signature rejection and widths
+above 2^53. A new full gate is running; see .tmp/PROGRESS.md for its session and
+final result before asserting the latest tree green. Hook orchestration uses a
+VCS double; actual pushed-SHA clean-worktree execution belongs to the runner.
 
-Differential: the published rung-3 `executor-control.bisa` with `sum` arguments
-0, 1, 3, 7, 255 matches the VM's 6, 11, 21, 41, 1281 source steps and sequential
-time exactly. Three faulting rung-3 entries (divzero, memfault, unknown_effect)
-also match their 3-step prefixes exactly. This is a classical count comparison. Rung 2 currently has no ISA
-object or stated gate/step count; its reports record pipeline blockers.
-`scripts/differential.py` reports that unavailability explicitly.
+Differential evidence: rung-3 sum inputs 0/1/3/7/255 match VM steps/time
+6/11/21/41/1281. Three faulting entries match 3-step prefixes. Nested/impure
+uncall cases match 11/8 steps. All 86 published K82 normalized leaf digests
+match, and each full literal profile equals its closed-form summary; all 16
+binding cases pass. These finite witnesses cover binding/order/costs, not a
+proof of circuit correctness. Rung-2 has no ISA object or stated count yet.
 
-Open requirements: `bennett-estimate-bph` and children `.1` (all source bindings),
-`.2` (schedule/topology/certification), `.3` (remaining differential evidence) and
-`.4` (published source-binding decisions). Root is in progress; `.1` has cases blocked on `.4`;
-the implementation requirements remain in scope. The independently filed
-consumer `bennett-estimate-b8o` also remains open.
-Structure recovery stays in scope, with upstream `b-isa-spec-r51` as the
-efficiency work item; there is no claimed meaningful full Grover/SQLite estimate
-at 2^20 rows yet. Do not label a padded step-machine estimate structure-recovered.
+examples/lift-allocator.bisa is VM-admitted with matching object/closure hashes
+and returns payload 1/code 0/steps 3 at budget 3,1,0,0. The 2^20-cell lookup
+fixture checks summary scaling only, not a full Grover/SQLite estimate. The
+structure-recovered label remains reserved for checked transformation evidence.
 
-The exported upstream `bennett-vm-hsd`/`b-isa-spec-c15` records were read because
-their databases are read-only under this job's sandbox. Published 0.9 K12 fixes
-the requested parameter vector, escaped per-class rows and upward decimal
-contract; no decision was guessed in those settled rules. The continuation
-demonstrated two separate source-to-wire binding gaps, EST-SOURCE-01/02, tracked
-by `bennett-estimate-bph.4`. Both source objects are accepted by the published VM
-binary with matching hashes. The fixed-argument function executes all four x/a
-combinations correctly, while alternative implicit length widths change exact
-workspace. No resource policy is silently substituted for that missing binding.
+Spec pin is e424d678fa553be5847bf1b53f83703462318b57 (K82); its blob was checked
+directly against the commit/tree objects without running git. Catalog bytes and
+identity are unchanged. Published K12 settles the old hsd/c15 decimal and
+parameter questions; none was guessed. EST-SOURCE-01/02 proposals remain
+unadopted and queued under COMMON rule 14 in .tmp/sol-estimate/cross-repo-beads.md.
 
-Exact proposed text and witnesses are in docs/CONTRACT_GAPS.md. The orchestrator
-request is `.tmp/sol-estimate/cross-repo-beads.md`, per COMMON rule 14; the
-proposals remain unadopted. Continue all independent `.1`/`.2`/`.3` work now. Consume the source-binding
-decisions and any new catalog identity once published, then finish affected cases. The sandbox's read-only
-sibling access does not itself justify stopping work.
-
-Continuation adds exact accuracy-share defaults; per-kind schedules and native/template
-choices; endpoint timing/occupancy/capacity/topology; streamed oracle K64 support
-and reverse ordinals; B5 allocation descriptors and root frame reconstruction;
-local-region action callees; nested token channels and qinplace occurrences;
-K62 primitive/call source adjoints and intrinsic copy/load recompute. Full K81
-cleanup partitioning and full executable certificate production remain open.
-K82 is consumed, with the published spec pin advanced to e424d678fa553be5847bf1b53f83703462318b57;
-the spec blob was checked directly against that commit without running git.
+Open work is bennett-estimate-bph and .1/.2/.3 (in progress), plus .4 for the
+published decisions and independent consumer b8o. Full activation/link/type,
+register/effect paths, K55 admission, K81 release-ended/call cleanup partitioning,
+changed-shape loop bindings, remaining adjoint cases, borrow-owner accounting and
+nested certificate composition remain. Continue independent work now. Upstream
+I2 b-isa-spec-r51 and missing rung artifacts do not remove the full 2^20-row
+Grover/SQLite requirement. Worklog is orchestrator-owned.

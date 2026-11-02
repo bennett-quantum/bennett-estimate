@@ -46,15 +46,17 @@ published JSON catalog. It needs no installed source tree at runtime. Python
 arbitrary-precision integers and `Fraction` implement the cost algebra; gates
 and state vectors are never materialised. Structured repetitions and padded
 memoryless oracle budgets use multiplication of cost summaries. The catalog
-is contract data, not code copied from another implementation.
+is contract data, not code copied from another implementation. Tests match all
+86 published K82 leaf digests and compare every complete literal profile with
+its closed-form summary.
 
 Current source coverage includes structured gates, allocation/borrowing,
 copy/XOR/exchange, predication, loops, local-region images and linear coherent
 memory, controlled action/oracle calls and qinplace, plus padded arithmetic/control
-oracles and layout-state/global-address construction. Each nested oracle retains
+oracles, lifted allocation with all four history slots, and layout-state/global-address construction. Each nested oracle retains
 its own resolved token. Unused resolved arguments retain their typed invocation
 bindings. Full lifted memory/activation rows, complete source adjoint/cleanup
-partitioning, register/effect histories and certificate production still require work.
+partitioning, remaining register/effect histories and certificate proof checking still require work.
 Unsupported paths fail explicitly; they remain requirements.
 
 Full exact source coverage needs the published decisions described in
@@ -80,6 +82,13 @@ Producer-chosen non-slot identities may be renamed; altered widths, classes,
 states or omitted lifetimes reject. Schema parsing and resource agreement do
 **not** verify correctness/error claims, nested certificate composition or
 shared-storage permissions.
+
+`--certificate-template existing.json --write-certificate output.json` adds
+K12 exact resources, native gate counts and the reconstructed root frame to
+an existing certificate for the **same bound invocation**. It preserves supplied
+reference/proof metadata and rejects changed object, target, schedule or arguments.
+The output does not assert a correctness verdict; claims remain unchecked.
+Certificate bytes are JCS and deterministic.
 
 Run the local checks headlessly:
 

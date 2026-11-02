@@ -151,6 +151,68 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_interface_width_above_2pow53_is_decimal_string_bound(self):
+        width=2**53+1
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[str(width)],"in":[],"mem":[],"args":[],"bounds":[0]}
+        obj=make_object(f"perm_action @root (t:wire[{width}]) () () () ()\nregs {{  }} bounds {{0}}\n^entry():\nqloop 0 {{\nx t[0]\n}}",sig)
+        result=e.estimate(obj,target(),"root",[],["0"]*4,include_frame=True)
+        self.assertEqual(result["resources"]["peak_qubits[data]"],str(width))
+        self.assertEqual(result["gates"],{})
+        self.assertEqual(e.expression(result["frame"]["slots"][0]["width"],{"c":0},{}),width)
+
+    def test_frame_widths_above_json_integer_limit_remain_exact_expressions(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        obj=make_object("perm_action @root (t:wire) () () () ()\n^entry():\nqregion cells 100 2",sig)
+        result=e.estimate(obj,target(),"root",[],["0"]*4,include_frame=True)
+        frame=e.loads(e.jcs(result["frame"]))
+        e.check_metadata_numbers(frame)
+        self.assertEqual(e.expression(frame["scratch"][0]["width"],{"c":F(0)},{}),2**101)
+        self.assertEqual(result["resources"]["peak_qubits[data]"],str(2**101+1))
+
+    def test_k12_certificate_production_preserves_supplied_proof_metadata(self):
+        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
+        obj=e.Object.read((fixture/"controlled.bisa").read_text());t=e.Target.read((fixture/"target.json").read_text())
+        result=e.estimate(obj,t,"controlled",[],["0"]*4)
+        template=e.Certificate.read((fixture/"certificate.json").read_text())
+        produced=template.with_estimate(result)
+        cert=e.Certificate.read(e.jcs(produced))
+        self.assertIn("frame_verified",cert.check_resource_rows(result))
+        root=result["closure_hash"]
+        self.assertEqual(produced["regions"][root]["estimate"],{"precision_digits":34,"exact_resources":result["exact_resources"]})
+        self.assertEqual(produced["regions"][root]["claims"],template.doc["regions"][root]["claims"])
+        self.assertEqual(produced["bindings"],template.doc["bindings"])
+        self.assertNotIn("estimate",template.doc["regions"][root])
+        changed=e.loads(e.jcs(result));changed["params_hash"]="0"*64
+        changed["invocation"]["args"]=["1"]
+        with self.assertRaisesRegex(e.ContractError,"invocation"):
+            template.with_estimate(changed)
+
+    def test_peak_uses_final_intervals_when_release_is_backdated(self):
+        rows=[entry("start",path=[point(point=f"entry:{i}")],time=time) for i,time in [(0,0),(1,5),(2,1),(3,5)]]
+        t=target();ledger=e.Ledger(t,e.Schedule(schedule(rows)))
+        q=e.Bundle("q",1,"data");s=e.Bundle("s",1,"data");u=e.Bundle("u",1,"data")
+        ledger.interface("mut:0",q);ledger.gate("x",[q])
+        ledger.allocate(s,chain=[point(point="entry:0")])
+        ledger.allocate(u,chain=[point(point="entry:1")])
+        ledger.release(s,chain=[point(point="entry:2")])
+        ledger.release(u,chain=[point(point="entry:3")])
+        result=ledger.finish()
+        self.assertEqual(result["time"],5)
+        self.assertEqual(result["peak_qubits[data]"],2)
+        self.assertEqual(result["qubit_second[data]"],6)
+
+    def test_source_alloc_selector_does_not_override_scheme_ancilla_class(self):
+        doc=e.loads(e.jcs(target().doc));doc["classes"]["special"]=dict(doc["classes"]["data"])
+        doc["schemes"].append({"name":"workspace-x","realises":{"op":"x","controls":{"min":0,"max":0}},"ancillae":{"count":1,"class":"data","state":"clean"},"template":[{"gate":"x","wires":["t"]}]})
+        ledger=e.Ledger(e.Target.read(e.jcs(doc)),e.Schedule(schedule([entry(realisation="workspace-x"),entry("alloc",**{"class":"special"})])))
+        ledger.interface("mut:0",e.Bundle("q",1,"data"));ledger.gate("x",[e.Bundle("q",1,"data")],chain=[point()]);ledger.finish()
+        self.assertEqual(ledger.frame()["ancillae"][0]["class"],"data")
+
+    def test_budget_components_fit_launch_uint64(self):
+        obj=e.Object.read((ROOT/"tests/fixtures/example1.bisa").read_text())
+        e.validate_budget([str(2**64-1),"0","0","0"],obj)
+        with self.assertRaises(e.ContractError):e.validate_budget([str(2**64),"0","0","0"],obj)
+
     def test_loop_binding_carries_reallocated_lifetime_to_next_visit(self):
         sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":[],"bounds":[3]}
         obj=make_object("perm_action @root () () () () ()\nregs {  } bounds { 3 }\n^entry():\nc = qalloc any 1\nqloop 3 {\nqfree c\nc = qalloc any 1\nx c[0]\nx c[0]\n}\nqfree c",sig)
@@ -378,7 +440,7 @@ class Accounting(unittest.TestCase):
         fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09/certificate.json"
         doc=e.loads(fixture.read_text());root=result["closure_hash"]
         region=next(iter(doc["regions"].values()))
-        region.update(frame=e.loads(e.jcs(result["frame"])),signature=obj.symbol("borrow_demo")["signature"],kind="perm_action",bounds=[1],resources=result["resources"],estimate={"precision_digits":34,"exact_resources":result["exact_resources"]},claims=[])
+        region.update(frame=e.loads(e.jcs(result["frame"])),signature=obj.symbol("borrow_demo")["signature"],kind="perm_action",bounds=[1],resources=result["resources"],estimate={"precision_digits":34,"exact_resources":result["exact_resources"]},gates_used={n:{"count":int(v)} for n,v in result["gates"].items()},claims=[])
         region["verification"].update(oracle=None,unitary=[],channel=[],borrow_frames=[],inverse_pairs=[])
         doc["regions"]={root:region}
         for key in ["object_hash","interface_hash","closure_hash","target_hash","schedule_hash","invocation"]:doc["bindings"][key]=result[key]
@@ -390,6 +452,20 @@ class Accounting(unittest.TestCase):
         e.Certificate.read(e.jcs(doc)).check_resource_rows(result)
         doc["regions"][root]["frame"]["borrow"][0]["width"]=2
         with self.assertRaisesRegex(e.ContractError,"frame"):
+            e.Certificate.read(e.jcs(doc)).check_resource_rows(result)
+
+    def test_certificate_cannot_change_root_signature_or_gate_inventory(self):
+        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
+        obj=e.Object.read((fixture/"controlled.bisa").read_text());t=e.Target.read((fixture/"target.json").read_text())
+        result=e.estimate(obj,t,"controlled",[],["0"]*4)
+        doc=e.loads((fixture/"certificate.json").read_text());region=doc["regions"][result["closure_hash"]]
+        region["resources"]=result["resources"];region["estimate"]={"precision_digits":34,"exact_resources":result["exact_resources"]}
+        e.Certificate.read(e.jcs(doc)).check_resource_rows(result)
+        region["gates_used"]={}
+        with self.assertRaisesRegex(e.ContractError,"gate"):
+            e.Certificate.read(e.jcs(doc)).check_resource_rows(result)
+        region["gates_used"]={"x":{"count":1}};region["signature"]["mut"]=[2]
+        with self.assertRaisesRegex(e.ContractError,"signature"):
             e.Certificate.read(e.jcs(doc)).check_resource_rows(result)
 
     def test_default_accuracy_share_is_exact_one_thirtieth(self):

@@ -95,6 +95,15 @@ def decimal_up(q):
     return (s[:scale] + "." + s[scale:]).rstrip("0").rstrip(".")
 
 
+def width_expression(value):
+    """B5 widths stay exact without JSON integer literals at/above 2^53."""
+    value=integer(value,0)
+    if value<2**53:return value
+    high,low=divmod(value,2**26)
+    product={"op":"*","args":[width_expression(high),2**26]}
+    return {"op":"+","args":[product,low]} if low else product
+
+
 def escape(name):
     allowed = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
     return "".join(chr(b) if b in allowed else f"%{b:02X}" for b in name.encode("utf-8"))
@@ -1115,6 +1124,22 @@ def parse_function(lines):
                 stack.append((current, inst))
                 current = inst.body
     require(not stack and blocks, "unclosed scope or no blocks")
+    action_ops={"qalloc","qborrow","qfree","qreturn","qcopy","quncopy","qxor","qexch","qinplace","qregion","qload","qunload","qstore","qexchm","qpred","qunpred","qif","qloop","mcx"}
+    region_calls={"oracle_call","action_call","adj","ctl"}
+    for inst in root:
+        op=inst.op
+        if kind in ["oracle","lproc"]:
+            require(op.startswith("lift.") or op in ["qjump","qbranch","qjumpr","fault"],"§4.8: instruction outside lifted tier")
+            require(not (op=="lift.ret" and kind=="oracle" or op=="lift.retval" and kind=="lproc"),"§4.2: wrong lifted return kind")
+        elif kind in ["action","perm_action"]:
+            require(op in action_ops|region_calls|GATES.keys(),"§4.8: instruction outside action tier")
+        else:
+            require(not op.startswith("lift.") and op not in action_ops|GATES.keys()|{"qjump","qbranch","qjumpr"},"§4.8: instruction outside classical tier")
+            require(kind=="cc" or op not in ["hostcall","measure"] and not op.startswith("measure.i"),"§4.8: CC-only instruction in R")
+            require(kind=="r" or op!="effect","§4.8: effect requires R")
+    if kind in ["oracle","lproc","cc","r"]:
+        terminators={"qjump","qbranch","qjumpr","lift.retval" if kind=="oracle" else "lift.ret","fault"} if kind in ["oracle","lproc"] else {"br","ret","trap","fault"}
+        for params,code in blocks.values():require(code and code[-1].op in terminators,"§3.6/§4.1: block has no valid terminator")
     return Function(name, kind, groups, "\n".join(lines), blocks, regs, root)
 
 
@@ -1218,6 +1243,8 @@ class Object:
                     arg_group(g[2],"token",True);arg_group(g[3],"classical")
                     require(all(ty!="token" for n,ty,r in g[3]) and all(r=="in" for n,ty,r in g[4]),"lproc token/classical/memory group mismatch")
                 def widths(group): return [type_width(ty,out.ptr) for n,ty,role in group]
+                def width_value(value):return unsigned(value) if isinstance(value,str) else integer(value,1)
+                def width_values(values):return [width_value(v) for v in values]
                 def mem(group):
                     result=[]
                     for n,ty,role in group:
@@ -1228,17 +1255,21 @@ class Object:
                 if kind in ["cc","r"]:
                     require(sig["params"]==[ty for n,ty,r in g[0]] and sig["results"]==[ty for n,ty,r in g[1]] and not any(g[2:]),"§9.1: classical signature/header mismatch")
                 elif kind=="oracle":
-                    require(len(g[1])==len(g[2])==1 and sig["in"]==widths(g[0]) and sig["tgt"]==widths(g[1])[0] and sig["fault"]==widths(g[2])[0] and sig["mem"]==mem(g[3]) and sig["args"]==[ty for n,ty,r in g[4]],"§9.1: oracle signature/header mismatch")
+                    require(len(g[1])==len(g[2])==1 and width_values(sig["in"])==widths(g[0]) and width_value(sig["tgt"])==widths(g[1])[0] and width_value(sig["fault"])==widths(g[2])[0] and sig["mem"]==mem(g[3]) and sig["args"]==[ty for n,ty,r in g[4]],"§9.1: oracle signature/header mismatch")
+                    require(width_value(sig["fault"])>=4,"§5.4: oracle fault width must be at least four")
                 elif kind in ["action","perm_action"]:
-                    require(sig["mut"]==widths(g[0]) and sig["in"]==widths(g[1]) and sig["mem"]==mem(g[2]) and sig["args"]==[ty for n,ty,r in g[3]] and not g[4],"§9.1: action signature/header mismatch")
+                    require(width_values(sig["mut"])==widths(g[0]) and width_values(sig["in"])==widths(g[1]) and sig["mem"]==mem(g[2]) and sig["args"]==[ty for n,ty,r in g[3]] and not g[4],"§9.1: action signature/header mismatch")
                 else:
-                    require(len(g[1])==1 and sig["params"]==widths(g[0]) and sig["result"]==widths(g[1])[0] and sig["tokens"]==[ty for n,ty,r in g[2]] and sig["args"]==[ty for n,ty,r in g[3]] and sig["mem"]==mem(g[4]),"§9.1: lproc signature/header mismatch")
+                    require(len(g[1])==1 and width_values(sig["params"])==widths(g[0]) and width_value(sig["result"])==widths(g[1])[0] and sig["tokens"]==[ty for n,ty,r in g[2]] and sig["args"]==[ty for n,ty,r in g[3]] and sig["mem"]==mem(g[4]),"§9.1: lproc signature/header mismatch")
                 for n,ty,r in fn.regs: type_width(ty,out.ptr)
             else:
                 require(symbol["name"] in out.sections.get("data",{}) and integer(sig["size"],0)*2==len(out.sections["data"][symbol["name"]]),"data signature size mismatch")
         if "layout" in out.sections:
             keys(out.sections["layout"], ["ptr_width","H","A_tab","S_cells","null_size","heap_base","heap_limit_max","globals","interface_regions"], ["block_image"], "layout")
         if "devices" in out.sections: keys(out.sections["devices"], ["models","services"], context="devices")
+        names=[s["name"] for s in symbols.values()]
+        require(len(names)==len(set(names)),"duplicate symbol name")
+        require(set(out.functions)=={s["name"] for s in symbols.values() if s["kind"]!="data"},"function definitions and symbols differ")
         return out
 
     def symbol(self, name):
@@ -1334,6 +1365,7 @@ class Object:
 def validate_budget(budget, obj):
     require(isinstance(budget,list) and len(budget) == 4, "§5.4/K13: budget requires four components")
     values = [unsigned(v) for v in budget]
+    require(all(v<1<<64 for v in values),"§5.4/§10: budget component exceeds uint64")
     layout = obj.sections.get("layout")
     if layout is None:
         require(values[1:] == [0,0,0], "§5.4: memoryless budget requires heap=stack=depth=0")
@@ -1354,7 +1386,7 @@ def resolved_arguments(types, values, obj):
         else:
             width = type_width(ty,obj.ptr)
             n = unsigned(value)
-            require(n < 1 << width, f"E_ARG: {ty} argument out of range")
+            require(n.bit_length()<=width, f"E_ARG: {ty} argument out of range")
             out.append(n)
     return out
 
@@ -1494,8 +1526,10 @@ class Ledger:
         self.cursor=self.makespan=F(0)
         self.counts={};self.gates={};self.error=F(0)
         self.records=[];self.dependencies={};self.parallel_events={}
+        self.live={}
         self.cleanup_decisions=[]
         self.interface_index=0;self.sequence=0
+        self.order=0
         self.classes=sorted(target.doc["classes"],key=lambda n:n.encode("utf-16-be"))
 
     def _decision(self,kind,chain,ordinal,step,phase):
@@ -1509,7 +1543,7 @@ class Ledger:
         return start
 
     def _find(self,b):
-        for record in reversed(self.records):
+        for record in reversed(self.live.get(b.identity,[])):
             source=record["bundle"]
             if record["end"] is None and source.identity==b.identity and source.offset<=b.offset and b.offset+b.width<=source.offset+source.width:return record
         raise ContractError(f"E_SCHEDULE_INFEASIBLE: wire is not live: {b.identity}[{b.offset}]")
@@ -1557,9 +1591,11 @@ class Ledger:
                 require(not occupied.intersection(vertices),"E_SCHEDULE_INFEASIBLE: overlapping live vertex placements")
                 placement=list(vertices)
         self.sequence+=1
-        record={"bundle":b,"class":cls,"state":"clean" if slot is not None else b.state,"start":start,"end":None,"vertices":placement,"slot":slot,"category":category,"scheme":scheme,"id":f"{b.identity}@{self.sequence}"}
+        self.order+=1
+        record={"bundle":b,"class":cls,"state":"clean" if slot is not None else b.state,"start":start,"end":None,"start_order":self.order,"end_order":None,"vertices":placement,"slot":slot,"category":category,"scheme":scheme,"id":f"{b.identity}@{self.sequence}"}
         self.records.append(record)
-        record["instant_peak"]=self._used(cls,start)
+        record["latest_use_end"]=F(0)
+        self.live.setdefault(b.identity,[]).append(record)
         return record
 
     def interface(self,slot,b,vertices=None):
@@ -1570,13 +1606,13 @@ class Ledger:
         self.interface_index+=1
         self._register(b,F(0),"any",vertices,slot=slot)
 
-    def allocate(self,b,chain=(),ordinal=0,step=None,phase=None,requested=None,category="scratch",scheme=None,start=None,vertices=None):
+    def allocate(self,b,chain=(),ordinal=0,step=None,phase=None,requested=None,category="scratch",scheme=None,start=None,vertices=None,select=True):
         # Resolve all selectors before applying any realisation to this leaf.
-        selected=self._decision("alloc",chain,ordinal,step,phase)
+        selected=self._decision("alloc",chain,ordinal,step,phase) if select else None
         moment=self._start(chain,ordinal,step,phase) if start is None else start
         cls=selected["class"] if selected is not None else requested or b.cls
         placement=selected.get("vertices") if selected is not None else vertices
-        for r in self.records:
+        for r in self.live.get(b.identity,[]):
             s=r["bundle"]
             require(r["end"] is not None or s.identity!=b.identity or b.offset+b.width<=s.offset or s.offset+s.width<=b.offset,"K27: double acquisition of a live allocation")
         r=self._register(b,moment,cls,placement,category=category,scheme=scheme)
@@ -1587,10 +1623,12 @@ class Ledger:
     def release(self,b,chain=(),ordinal=0,step=None,phase=None,start=None):
         r=self._find(b)
         require(r["bundle"].width==b.width and r["bundle"].offset==b.offset,"partial allocation release")
-        minimum=max([r["start"]]+[value for (identity,index),value in self.dependencies.items() if identity==r["id"]])
+        minimum=max(r["start"],r["latest_use_end"])
         moment=self._start(chain,ordinal,step,phase,minimum) if start is None else start
         require(moment>=minimum,"E_SCHEDULE_INFEASIBLE: release violates dependency")
+        self.order+=1;r["end_order"]=self.order
         r["end"]=moment;self.cursor=moment;self.makespan=max(self.makespan,moment)
+        self.live[b.identity].remove(r)
         return space_profile(r["class"],r["state"],-b.width)
 
     def _wires(self,operands,controls):
@@ -1628,7 +1666,8 @@ class Ledger:
             for time in sorted(self.parallel_events):
                 active+=self.parallel_events[time]
                 require(active<=parallel,"E_SCHEDULE_INFEASIBLE: max_parallel exceeded")
-        for r,w in zip(records,wires):self.dependencies[(r["id"],w[1])]=end
+        for r,w in zip(records,wires):
+            self.dependencies[(r["id"],w[1])]=end;r["latest_use_end"]=max(r["latest_use_end"],end)
         self.counts=add_maps(self.counts,p.counts);self.gates=add_maps(self.gates,p.gates);self.error+=p.error
         self.cursor=end;self.makespan=max(self.makespan,end)
         return p
@@ -1667,7 +1706,7 @@ class Ledger:
         b=Bundle(f"scheme:{len(self.records)}",n,anc["class"],state="borrowed" if anc["state"]=="dirty" else "clean")
         # A scheme has no ordinal/cost of its own. Its allocation and native
         # template are consequences of the one selected source operation.
-        p=self.allocate(b,start=start,requested=b.cls,category="ancillae",scheme=scheme["name"])
+        p=self.allocate(b,chain=chain,ordinal=ordinal,step=step,phase=phase,start=start,requested=b.cls,category="ancillae",scheme=scheme["name"],select=False)
         time=start
         for leaf in scheme["template"]:
             repeat=leaf.get("repeat")
@@ -1696,7 +1735,7 @@ class Ledger:
                 p=p.then(part);time+=part.time
         p=p.then(self.release(b,start=time))
         for w in wires:
-            r=self._find(self._bit_bundle(w));self.dependencies[(r["id"],w[1])]=time
+            r=self._find(self._bit_bundle(w));self.dependencies[(r["id"],w[1])]=time;r["latest_use_end"]=max(r["latest_use_end"],time)
         self.cursor=time;self.makespan=max(self.makespan,time)
         return p
 
@@ -1707,17 +1746,22 @@ class Ledger:
             if r["end"] is None:
                 require(r["slot"] is not None,"K27: live allocation at region exit")
                 r["end"]=self.makespan
+                r["end_order"]=self.order+1
         peaks={};areas={}
         for cls in self.classes:
-            changes={};zero_peak=0
+            changes={}
             for r in self.records:
                 if r["class"]!=cls:continue
                 width=r["bundle"].width;start,end=r["start"],r["end"]
-                changes[start]=changes.get(start,0)+width;changes[end]=changes.get(end,0)-width
-                if start==end:zero_peak=max(zero_peak,width)
+                # Generated order breaks equal-time endpoint ties, including
+                # zero-duration lifetimes. Later explicit releases may have
+                # earlier times, so peak uses final intervals, not a prefix
+                # snapshot taken when the allocation was encountered.
+                lo,hi=(start,r["start_order"]),(end,r["end_order"])
+                changes[lo]=changes.get(lo,0)+width;changes[hi]=changes.get(hi,0)-width
                 key=(cls,r["state"])
                 areas[key]=areas.get(key,F(0))+width*(end-start)
-            active=0;peak=max([zero_peak]+[r["instant_peak"] for r in self.records if r["class"]==cls])
+            active=peak=0
             for time in sorted(changes):active+=changes[time];peak=max(peak,active)
             peaks[cls]=peak
             cap=self.target.doc["classes"][cls]["capacity"]
@@ -1726,7 +1770,7 @@ class Ledger:
         if top:
             for i,r in enumerate(self.records):
                 for other in self.records[:i]:
-                    if max(r["start"],other["start"])<min(r["end"],other["end"]):
+                    if max((r["start"],r["start_order"]),(other["start"],other["start_order"]))<min((r["end"],r["end_order"]),(other["end"],other["end_order"])):
                         require(not set(r["vertices"]).intersection(other["vertices"]),"E_SCHEDULE_INFEASIBLE: overlapping live vertex placements")
         rows={}
         for name,resource in self.target.doc["resources"].items():
@@ -1747,11 +1791,11 @@ class Ledger:
                 if r["slot"].startswith("control:"):continue
                 group,role="slots",r["slot"].split(":")[0]
                 role=r.get("role",role)
-                record={"id":r["slot"],"role":role,"class":r["class"],"width":b.width}
+                record={"id":r["slot"],"role":role,"class":r["class"],"width":width_expression(b.width)}
             else:
                 group=r["category"]
                 if group=="scratch" and r["state"]=="borrowed":group="borrow"
-                record={"id":r["id"],"class":r["class"],"width":b.width}
+                record={"id":r["id"],"class":r["class"],"width":width_expression(b.width)}
                 if group in ["scratch","ancillae"]:record["state"]="dirty" if r["state"]=="borrowed" else "clean"
                 if group=="ancillae":record["scheme"]=r["scheme"]
             result[group].append(record)
@@ -1853,7 +1897,7 @@ class Source:
         N = len(rows)
         P = max(1,N.bit_length())
         sig = self.obj.symbol(fn.name)["signature"]
-        Fwidth,T = sig["fault"],sig["tgt"]
+        Fwidth,T = integer(sig["fault"],4),integer(sig["tgt"],1)
         for n,ty,_ in fn.regs: env[n] = self.fresh(n,type_width(ty,self.obj.ptr))
         widths = {n:(b.width if isinstance(b,Bundle) else sum(w.width for w in b)) for n,b in env.items() if isinstance(b,Bundle) or isinstance(b,list) and b and all(isinstance(w,Bundle) for w in b)}
         slot_widths = []
@@ -2431,13 +2475,13 @@ class Source:
                 require(all(n in self.obj.functions and self.obj.functions[n].kind=="oracle" for n in names),"qinplace requires linked oracle pair")
                 signatures=[self.obj.symbol(n)["signature"] for n in names]
                 require(signatures[0]==signatures[1],"qinplace pair signature mismatch")
-                sig=signatures[0];N=sum(b.width for b in wire(a[3],env));Fwidth=sig["fault"]
-                require(sig["in"] and sig["in"][0]==N==sig["tgt"],"qinplace target/first input width mismatch")
+                sig=signatures[0];N=sum(b.width for b in wire(a[3],env));Fwidth=integer(sig["fault"],4)
+                require(sig["in"] and integer(sig["in"][0],1)==N==integer(sig["tgt"],1),"qinplace target/first input width mismatch")
                 token=env.get(a[2]);validate_budget(token,self.obj)
                 ins,mem,args=[list_operand(x) for x in a[4:]] if len(a)==7 else [[],[],[]]
                 require([len(ins),len(mem),len(args)]==[len(sig["in"])-1,len(sig["mem"]),len(sig["args"])],"qinplace argument arity")
                 extra=[wire(value,env) for value in ins]
-                require([sum(b.width for b in ws) for ws in extra]==sig["in"][1:],"qinplace input width mismatch")
+                require([sum(b.width for b in ws) for ws in extra]==[integer(w,1) for w in sig["in"][1:]],"qinplace input width mismatch")
                 caller_types={n:ty for n,ty,r in self.obj.functions[function].groups[3]}
                 values=[]
                 for ty,value in zip(sig["args"],args):
@@ -2445,7 +2489,7 @@ class Source:
                     values.append(env[value] if ty in ["token","f64"] else str(env[value]))
                 memory=[]
                 for desc,value in zip(sig["mem"],mem):
-                    require(value in regions and list(regions[value][:2])==[desc["A"],desc["W"]],"qinplace memory shape mismatch")
+                    require(value in regions and list(regions[value][:2])==[integer(desc["A"],0),integer(desc["W"],1)],"qinplace memory shape mismatch")
                     memory.append(regions[value][2])
                 templates=[]
                 for call_index,name_ in enumerate(names):
@@ -2568,13 +2612,14 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
         sig = obj.symbol(region)["signature"]
         widths = list(sig.get("in",[]))+list(sig.get("mut",[]))+([sig["tgt"],sig["fault"]] if fn.kind=="oracle" else [])
         widths += [(1<<integer(m["A"],0))*integer(m["W"],1) for m in sig.get("mem",[])]
-        interface = {source.cls:sum(widths)+inherited_controls}
+        interface = {source.cls:sum(integer(w,1) for w in widths)+inherited_controls}
         steps = None
     rows=ledger.finish() if ledger is not None else p.resources(target,interface)
     for cls,desc in target.doc["classes"].items():
         peak = rows.get("peak_qubits["+escape(cls)+"]",0)
         require(desc["capacity"]=="unbounded" or peak <= desc["capacity"], f"E_SCHEDULE_INFEASIBLE: capacity exceeded for {cls}")
     result={"schema":"bennett-estimate/0.1", "label":"bound" if step_bound is not None else "exact", "scope":"scheduled reference realisation" if ledger is not None else "sequential reference realisation", "object_hash":obj.hash,
+            "kind":fn.kind,"signature":obj.symbol(region)["signature"],"bounds":obj.symbol(region)["signature"].get("bounds",[]),
             "interface_hash":identities[region],"closure_hash":closure,"effective_schedule":effective_schedule,"schedule_hash":digest(jcs(effective_schedule)),
             "target_hash":target.hash,"region":region,"variant":variant,"inherited_controls":inherited_controls,
             "invocation":{"args":args,"budget":budget},"params_hash":digest(jcs(args)),
@@ -2583,7 +2628,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
             "gates":{n:str(v) for n,v in sorted(ledger.gates.items() if ledger is not None else p.gates.items())},"classical_steps":str(steps) if steps is not None else None,
             "error_bound":str(ledger.error if ledger is not None else p.error),"summary_operations":catalog.visits}
     if step_bound is not None:
-        result["bound_assumptions"]=[f"classical execution terminates within {steps} source instructions, including callees and reversal"]
+        result["bound_assumptions"]=[f"classical execution terminates within {steps} source instructions, including callees"]
         result["rational_upper_bounds"]=result.pop("exact_resources")
     if ledger is not None:
         result["resolved_default_epsilon_share"]={"numerator":str(ledger.default_share.numerator),"denominator":str(ledger.default_share.denominator)}
@@ -2694,13 +2739,37 @@ class Certificate:
         for n in doc["composition"]["multiplicities"].values(): integer(n,0)
         return cls(doc)
 
-    def check_resource_rows(self,result):
+    def check_bindings(self,result):
         b=self.doc["bindings"]
         for name in ["object_hash","interface_hash","closure_hash","target_hash","schedule_hash"]:
             require(b.get(name)==result[name],f"certificate {name} mismatch")
         require(b.get("invocation")==result["invocation"],"certificate invocation mismatch")
+
+    def with_estimate(self,result):
+        """Add reconstructed K12 costs to supplied, bound proof metadata.
+
+        This produces a certificate document, not a correctness verdict.
+        Provenance, claims, domains and error composition are never invented.
+        """
+        self.check_bindings(result)
+        require(result["label"]=="exact" and "frame" in result,"certificate production requires exact costs and a reconstructed frame")
+        doc=loads(jcs(self.doc))
+        root=doc["regions"].get(result["closure_hash"])
+        require(root is not None,"certificate template has no root region")
+        for name in ["kind","signature","bounds"]:require(root[name]==result[name],f"certificate template {name} differs from linked source")
+        root.update(frame=result["frame"],resources=result["resources"],estimate={"precision_digits":34,"exact_resources":result["exact_resources"]},gates_used={name:{"count":int(count) if int(count)<2**53 else count} for name,count in result["gates"].items()})
+        doc["producer"]={"name":"bennett-estimate","version":"0.1.0","materialisation":{"llvm_version":"none","pipeline":"isa-0.9-resource-reconstruction","normaliser_version":"none"}}
+        produced=Certificate.read(jcs(doc))
+        produced.check_resource_rows(result)
+        return produced.doc
+
+    def check_resource_rows(self,result):
+        self.check_bindings(result)
         region=self.doc["regions"].get(result["closure_hash"])
         require(region is not None and "estimate" in region,"certificate has no bound K12 estimate")
+        for name in ["kind","signature","bounds"]:require(region[name]==result[name],f"certificate {name} differs from linked source")
+        gates={n:integer(record["count"],0) for n,record in region["gates_used"].items()}
+        require(gates=={n:int(v) for n,v in result["gates"].items()},"certificate gate inventory differs from independently reconstructed native counts")
         require(region["resources"]==result["resources"] and region["estimate"]["exact_resources"]==result["exact_resources"],"certificate resources differ from independently reconstructed cost")
         if "frame" in result:
             def normalise(frame):
@@ -2715,7 +2784,7 @@ class Certificate:
                 require(not frame.get("live_ranges"),"certificate frame sharing differs from reconstructed lifetimes")
                 return answer
             require(normalise(region["frame"])==normalise(result["frame"]),"certificate frame differs from independently reconstructed lifetimes")
-        return "resource_rows_verified; frame_verified"+"; correctness_claims_not_checked" if "frame" in result else "resource_rows_verified; correctness_claims_not_checked"
+        return "resource_rows_verified; "+("frame_verified; " if "frame" in result else "")+"correctness_claims_not_checked"
 
 
 def main(argv=None):
@@ -2730,9 +2799,12 @@ def main(argv=None):
     parser.add_argument("--epsilon",default="0",help="exact decimal requested accuracy (default 0)")
     parser.add_argument("--certificate",type=Path,help="read certificate and cross-check K12 resources; does not verify correctness claims")
     parser.add_argument("--include-frame",action="store_true",help="reconstruct B5 allocation descriptor, visiting each allocation occurrence")
+    parser.add_argument("--certificate-template",type=Path,help="bound certificate supplying provenance and proof metadata for K12 output; claims remain unchecked")
+    parser.add_argument("--write-certificate",type=Path,help="write JCS K12 certificate using --certificate-template")
     parser.add_argument("--classical-step-bound",type=int,help="conditional upper bound for purely classical objects; termination assumption is reported")
     a=parser.parse_args(argv)
     try:
+        require((a.certificate_template is None)==(a.write_certificate is None),"--certificate-template and --write-certificate must be used together")
         obj=Object.read(a.object.read_text())
         target=Target.read(a.target.read_text())
         candidates=[f.name for f in obj.functions.values() if f.kind!="lproc"]
@@ -2740,9 +2812,14 @@ def main(argv=None):
         require(region is not None,"multiple entry regions: supply --region")
         params=loads(Path(a.params[1:]).read_text() if a.params.startswith("@") else a.params)
         budget=a.budget.split(",")
-        result=estimate(obj,target,region,params,budget,a.variant,a.inherited_controls,a.classical_step_bound,a.epsilon,a.include_frame or a.certificate is not None)
+        result=estimate(obj,target,region,params,budget,a.variant,a.inherited_controls,a.classical_step_bound,a.epsilon,a.include_frame or a.certificate is not None or a.certificate_template is not None)
         if a.certificate:
             result["certificate_status"]=Certificate.read(a.certificate.read_text()).check_resource_rows(result)
+        if a.certificate_template:
+            produced=Certificate.read(a.certificate_template.read_text()).with_estimate(result)
+            a.write_certificate.write_text(jcs(produced))
+            result["certificate_output"]=str(a.write_certificate)
+            result["certificate_status"]=Certificate(produced).check_resource_rows(result)
         print(jcs(result))
         return 0
     except (ContractError,OSError,ValueError,KeyError,TypeError,RecursionError) as ex:

@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import unittest
+import tempfile
 from fractions import Fraction as F
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -198,6 +199,12 @@ class Objects(unittest.TestCase):
         for text in [oracle.replace("one:reg[8]","one:ptr"),oracle.replace("x:wire[8] in","x:i8"),oracle.replace("x:wire[8] in","x:wire[8] mut"),action.replace("regs {  }","regs { ghost:wire }"),action.replace('"tier":"q"','"tier":"r"')]:
             with self.assertRaises(e.ContractError):e.Object.read(text)
 
+    def test_instruction_tiers_and_terminators_are_checked_at_admission(self):
+        oracle=(ROOT/"tests/fixtures/example1.bisa").read_text()
+        action=(ROOT/"tests/fixtures/example3.bisa").read_text()
+        for text in [oracle.replace("one = lift.const.i8 1","one = budget.mint @inc8 one one one one"),oracle.replace("lift.retval r","lift.ret r"),oracle.replace("lift.retval r","r = lift.add x one"),action.replace("cx x b[0]","br ^entry()",1)]:
+            with self.assertRaises(e.ContractError):e.Object.read(text)
+
     def test_rung3_nested_uncall_and_impure_fault_prefix(self):
         obj=e.Object.read((ROOT.parent/"bennett-conformance/ladder/rung-3/fixtures/executor-control.bisa").read_text())
         target=e.Target.read((ROOT/"data/classical-step-16.json").read_text())
@@ -357,6 +364,31 @@ class Certificates(unittest.TestCase):
 
 
 class CommandLine(unittest.TestCase):
+    def test_k12_certificate_write_and_independent_recheck(self):
+        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
+        binary=os.environ["BENNETT_ESTIMATE_BIN"]
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            output=Path(directory)/"estimate.cert.json"
+            command=[binary,str(fixture/"controlled.bisa"),"--target",str(fixture/"target.json"),"--region","controlled"]
+            made=subprocess.run(command+["--certificate-template",str(fixture/"certificate.json"),"--write-certificate",str(output)],capture_output=True,text=True,timeout=30,check=True)
+            result=json.loads(made.stdout)
+            self.assertIn("correctness_claims_not_checked",result["certificate_status"])
+            certificate=e.Certificate.read(output.read_text())
+            self.assertEqual(certificate.doc["regions"][result["closure_hash"]]["estimate"]["exact_resources"],result["exact_resources"])
+            rebuilt=subprocess.run(command+["--certificate",str(output)],capture_output=True,text=True,timeout=30,check=True)
+            self.assertIn("frame_verified",json.loads(rebuilt.stdout)["certificate_status"])
+            first=output.read_bytes()
+            subprocess.run(command+["--certificate-template",str(fixture/"certificate.json"),"--write-certificate",str(output)],capture_output=True,text=True,timeout=30,check=True)
+            self.assertEqual(first,output.read_bytes())
+
+    def test_vm_admits_and_runs_lifted_allocator_witness(self):
+        vm=Path(os.environ.get("BENNETT_VM_BIN",ROOT.parent/"bennett-vm/target/debug/bennett-vm"))
+        path=ROOT/"examples/lift-allocator.bisa"
+        checked=json.loads(subprocess.run([str(vm),"check",str(path)],capture_output=True,text=True,timeout=30,check=True).stdout)
+        self.assertEqual(checked["object_hash"],e.Object.read(path.read_text()).hash)
+        actual=json.loads(subprocess.run([str(vm),"run-oracle",str(path),"root","--input","","--budget","3,1,0,0"],capture_output=True,text=True,timeout=30,check=True).stdout)
+        self.assertEqual(actual,{"payload":1,"code":0,"steps":3})
+
     def test_vm_admits_contract_witnesses_and_runs_reference_payload(self):
         vm=Path(os.environ.get("BENNETT_VM_BIN",ROOT.parent/"bennett-vm/target/debug/bennett-vm"))
         for name in ["parameter-source-gap.bisa","implicit-length-source-gap.bisa"]:
@@ -389,6 +421,7 @@ class CommandLine(unittest.TestCase):
         report=module.run(ROOT,Path(os.environ["BENNETT_ESTIMATE_BIN"]))
         self.assertEqual([r["steps"] for r in report["rung3"]["rows"]],[6,11,21,41,1281])
         self.assertEqual([(r["region"],r["status"],r["steps"]) for r in report["rung3"]["fault_rows"]],[("divzero","FAILED",3),("memfault","FAILED",3),("unknown_effect","FAILED",3)])
+        self.assertEqual([(r["region"],r["status"],r["steps"]) for r in report["rung3"]["history_rows"]],[("nested","COMPLETED",11),("impure","FAILED",8)])
         self.assertIn(report["rung2"]["status"],["unavailable","objects_available"])
 
 
