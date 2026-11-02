@@ -44,6 +44,35 @@ def make_program(text,signatures,data=None,layout=None,ptr=32):
 
 
 class Selectors(unittest.TestCase):
+    def test_record_fields_capture_wire_ids_and_validate_unvisited_entries(self):
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),target())
+        descriptor={"name":"Records","type":"records","fields":["id","width",{"name":"location","type":"wire","width":"width"}],"order":["id"]}
+        c.recipes["record-capture"]={"parameters":[{"name":"q","type":"wire","width":4},descriptor],"body":[{"visit":"Records","body":[{"for":"bit","from":0,"to":"width","body":[{"gate":"x","wires":['location["bit"]']}]}]}]}
+        env={"f":e.Bundle("allocation",4,"data")}
+        records=[{"id":0,"width":2,"location":{"range":"f","from":1,"to":3}}]
+        self.assertEqual(c.recipe("record-capture",["f",records],env).gates,{"x":2})
+        c.recipes["record-capture"]["body"]=[]
+        invalid=[records+records,[{**records[0],"width":3}],[{**records[0],"extra":1}]]
+        for values in invalid:
+            with self.assertRaises(e.ContractError):c.recipe("record-capture",["f",values],env)
+
+    def test_fixed_procedure_binding_closure_keeps_entry_positions_distinct(self):
+        root={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":["token","token","i1"]}
+        worker={"abi":"0.9","tier":"q","kind":"lproc","params":[1],"result":1,"tokens":["token","token"],"args":["i1"],"mem":[]}
+        layout={"ptr_width":32,"H":1,"A_tab":0,"S_cells":3,"globals":{},"interface_regions":{},"heap_base":1,"heap_limit_max":1,"null_size":1}
+        text="oracle @root (x:wire in) (t:wire) (f:wire[4]) () (a:token, b:token, c:i1)\nregs { r:reg[1], s:reg[1] }\n^entry():\nr = lift.call @worker (x) (a, b) (c) ()\ns = lift.call @worker (x) (b, a) (c) ()\nlift.retval r\nlproc @worker (v:reg[1]) (r:reg[1]) (ta:token token, tb:token token) (c:i1 classical) ()\n^entry():\nr = lift.call @worker (v) (tb, ta) (c) ()\nlift.ret r"
+        obj=make_program(text,{"root":root,"worker":worker},layout=layout)
+        instances=obj.procedure_instances("root")
+        self.assertEqual([(r["function"].name,r["key"]) for r in instances],[("root",()),("worker",(0,1,2)),("worker",(1,0,2))])
+        self.assertEqual([r["first"] for r in instances],[0,3,5])
+        self.assertEqual([r["arguments"] for r in instances[1:]],[{"ta":0,"tb":1,"c":2},{"ta":1,"tb":0,"c":2}])
+        self.assertEqual([r["labels"] for r in instances],[{"entry":0},{"entry":3},{"entry":5}])
+        # Fixed argument lists cannot be filled by a register location even
+        # when its bit width happens to equal the declared classical type.
+        wrong=make_program(text.replace("(a, b) (c) ()","(a, b) (r) ()",1),{"root":root,"worker":worker},layout=layout)
+        with self.assertRaisesRegex(e.ContractError,"classical|fixed"):
+            wrong.procedure_instances("root")
+
     def test_region_graph_includes_lproc_closure_but_allows_lproc_recursion(self):
         root={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":["token"]}
         worker={"abi":"0.9","tier":"q","kind":"lproc","params":[1],"result":1,"tokens":["token"],"args":[],"mem":[]}
@@ -167,6 +196,44 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_nested_inverse_reacquires_the_captured_scratch_binding(self):
+        t=target();ledger=e.Ledger(t,e.Schedule(schedule()))
+        q=e.Bundle("q",1,"data");ledger.interface("mut:0",q)
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);c.ledger=ledger
+        prep=[{"alloc":"address","class":"any","state":"clean","width":1},{"gate":"x","wires":["address[0]"]}]
+        compute=[*prep,{"gate":"cx","wires":["address[0]","q[0]"]},{"inverse":True,"body":prep}]
+        profile=c.body([*compute,{"inverse":True,"body":compute}],{"q":q})
+        self.assertTrue(all(v==0 for v in profile.delta.values()))
+        self.assertEqual(ledger.gates,{"x":4,"cx":2})
+        self.assertEqual(ledger.finish()["qubit_second[data]"],12)
+        self.assertEqual(len(ledger.frame()["scratch"]),2)
+
+    def test_procedure_activation_rows_share_root_dispatch_and_ordered_locations(self):
+        root={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        worker={"abi":"0.9","tier":"q","kind":"lproc","params":[1],"result":1,"tokens":[],"args":[],"mem":[]}
+        layout={"ptr_width":2,"H":1,"A_tab":0,"S_cells":3,"globals":{},"interface_regions":{},"heap_base":1,"heap_limit_max":1,"null_size":1}
+        text="oracle @root (x:wire in) (t:wire) (f:wire[4]) () ()\nregs { r:reg[1] }\n^entry():\nr = lift.call @worker (x)\nlift.retval r\nlproc @worker (a:reg[1]) (v:reg[1]) () () ()\n^entry():\nv = lift.mov a\nlift.ret v"
+        obj=make_program(text,{"root":root,"worker":worker},layout=layout,ptr=2)
+        doc=e.loads(e.jcs(target().doc));doc["ptr_widths_supported"]=[2];t=e.Target.read(e.jcs(doc));budget=["1","1","8","1"]
+        baseline=e.estimate(obj,t,"root",[],budget)
+        events=[];original=e.Ledger;symbol=obj.symbol("worker")["interface_hash"]
+        class Recording(original):
+            def gate(self,op,wires,controls=(),**kw):
+                if kw["chain"][-1]["symbol"]==symbol:events.append((len(kw["chain"]),kw["chain"][-1]["instance"],kw["step"],kw["phase"]))
+                return super().gate(op,wires,controls,**kw)
+        with patch.object(e,"Ledger",Recording):streamed=e.estimate(obj,t,"root",[],budget,include_frame=True)
+        self.assertEqual(streamed["exact_resources"],baseline["exact_resources"])
+        # Four rows give P=3; slots=(capture1,fp4,sp4,depth2),
+        # old_pc3/flag1/succ3 give an 18-bit history frame.
+        self.assertEqual([r["width"] for r in streamed["frame"]["history"]],[18])
+        self.assertEqual([r["width"] for r in streamed["frame"]["scratch"][:16]],[3,3,1,4,1,3,1,4,4,2,16,32,1,1,1,6])
+        self.assertTrue(events)
+        self.assertEqual(set((length,tuple(instance),step,phase) for length,instance,step,phase in events),{(1,(),1,"fwd"),(1,(),1,"rev")})
+        obj.sections["schedule"]=streamed["effective_schedule"]
+        obj.sections["schedule"]["entries"]=[entry(path=[point(symbol)],step=1,phase="fwd",generated=0,realisation="missing")]
+        with self.assertRaisesRegex(e.ContractError,"realisation"):
+            e.estimate(obj,t,"root",[],budget)
+
     def test_default_summary_matches_replay_with_scheme_workspace_and_accuracy(self):
         sig={"abi":"0.9","tier":"q","kind":"action","mut":[3],"in":[],"mem":[],"args":[],"bounds":[3]}
         obj=make_object("action @root (q:wire[3]) () () () ()\nregs {  } bounds { 3 }\n^entry():\nqloop 3 {\nrz 0.5 q[0]\nmcx (q[0], q[1]) q[2]\n}",sig)

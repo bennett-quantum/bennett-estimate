@@ -678,6 +678,7 @@ class Catalog:
         self.binding_serial=0
         self.allocation_scopes={}
         self.used_allocations=set()
+        self.inverse_declarations=set()
         self.named_interfaces={}
         self.default_class=next(iter(sorted(target.doc["classes"],key=lambda name:name.encode("utf-16-be"))))
 
@@ -701,7 +702,34 @@ class Catalog:
             elif kind == "templates":
                 value = caller[actual] if isinstance(actual, str) else [(a, dict(caller), controls) for a in actual]
                 require(len(value) == scalar(formal["length"], env), "K22: template length mismatch")
-            elif kind in ["angle", "image", "symbol", "class", "event", "records", "allocation", "value", "arguments", "region"]:
+            elif kind=="records":
+                keys(formal,["name","type","fields","order"],context="K25 records formal")
+                fields=formal["fields"];order=formal["order"]
+                require(isinstance(fields,list) and isinstance(order,list),"K25: invalid records schema")
+                names=[f if isinstance(f,str) else f["name"] for f in fields]
+                types={n:("integer" if isinstance(f,str) else f["type"]) for n,f in zip(names,fields)}
+                require(len(set(names))==len(names) and len(set(order))==len(order) and all(types.get(n)=="integer" for n in order),"K25: invalid record field/order names")
+                require(all(t in ["integer","wire","region","class","allocation","image"] for t in types.values()),"K25: invalid record field type")
+                records=caller[actual] if isinstance(actual,str) else actual
+                require(isinstance(records,list),"K25: records actual must be array")
+                value=[];previous=None
+                for record in records:
+                    keys(record,names,context="K25 record")
+                    resolved={};integers={}
+                    for field,n in zip(fields,names):
+                        shape=dict(env,**integers);lexical=dict(caller,**integers)
+                        receiving=field
+                        if isinstance(field,dict):
+                            receiving=dict(field)
+                            for parameter in ["width","address","cell"]:
+                                if parameter in receiving:receiving[parameter]=integer(scalar(receiving[parameter],shape),0)
+                        captured,_=self.bind([receiving],[record[n]],lexical,())
+                        resolved[n]=captured[n]
+                        if types[n]=="integer":integers[n]=resolved[n]
+                    key=tuple(resolved[n] for n in order)
+                    require(not order or previous is None or previous<key,"K25: record order must be strictly increasing")
+                    previous=key;value.append(resolved)
+            elif kind in ["angle", "image", "symbol", "class", "event", "allocation", "value", "arguments", "region"]:
                 value = caller.get(actual, actual) if isinstance(actual, str) else actual
                 if kind == "allocation": require(isinstance(value, Bundle), "K27: invalid allocation handle")
                 if kind == "image": require(isinstance(value, str) and re.fullmatch(r"(?:[0-9a-f]{2})*", value), "K21: invalid image")
@@ -894,7 +922,7 @@ class Catalog:
         else:
             chain=list(self.call_edges)
             if meta is not None:
-                chain.append({"symbol":meta["symbol"],"point":meta["point"],"iteration":list(coordinates),"instance":[]})
+                chain.append({"symbol":meta["symbol"],"point":meta["point"],"iteration":list(coordinates),"instance":meta.get("instance",[])})
             canonical=jcs(chain)
             self.address_cache=(meta,self.call_edges,coordinates,chain,canonical)
         if carrier:return {"chain":chain,"ordinal":0,"step":self.root_step,"phase":self.root_phase}
@@ -947,6 +975,11 @@ class Catalog:
         return p
 
     def body(self, nodes, env, controls=(), inverse=False):
+        previous=self.inverse_declarations
+        try:return self._body(nodes,env,controls,inverse)
+        finally:self.inverse_declarations=previous
+
+    def _body(self, nodes, env, controls=(), inverse=False):
         require(isinstance(nodes, list), "K19: constructor body must be array")
         env = dict(env)
         # Declarations must also be available during inverse traversal. No wire
@@ -956,12 +989,13 @@ class Catalog:
                 n = integer(scalar(node["width"], env), 0)
                 cls = node["class"]
                 if isinstance(cls, dict): cls = cls["class"]
-                if node["alloc"] in env and isinstance(env[node["alloc"]],Bundle) and self.allocation_scopes.get(env[node["alloc"]].identity)==env.get(_BINDING_SCOPE) and (inverse or env[node["alloc"]].identity not in self.used_allocations):continue
+                if node["alloc"] in env and isinstance(env[node["alloc"]],Bundle) and self.allocation_scopes.get(env[node["alloc"]].identity)==env.get(_BINDING_SCOPE) and (inverse or env[node["alloc"]].identity not in self.used_allocations or env[node["alloc"]].identity in self.inverse_declarations):continue
                 if cls == "any" and self.ledger is None: cls = self.default_class
                 require(cls=="any" or cls in self.target.doc["classes"], "unknown allocation class")
                 self.serial += 1
                 env[node["alloc"]] = Bundle(f"{self.serial}:{node['alloc']}", n, cls, state="borrowed" if node["state"] in ["dirty","borrowed"] else "clean")
                 self.allocation_scopes[env[node["alloc"]].identity]=env.get(_BINDING_SCOPE)
+        if inverse:self.inverse_declarations=self.inverse_declarations | {env[node["alloc"]].identity for node in nodes if "alloc" in node}
         out = Profile()
         for node in reversed(nodes) if inverse else nodes:
             prior_context=self.source_context
@@ -1038,7 +1072,7 @@ class Catalog:
                 joined = tuple(dict.fromkeys(controls + captured.controls))
                 edges,coordinates=self.call_edges,self.loop_coordinates
                 if marked is not None and marked[1].get("call"):
-                    edge={"symbol":marked[1]["symbol"],"point":marked[1]["point"],"iteration":list(coordinates[:marked[1]["depth"]]),"instance":[],"call_index":marked[1].get("call_index",0)}
+                    edge={"symbol":marked[1]["symbol"],"point":marked[1]["point"],"iteration":list(coordinates[:marked[1]["depth"]]),"instance":marked[1].get("instance",[]),"call_index":marked[1].get("call_index",0)}
                     if marked[1].get("oracle_call"):edge["entered_invocation"]=[None,None]
                     self.call_edges=edges+(edge,);self.loop_coordinates=[]
                 p = captured.builder(joined,inverse,env) if captured.builder is not None else self.body(captured.body, captured.env, joined, inverse)
@@ -1432,6 +1466,59 @@ class Object:
         require(len(matches) == 1, f"unknown/ambiguous symbol {name}")
         return matches[0]
 
+    def procedure_instances(self,root):
+        """§3.7 finite binding closure, keyed by entry positions, not values."""
+        require(root in self.functions and self.functions[root].kind=="oracle","procedure closure requires an oracle")
+        fn=self.functions[root]
+        first={"function":fn,"key":(),"arguments":{n:i for i,(n,ty,r) in enumerate(fn.groups[4])},"regions":{n:i for i,(n,ty,r) in enumerate(fn.groups[3])},"calls":{}}
+        instances={(root,()):first};pending=[first]
+        while pending:
+            caller=pending.pop();function=caller["function"]
+            fixed=function.groups[4] if function.kind=="oracle" else function.groups[2]+function.groups[3]
+            fixed_types={n:ty for n,ty,r in fixed}
+            mem=function.groups[3] if function.kind=="oracle" else function.groups[4]
+            region_types={n:ty for n,ty,r in mem}
+            locations=function.regs if function.kind=="oracle" else function.groups[0]+function.groups[1]+function.regs
+            writes={n:type_width(ty,self.ptr) for n,ty,r in locations}
+            readable=function.groups[0]+[v for v in function.groups[4] if v[1]!="token"] if function.kind=="oracle" else function.groups[3]
+            reads={**writes,**{n:type_width(ty,self.ptr) for n,ty,r in readable}}
+            for row in function.code:
+                if row.op!="lift.call":continue
+                a=row.args;callee=self.functions.get(a[0].removeprefix("@"))
+                require(callee is not None and callee.kind=="lproc","lift.call requires a linked lproc")
+                require(len(a) in [2,5],"lift.call needs its complete fixed binding lists")
+                require(len(a)==5 or not any(callee.groups[2:]),"lift.call short form omits nonempty fixed bindings")
+                actuals=[list_operand(value) for value in a[1:]]
+                if len(actuals)==1:actuals += [[],[],[]]
+                require([len(v) for v in actuals]==[len(callee.groups[i]) for i in [0,2,3,4]],"lift.call argument arity mismatch")
+                require(len(row.lhs)==1 and row.lhs[0] in writes and writes[row.lhs[0]]==type_width(callee.groups[1][0][1],self.ptr),"lift.call result location width mismatch")
+                require(all(name in reads and reads[name]==type_width(ty,self.ptr) for (n,ty,r),name in zip(callee.groups[0],actuals[0])),"lift.call location argument width mismatch")
+                arguments={};regions={}
+                for formals,values in zip(callee.groups[2:4],actuals[1:3]):
+                    for (name,ty,role),value in zip(formals,values):
+                        require(value in caller["arguments"] and fixed_types.get(value)==ty,"lift.call fixed token/classical argument type mismatch")
+                        arguments[name]=caller["arguments"][value]
+                for (name,ty,role),value in zip(callee.groups[4],actuals[3]):
+                    require(value in caller["regions"] and region_types.get(value)==ty,"lift.call fixed region binding mismatch")
+                    regions[name]=caller["regions"][value]
+                key=tuple(arguments[n] for n,ty,r in callee.groups[2]+callee.groups[3])+tuple(regions[n] for n,ty,r in callee.groups[4])
+                identity=(callee.name,key);caller["calls"][id(row)]=identity
+                if identity not in instances:
+                    record={"function":callee,"key":key,"arguments":arguments,"regions":regions,"calls":{}}
+                    instances[identity]=record;pending.append(record)
+        ordered=[first]
+        if len(instances)>1:
+            self.identities(closure=True)
+            for _,component in sorted(self.closure_components):
+                for name in component:
+                    if name!=root:ordered.extend(instances[(name,key)] for key in sorted(key for function,key in instances if function==name))
+        position=0
+        for record in ordered:
+            record["first"]=position;record["labels"]={}
+            for block,(_,rows) in record["function"].blocks.items():
+                record["labels"][block]=position;position+=len(rows)
+        return ordered
+
     def identities(self, closure=False):
         records = {s["name"]:s for s in self.sections["symbols"].values()}
         imports = self.sections.get("imports", {})
@@ -1484,6 +1571,7 @@ class Object:
                 components.append(sorted(component))
         for v in records:
             if v not in indices: visit(v)
+        component_order=[]
         for component in components:
             cyclic = len(component)>1 or component[0] in references[component[0]]
             def envelope(name):
@@ -1513,7 +1601,11 @@ class Object:
             if cyclic:
                 scc = digest("".join(envelope(n) for n in component))
                 for i,n in enumerate(component): computed[n] = digest(scc+":"+str(i))
-            else: computed[component[0]] = digest(envelope(component[0]))
+                component_order.append((scc,tuple(component)))
+            else:
+                computed[component[0]] = digest(envelope(component[0]))
+                component_order.append((computed[component[0]],tuple(component)))
+        if closure:self.closure_components=component_order
         return {n:computed[n] for n in records}
 
 
@@ -1602,7 +1694,14 @@ class Schedule:
 
     def validate_paths(self,obj,region):
         symbols={obj.symbol(name)["interface_hash"]:fn for name,fn in obj.functions.items()}
-        root=obj.symbol(region)["interface_hash"]
+        domains={}
+        def domain(name):
+            if name not in domains:
+                records=obj.procedure_instances(name) if obj.functions[name].kind=="oracle" else [{"function":obj.functions[name],"key":()}]
+                resolved={}
+                for record in records:resolved.setdefault(obj.symbol(record["function"].name)["interface_hash"],set()).add(record["key"])
+                domains[name]=resolved
+            return domains[name]
         depths={}
         def visit(fn,nodes,depth):
             for node in nodes:
@@ -1613,8 +1712,9 @@ class Schedule:
             for _,nodes in fn.blocks.values():visit(fn,nodes,0)
         for entry in self.entries:
             path=entry["path"]
-            if path:require(path[0]["symbol"]==root,"schedule path is not rooted at requested region")
+            context=domain(region) if path else {}
             for i,element in enumerate(path):
+                require(element["symbol"] in context,"schedule path is not rooted in the current invocation closure")
                 require(element["symbol"] in symbols,"schedule path has unknown symbol")
                 fn=symbols[element["symbol"]]
                 point=element["point"]
@@ -1629,6 +1729,7 @@ class Schedule:
                 require(iteration=="*" or len(iteration)==depth,"schedule iteration depth mismatch")
                 instance=element.get("instance","*")
                 if fn.kind!="lproc":require(instance in ["*",[]],"non-lproc point has a nonempty instance")
+                elif instance!="*":require(tuple(instance) in context[element["symbol"]],"schedule path names an unreachable fixed-binding instance")
                 if i+1<len(path) or element.get("call_index","*")!="*":
                     require(inst is not None,"support point is not an invocation edge")
                     op,args=inst.op,inst.args
@@ -1637,11 +1738,15 @@ class Schedule:
                         op,args=args[skip-1],args[skip:]
                     require(op in ["action_call","oracle_call","lift.oracle_call","lift.oracle_uncall","lift.perm_call","qinplace"],"path descends through a non-call point")
                     targets=[a.removeprefix("@") for a in args[:2 if op=="qinplace" else 1]]
+                    if op=="lift.oracle_uncall":targets*=2
                     call_index=element.get("call_index","*")
                     require(call_index=="*" or integer(call_index,0)<len(targets),"semantic call occurrence outside expansion")
                     if i+1<len(path):
                         allowed=targets if call_index=="*" else [targets[integer(call_index,0)]]
-                        require(path[i+1]["symbol"] in [obj.symbol(n)["interface_hash"] for n in allowed],"path callee does not match source call")
+                        context={}
+                        for target in allowed:
+                            for symbol,instances in domain(target).items():context.setdefault(symbol,set()).update(instances)
+                        require(path[i+1]["symbol"] in context,"path callee does not match source call")
 
     @staticmethod
     def specificity(entry):
@@ -2099,25 +2204,53 @@ class Source:
     def oracle(self, fn, env, budget, controls=(),raw_inverse=False):
         require(self.obj.versions["isa"] == "0.9", "0.8 has no published complete expansion library; exact padded cost requires 0.9")
         B = unsigned(budget[0])
-        rows = fn.code
-        pseudo_names={n for n,ty,role in fn.groups[4] if ty!="token"}
-        for row in rows:
-            if row.op in ["lift.call","lift.oracle_call","lift.oracle_uncall","lift.perm_call"]: continue
-            reads={name for arg in row.args if not arg.startswith(("@","^")) for name in re.findall(NAME,arg)}
+        root_env=env
+        instances=self.obj.procedure_instances(fn.name)
+        by_instance={(record["function"].name,record["key"]):record for record in instances}
+        rows=[(record,row) for record in instances for row in record["function"].code]
+        for record,row in rows:
+            owner=record["function"]
+            pseudo_names={n for n,ty,role in (owner.groups[4] if owner.kind=="oracle" else owner.groups[3]) if ty!="token"}
+            operands=row.args
+            if row.op=="lift.call":operands=[row.args[1]]
+            elif row.op in ["lift.oracle_call","lift.oracle_uncall"]:operands=row.args[2:6]
+            elif row.op=="lift.perm_call":operands=row.args[1:4]
+            reads={name for arg in operands if not arg.startswith(("@","^")) for name in re.findall(NAME,arg)}
             require(not reads & pseudo_names,"EST-SOURCE-01: published ref source binding does not fix classical pseudo-location allocations; see docs/CONTRACT_GAPS.md")
         N = len(rows)
         P = max(1,N.bit_length())
         sig = self.obj.symbol(fn.name)["signature"]
         Fwidth,T = integer(sig["fault"],4),integer(sig["tgt"],1)
-        for n,ty,_ in fn.regs: env[n] = self.fresh(n,type_width(ty,self.obj.ptr))
-        widths = {n:(b.width if isinstance(b,Bundle) else sum(w.width for w in b)) for n,b in env.items() if isinstance(b,Bundle) or isinstance(b,list) and b and all(isinstance(w,Bundle) for w in b)}
+        root_args=[n for n,ty,r in fn.groups[4]];root_mem=[n for n,ty,r in fn.groups[3]]
+        locations=[];location_state=[]
+        def widths_of(scope):return {n:(b.width if isinstance(b,Bundle) else sum(w.width for w in b)) for n,b in scope.items() if isinstance(b,Bundle) or isinstance(b,list) and b and all(isinstance(w,Bundle) for w in b)}
+        for record in instances:
+            owner=record["function"]
+            local=env if owner.kind=="oracle" else {**{n:root_env[root_args[i]] for n,i in record["arguments"].items()},**{n:root_env[root_mem[i]] for n,i in record["regions"].items()}}
+            declared=owner.regs if owner.kind=="oracle" else owner.groups[0]+owner.groups[1]+owner.regs
+            record["env"]=local;record["locations"]=[];record["location_ids"]={}
+            for position,(n,ty,role) in enumerate(declared):
+                width=type_width(ty,self.obj.ptr)
+                label=n if owner.kind=="oracle" else f"{owner.name}{record['key']}:{n}"
+                local[n]=self.fresh(label,width)
+                descriptor={"id":len(locations),"width":width,"slot":position,"location":local[n]}
+                record["location_ids"][n]=descriptor["id"]
+                record["locations"].append(descriptor);locations.append(descriptor)
+                location_state.append((label,local[n]))
         slot_widths = []
         layout=self.obj.sections.get("layout")
-        for row in rows:
+        require(len(instances)==1 or layout is not None,"§7.2: procedures require layout state")
+        Sc=integer(layout["S_cells"],0)+1 if layout is not None else 1
+        Dc=max(1,(unsigned(budget[3])+1).bit_length())
+        Did=max(1,(max(1,len(locations))-1).bit_length())
+        for record,row in rows:
+            widths=widths_of(record["env"])
             ws = [widths[n] for n in row.lhs]
             if row.op=="lift.alloc":
                 require(layout is not None,"lift.alloc requires a layout")
                 ws=[self.obj.ptr,2*self.obj.ptr+2,integer(layout["H"],0)+2,integer(layout["A_tab"],0)+1]
+            elif row.op=="lift.call":ws=[widths[n] for n in list_operand(row.args[1])]+[Sc,Sc,Dc]
+            elif row.op=="lift.ret":ws=[widths[row.args[0]],Sc,Dc]
             for j,w in enumerate(ws):
                 if j == len(slot_widths): slot_widths.append(w)
                 else: slot_widths[j] = max(slot_widths[j],w)
@@ -2125,22 +2258,23 @@ class Source:
         pc,nextpc = self.fresh("pc",P), self.fresh("pc_prime",P)
         faulted,code,result = self.fresh("faulted",1),self.fresh("code",Fwidth),self.fresh("result_val",T)
         frame = self.fresh("frame",Q)
-        state=self.oracle_state(fn,env,budget,P,Q,pc,nextpc,faulted,code,result)
+        state=self.oracle_state(fn,env,budget,P,Q,pc,nextpc,faulted,code,result,location_state)
         state_wires={record["name"]:record["storage"] for record in state}
         flag = {"range":"frame","from":P+sum(slot_widths),"to":P+sum(slot_widths)+1}
         successor = {"range":"frame","from":Q-P,"to":Q}
-        labels={}
-        offset=0
-        for block,(_,instructions) in fn.blocks.items(): labels[block]=offset;offset+=len(instructions)
         row_templates,next_templates=[],[]
         template_formal=[{"name":"frame","type":"wire","width":Q}]
         def invoke(name, actuals): return {"invoke":name,"args":actuals}
         def lit(value): return invoke("successor.literal",[P,value,"next"])
-        for index,row in enumerate(rows):
+        def displacement(position,width):
+            start=P+sum(slot_widths[:position])
+            return {"range":"frame","from":start,"to":start+width}
+        for index,(instance,row) in enumerate(rows):
+            owner=instance["function"];env=instance["env"];labels=instance["labels"];widths=widths_of(env)
             op = re.sub(r"\.i[1-9][0-9]*$","",row.op)
             a = row.args
             body=[]
-            meta={"symbol":self.obj.symbol(fn.name)["interface_hash"],"point":f"{row.block}:{row.ordinal}","depth":0,"kind":row.op,"exact":True}
+            meta={"symbol":self.obj.symbol(owner.name)["interface_hash"],"point":f"{row.block}:{row.ordinal}","instance":list(instance["key"]),"depth":0,"kind":row.op,"exact":True}
             written=row.lhs
             if written:
                 require(len(written)==1 or op=="lift.parmov","unsupported multi-result lifted row")
@@ -2151,7 +2285,7 @@ class Source:
                     layout=self.obj.sections.get("layout")
                     require(layout is not None and width==self.obj.ptr,"lift.addr needs layout and pointer-width destination")
                     name=a[0].removeprefix("@")
-                    entry=layout["globals"].get(name,layout["interface_regions"].get(fn.name,{}).get(name))
+                    entry=layout["globals"].get(name,layout["interface_regions"].get(owner.name,{}).get(name))
                     require(entry is not None,"lift.addr names no global or own interface region")
                     value=integer(entry["base"],0)
                 else:
@@ -2191,7 +2325,17 @@ class Source:
             elif op=="fault": body=[invoke("fault",[Fwidth,int(a[0]) or 4,faulted,code])]
             elif op=="qjump": body=[]
             elif op=="qbranch": body=[invoke(op,[P,labels[a[1][1:]],labels[a[2][1:]],a[0],successor])]
-            elif op=="qjumpr": body=[invoke(op,[P,Fwidth,0,N,a[0],successor,flag,faulted,code])]
+            elif op=="qjumpr": body=[invoke(op,[P,Fwidth,instance["first"],len(owner.code),a[0],successor,flag,faulted,code])]
+            elif op=="lift.call":
+                callee=by_instance[instance["calls"][id(row)]]
+                formals=callee["function"].groups[0];actuals=list_operand(a[1]);m=len(actuals)
+                captures=[{"position":i,"width":widths[value],"source":env[value],"parameter":callee["env"][name],"capture":displacement(i,widths[value])} for i,((name,ty,role),value) in enumerate(zip(formals,actuals))]
+                record_size=3+len(callee["locations"])
+                stack=state_wires["stack"];K=stack.width//(1<<integer(layout["S_cells"],0))
+                body=[invoke(op,[Dc,Sc,max(Sc,record_size.bit_length())+1,record_size,1<<integer(layout["S_cells"],0),K,P,Did,Fwidth,unsigned(budget[3]),unsigned(budget[2]),index+1,instance["location_ids"][w],state_wires["depth"],state_wires["sp"],state_wires["fp"],stack,displacement(m,Sc),displacement(m+1,Sc),displacement(m+2,Dc),flag,faulted,code,callee["locations"],captures])]
+            elif op=="lift.ret":
+                stack=state_wires["stack"];K=stack.width//(1<<integer(layout["S_cells"],0))
+                body=[invoke(op,[Dc,Sc,1<<integer(layout["S_cells"],0),K,P,Did,Fwidth,slot_widths[0],widths[a[0]],state_wires["depth"],state_wires["fp"],stack,displacement(1,Sc),displacement(2,Dc),flag,faulted,code,a[0],displacement(0,slot_widths[0]),successor,instance["locations"],locations])]
             elif op=="lift.free" or op=="lift.boundscheck" and not re.fullmatch(r"0|[1-9][0-9]*",a[1]):
                 require(layout is not None,"allocator-table row requires layout")
                 require(widths[a[0]]==self.obj.ptr,"allocator-table pointer width mismatch")
@@ -2206,11 +2350,11 @@ class Source:
                 if op=="lift.perm_call":
                     require(self.obj.functions[a[0].removeprefix("@")].kind=="perm_action","lift.perm_call requires permutation action")
                 regions={}
-                for n,ty,role in fn.groups[3]:
+                for n,ty,role in (owner.groups[3] if owner.kind=="oracle" else owner.groups[4]):
                     shape=re.fullmatch(r"region\[([0-9]+),([0-9]+)\]",ty)
                     regions[n]=(int(shape[1]),int(shape[2]),env[n])
                 adapter=Instruction("action_call" if op=="lift.perm_call" else "oracle_call",a,[],block=row.block,ordinal=row.ordinal)
-                body=self.action_nodes([adapter],env,regions,controls)
+                body=self.action_nodes([adapter],env,regions,controls,function_name=owner.name)
                 if op=="lift.oracle_uncall":
                     # K65/K81: this intrinsic alone owns its cleanup carrier.
                     # Reverse is the adjoint of its exact computing call.
@@ -2227,7 +2371,7 @@ class Source:
                     calls=[]
                     for occurrence in [0,1]:
                         replacement=Instruction("oracle_call",actuals,[],block=row.block,ordinal=row.ordinal)
-                        call=self.action_nodes([replacement],local,regions,controls)
+                        call=self.action_nodes([replacement],local,regions,controls,function_name=owner.name)
                         if self.catalog.ledger is not None:
                             for node in call:self.catalog.source_metadata[id(node)]=(node,{**meta,"call":True,"oracle_call":True,"call_index":occurrence})
                         calls.append(call)
@@ -2244,19 +2388,21 @@ class Source:
             if op in ["lift.retval","fault"]: nxt=[lit(N)]
             elif op=="qjump": nxt=[lit(labels[a[0][1:]])]
             elif op=="qbranch": nxt=[invoke("bind.qxor",[P,successor,"next"])]
-            elif op=="qjumpr": nxt=[invoke("successor.dynamic",[P,N,flag,successor,"next"])]
+            elif op in ["qjumpr","lift.ret"]: nxt=[invoke("successor.dynamic",[P,N,flag,successor,"next"])]
+            elif op=="lift.call":nxt=[invoke("successor.flagged",[P,callee["first"],N,flag,"next"])]
             elif op in ["lift.faultif","lift.udiv","lift.urem","lift.sdiv","lift.srem","lift.alloc","lift.free","lift.boundscheck"]: nxt=[invoke("successor.flagged",[P,index+1,N,flag,"next"])]
             else: nxt=[lit(index+1)]
-            row_templates.append({"parameters":template_formal,"body":body})
-            next_templates.append({"parameters":template_formal+[{"name":"next","type":"wire","width":P}],"body":nxt})
+            row_templates.append(({"parameters":template_formal,"body":body},dict(env),controls))
+            next_templates.append(({"parameters":template_formal+[{"name":"next","type":"wire","width":P}],"body":nxt},dict(env),controls))
             if self.catalog.ledger is not None:
                 for node in body+nxt:
                     prior=self.catalog.source_metadata.get(id(node),(None,{}))[1]
                     context={**meta,**{k:prior[k] for k in ["call","oracle_call","call_index"] if k in prior}} if prior.get("call") else meta
                     self.catalog.source_metadata[id(node)]=(node,context)
+        env=root_env;env["$source_rows"]=row_templates;env["$source_next"]=next_templates
         if self.catalog.ledger is not None:
-            return self.oracle_stream(fn,env,budget,controls,P,N,Q,Fwidth,T,pc,nextpc,faulted,code,result,row_templates,next_templates,state,raw_inverse)
-        step=self.catalog.recipe("step",[P,N,Q,pc,nextpc,frame,row_templates,next_templates],env,controls)
+            return self.oracle_stream(fn,env,budget,controls,P,N,Q,Fwidth,T,pc,nextpc,faulted,code,result,"$source_rows","$source_next",state,raw_inverse)
+        step=self.catalog.recipe("step",[P,N,Q,pc,nextpc,frame,"$source_rows","$source_next"],env,controls)
         require(all(v==0 for v in step.delta.values()),"unbalanced step workspace")
         target=env[fn.groups[1][0][0]];fault=env[fn.groups[2][0][0]]
         # Exactly the published commit segment, with the source-bound state.
@@ -2335,13 +2481,14 @@ class Source:
             catalog.source_context,catalog.root_step,catalog.root_phase,catalog.reverse_limits=saved
             catalog.call_edges=saved_edges
 
-    def oracle_state(self,fn,env,budget,P,Q,pc,nextpc,faulted,code,result):
+    def oracle_state(self,fn,env,budget,P,Q,pc,nextpc,faulted,code,result,location_state=None):
         """K25 source state, stored as compact descriptors rather than wires.
 
         The B frames share one cost coordinate; it represents B distinct equal
         lifetimes, not a shared frame identity for a scheduled certificate.
         """
         records=[]
+        if location_state is None:location_state=[(n,env[n]) for n,ty,r in fn.regs]
         def add(name,b,initial=0,images=()):
             require(initial>=0 and initial.bit_length()<=b.width,"construction initial value outside width")
             records.append({"name":name,"storage":b,"initial":initial,"images":list(images)})
@@ -2381,7 +2528,7 @@ class Source:
             Hc,Ac,Sc,Dc=H+2,A+1,S+1,max(1,(unsigned(budget[3])+1).bit_length())
             for name,width,initial in [("heap_used",Hc,0),("atop",Ac,len(entries)),("sp",Sc,0),("fp",Sc,0),("depth",Dc,0)]: add(name,self.fresh(name,width),initial)
             add("mem",self.fresh("mem",8*(1<<H)),images=sorted(images))
-            location_widths=[env[n].width for n,ty,r in fn.regs]
+            location_widths=[b.width for n,b in location_state]
             Did=max(1,(max(1,len(location_widths))-1).bit_length())
             cell_width=max(P,Sc,Did,*location_widths)
             add("stack",self.fresh("stack",(1<<S)*cell_width))
@@ -2389,7 +2536,7 @@ class Source:
             table=self.fresh("alloctab",(1<<A)*entry_width)
             for i,(base,size) in enumerate(entries):
                 packed|=(base+(size<<self.obj.ptr)+(3<<(2*self.obj.ptr)))<<(i*entry_width)
-        for n,ty,r in fn.regs: add(n,env[n])
+        for n,b in location_state:add(n,b)
         if table is not None: add("alloctab",table,packed)
         B=unsigned(budget[0])
         if self.catalog.ledger is not None:
@@ -2567,7 +2714,7 @@ class Source:
         p,steps,_,_=execute(fn,initial)
         return p,steps
 
-    def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False):
+    def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False,function_name=None):
         out,fragments = [],[]
         inactive=env.setdefault(_SOURCE_INACTIVE,set())
         predicates = []
@@ -2579,7 +2726,7 @@ class Source:
         for inst in source_nodes:
             beginning=len(out)
             op,a = inst.op,inst.args
-            function=self.calls[-1]
+            function=function_name or self.calls[-1]
             meta={"symbol":self.obj.symbol(function)["interface_hash"],"point":f"{inst.block}:{inst.ordinal}","depth":depth,"kind":op,"call":op in ["action_call","oracle_call"],"oracle_call":op=="oracle_call","exact":self.obj.functions[function].kind=="perm_action"}
             if op in GATES or op == "mcx":
                 require(not any(self.obj.functions[n].kind in ["oracle","perm_action"] for n in self.calls) or op in ["x","cx","ccx","mcx","swap"],"§5.3: non-permutation source gate in permutation action")
