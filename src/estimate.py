@@ -1193,6 +1193,7 @@ class Catalog:
 
 NAME = r"[A-Za-z_][A-Za-z0-9_.]*"
 _SOURCE_INACTIVE=object()
+_SOURCE_LIFETIMES=object()
 SECTIONS = ["symbols", "imports", "functions", "data", "devices", "layout", "schedule", "certificate", "coverage"]
 
 
@@ -2787,9 +2788,65 @@ class Source:
         p,steps,_,_=execute(fn,initial)
         return p,steps
 
+    def source_loop(self,inst,env,regions,controls,depth,adjoint,n):
+        """Finite binding transitions; repeat source templates, never gates.
+
+        Widths/classes come from fixed arguments, literal allocation shapes
+        and existing bindings. A state includes physical handles and liveness,
+        so a repeated state admits exact composition of the whole cycle.
+        """
+        def snapshot(values):
+            result=dict(values);result[_SOURCE_INACTIVE]=set(values.get(_SOURCE_INACTIVE,()))
+            return result
+        def state(values):
+            inactive=values.get(_SOURCE_INACTIVE,())
+            return tuple(sorted((key,b.identity,b.width,b.cls,b.offset,b.state,key in inactive) for key,b in values.items() if isinstance(key,str) and not key.startswith("$") and isinstance(b,Bundle)))
+        initial=snapshot(env);current=snapshot(env)
+        variants=[];states=[initial];seen={};prefix=cycle=0
+        if not n:
+            # Check the body without changing the zero-visit exit bindings.
+            self.action_nodes(inst.body,current,regions,controls,depth+1,adjoint)
+        while len(variants)<n:
+            key=state(current)
+            if key in seen:
+                prefix=seen[key];cycle=len(variants)-prefix;break
+            seen[key]=len(variants)
+            body=self.action_nodes(inst.body,current,regions,controls,depth+1,adjoint)
+            variants.append(Captured(body,snapshot(current),controls))
+            states.append(snapshot(current))
+        else:prefix=len(variants)
+        final=states[prefix+(n-prefix)%cycle] if cycle else states[-1]
+        env.clear();env.update(snapshot(final))
+        def expand(joined,inverse,call_env):
+            catalog=self.catalog;out=Profile()
+            reverse=adjoint!=inverse
+            if catalog.ledger is not None:
+                coordinates=catalog.loop_coordinates
+                try:
+                    for index in range(n-1,-1,-1) if reverse else range(n):
+                        selected=index if index<prefix else prefix+(index-prefix)%cycle
+                        variant=variants[selected];catalog.loop_coordinates=coordinates+[index]
+                        out=out.then(catalog.body(variant.body,variant.env,joined,inverse))
+                finally:catalog.loop_coordinates=coordinates
+                return out
+            segments=[(range(prefix),1)]
+            if cycle:
+                repeats,remainder=divmod(n-prefix,cycle)
+                segments.extend([(range(prefix,prefix+cycle),repeats),(range(prefix,prefix+remainder),1)])
+            for indices,count in reversed(segments) if reverse else segments:
+                if not count:continue
+                profile=Profile()
+                for index in reversed(indices) if reverse else indices:
+                    variant=variants[index]
+                    profile=profile.then(catalog.body(variant.body,variant.env,joined,inverse))
+                out=out.then(profile.repeat(count))
+            return out
+        return Captured([],{},controls,builder=expand)
+
     def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False,function_name=None):
         out,fragments = [],[]
         inactive=env.setdefault(_SOURCE_INACTIVE,set())
+        lifetimes=env.setdefault(_SOURCE_LIFETIMES,{})
         predicates = []
         def emit(node,controlled=True):
             if predicates and controlled:
@@ -2830,8 +2887,24 @@ class Source:
                     A,n,_ = regions[a[0]]; cls,state=(self.cls if self.catalog.ledger is None else "any"),"clean"
                 if name in env:
                     b=env[name]
-                    require(isinstance(b,Bundle) and (b.width,b.cls,b.state)==(n,cls,state),"reallocated source binding with changed shape/class/state needs a distinct binding adapter")
-                else:b = self.fresh(name,n,cls,state)
+                    require(isinstance(b,Bundle),"allocation replaces a non-wire binding")
+                    lifetimes.setdefault((name,b.width,b.cls,b.state),b)
+                    if (b.width,b.cls,b.state)!=(n,cls,state):
+                        # Earlier source rows retain the lifetime they used.
+                        # A consumed name may be produced again with another
+                        # shape, without rewriting those earlier operands.
+                        prefix=[node for fragment in reversed(fragments) for node in fragment] if adjoint else list(out)
+                        if prefix:
+                            capture=f"$prior_lifetime:{self.serial}";self.serial+=1
+                            env[capture]=Captured(prefix,dict(env),controls)
+                            wrapper={"splice":capture}
+                            out=[wrapper];fragments=[[wrapper]];beginning=1
+                        b=lifetimes.get((name,n,cls,state))
+                        if b is None:b=self.fresh(name,n,cls,state)
+                else:
+                    b=lifetimes.get((name,n,cls,state))
+                    if b is None:b=self.fresh(name,n,cls,state)
+                lifetimes[(name,n,cls,state)]=b
                 env[name] = b
                 inactive.discard(name)
                 # Bind allocation result outside captured loops; acquire/release
@@ -2868,6 +2941,20 @@ class Source:
             elif op == "qloop":
                 n=env.get(a[0],int(a[0]) if a[0].isdigit() else None)
                 require(isinstance(n,int) and n>=0,"invalid qloop bound")
+                if len(a)==1:
+                    entry=dict(env)
+                    entry[_SOURCE_INACTIVE]=set(inactive)
+                    captured=self.source_loop(inst,env,regions,controls,depth,adjoint,n)
+                    inactive=env[_SOURCE_INACTIVE]
+                    if out and any(isinstance(b,Bundle) and env.get(key)!=b for key,b in entry.items()):
+                        prefix=[node for fragment in reversed(fragments) for node in fragment] if adjoint else list(out)
+                        capture=f"$before_loop:{self.serial}";self.serial+=1
+                        env[capture]=Captured(prefix,entry,controls)
+                        wrapper={"splice":capture};out=[wrapper];fragments=[[wrapper]];beginning=1
+                    capture=f"$source_loop:{self.serial}";self.serial+=1
+                    env[capture]=captured;emit({"splice":capture})
+                    fragments.append(out[beginning:])
+                    continue
                 body = self.action_nodes(inst.body,env,regions,controls,depth+1,adjoint)
                 if len(a)==1: emit({"for":"$iteration","from":0,"to":n,"body":body})
                 else:
@@ -3184,6 +3271,151 @@ class Certificate:
     def __init__(self,doc): self.doc=doc
 
     @staticmethod
+    def hash(value):
+        require(isinstance(value,str) and re.fullmatch(r"[0-9a-f]{64}",value),"invalid certificate hash")
+
+    @staticmethod
+    def array(value):
+        require(isinstance(value,list),"certificate field must be array")
+        return value
+
+    @staticmethod
+    def count(value):
+        require(isinstance(value,(int,Decimal,str)) and not isinstance(value,bool),"certificate count must be integer")
+        return unsigned(value) if isinstance(value,str) else integer(value,0)
+
+    @staticmethod
+    def name(value):
+        require(isinstance(value,str) and value,"empty/non-string certificate name")
+
+    @classmethod
+    def budget(cls,value):
+        require(len(cls.array(value))==4,"K13: budget needs four components")
+        for part in value:unsigned(part)
+
+    @classmethod
+    def invocation(cls,value,uniform=False):
+        keys(value,["args","budget"],context="invocation")
+        if value["args"]=="all" or value["budget"]=="all":
+            require(uniform and value=={"args":"all","budget":"all"},"K13: only structural invocations may quantify all arguments and budgets")
+            return
+        cls.budget(value["budget"])
+        for argument in cls.array(value["args"]):
+            if isinstance(argument,list):cls.budget(argument)
+            elif isinstance(argument,str) and re.fullmatch(r"0x[0-9a-f]{16}",argument):pass
+            else:unsigned(argument)
+
+    @classmethod
+    def domain(cls,domain,inherited_controls=0):
+        keys(domain,["bundles","borrowed","regions"],["args"],"domain")
+        for group in ["bundles","borrowed","args"]:
+            names=set()
+            for position,component in enumerate(cls.array(domain.get(group,[]))):
+                keys(component,["name","width","lo","hi"],context="domain component")
+                cls.name(component["name"])
+                # Borrowed names are annotations; allocation position is its
+                # identity. Interface names resolve against the linked object.
+                if group!="borrowed" and not (group=="bundles" and position<inherited_controls):
+                    require(component["name"] not in names,"K72: repeated domain component")
+                    names.add(component["name"])
+                width=cls.count(component["width"]);lo=cls.count(component["lo"]);hi=cls.count(component["hi"])
+                require(width>0 and lo<=hi and hi.bit_length()<=width,"K72: domain width/range mismatch")
+        names=set()
+        for region in cls.array(domain["regions"]):
+            keys(region,["name","cells"],context="domain region");cls.name(region["name"])
+            require(region["name"] not in names,"K72: repeated domain region");names.add(region["name"])
+            if region["cells"]=="all":continue
+            indices=set()
+            for cell in cls.array(region["cells"]):
+                keys(cell,["index","lo","hi"],context="domain cell")
+                index=cls.count(cell["index"]);lo=cls.count(cell["lo"]);hi=cls.count(cell["hi"])
+                require(index not in indices and lo<=hi,"K72: repeated cell/reversed range");indices.add(index)
+
+    @classmethod
+    def expected(cls,value,kind):
+        if isinstance(value,str):
+            require(value=="oracle" or value=="inverse_pair" and kind=="exhaustive","unknown expected relation")
+            return
+        require(isinstance(value,dict) and len(value)==1,"expected relation needs one table/program")
+        if "program" in value:cls.hash(value["program"]);return
+        keys(value,["table"],context="expected table")
+        seen=set()
+        for row in cls.array(value["table"]):
+            keys(row,["before","after"],context="table row")
+            for state in row.values():
+                keys(state,["bundles","borrowed","regions"],context="table tuple")
+                for group in ["bundles","borrowed"]:
+                    for item in cls.array(state[group]):unsigned(item)
+                for region in cls.array(state["regions"]):
+                    for item in cls.array(region):unsigned(item)
+            before=jcs(row["before"])
+            require(before not in seen,"K13: duplicate table input");seen.add(before)
+
+    @classmethod
+    def metric_bounds(cls,value,metrics=("operator_norm","diamond")):
+        keys(value,[],metrics,"metric bounds")
+        for bound in value.values():require(decimal_value(bound)>=0,"negative certificate error bound")
+
+    @classmethod
+    def variant_key(cls,value,closure=False):
+        require(isinstance(value,str) and ":" in value,"invalid variant/control key")
+        variant,controls=value.rsplit(":",1);unsigned(controls)
+        if closure:
+            require(":" in variant,"composition key lacks closure hash")
+            hash_,variant=variant.split(":",1);cls.hash(hash_)
+        cls.name(variant)
+
+    @classmethod
+    def claim(cls,claim,count):
+        require(isinstance(claim,dict),"claim must be object")
+        kind=claim.get("kind")
+        required={"exhaustive":["domain","expected","subject"],"sampled":["domain","expected","subject","sampler"],"structural":["rule","subclaims","witness"],"numerical":["subject","metric","precision_bits","bound"],"channel":["subject","metric","precision_bits","bound","dual"]}
+        require(kind in required,"unknown claim kind")
+        keys(claim,["kind",*required[kind]],["label","invocation"],"claim")
+        if "label" in claim:require(claim["label"] in ["proof","evidence"],"unknown requested claim label")
+        if "invocation" in claim:cls.invocation(claim["invocation"],uniform=kind=="structural")
+        if "domain" in claim:
+            controls=cls.count(claim["subject"].get("inherited_controls",0)) if isinstance(claim.get("subject"),dict) else 0
+            cls.domain(claim["domain"],controls);cls.expected(claim["expected"],kind)
+        if "subject" in claim:
+            subject=claim["subject"]
+            keys(subject,["closure_hash","variant","inherited_controls"],["schedule_hash"],"subject")
+            cls.hash(subject["closure_hash"]);cls.name(subject["variant"]);cls.count(subject["inherited_controls"])
+            if "schedule_hash" in subject:cls.hash(subject["schedule_hash"])
+            if kind in ["numerical","channel"] or claim.get("expected")=="oracle":require("schedule_hash" in subject,"K13: realised claim lacks schedule hash")
+            if "schedule_hash" not in subject and claim.get("expected")!="inverse_pair":require("invocation" in claim,"K13: standalone reference claim lacks invocation")
+        if kind=="sampled":
+            sampler=claim["sampler"];keys(sampler,["algorithm","seed","count"],context="sampler")
+            seed=cls.array(sampler["seed"])
+            require(sampler["algorithm"]=="xoshiro256**" and len(seed)==4,"invalid sampler")
+            words=[unsigned(n) for n in seed]
+            require(any(words) and all(n.bit_length()<=64 for n in words),"invalid xoshiro256** seed words")
+            cls.count(sampler["count"])
+        if kind in ["numerical","channel"]:
+            require(claim["metric"]==("operator_norm" if kind=="numerical" else "diamond"),"claim metric does not match kind")
+            require(cls.count(claim["precision_bits"])>0 and decimal_value(claim["bound"])>=0,"invalid claim precision/bound")
+        if kind=="channel":
+            for dual in cls.array(claim["dual"]):
+                keys(dual,["Y","mu"],context="dual witness");decimal_value(dual["mu"])
+                for entry in cls.array(dual["Y"]):
+                    require(len(cls.array(entry))==4 and all(isinstance(v,str) for v in entry),"interval entry needs four decimal strings")
+                    lo,hi,ilo,ihi=map(decimal_value,entry)
+                    require(lo<=hi and ilo<=ihi,"reversed matrix interval")
+        if kind=="structural":
+            require("invocation" in claim,"K13: structural claim lacks invocation")
+            for index in cls.array(claim["subclaims"]):require(cls.count(index)<count,"structural subclaim index outside claims")
+            rule=claim["rule"];witness=claim["witness"]
+            require(rule in ["translation_lemma","inverse_pair_library","adjoint_table"],"unknown structural rule")
+            if rule=="adjoint_table":keys(witness,[],context="adjoint witness")
+            elif rule=="inverse_pair_library":
+                keys(witness,["library_closure_hash","claim_index"],context="library witness")
+                cls.hash(witness["library_closure_hash"]);cls.count(witness["claim_index"])
+            else:
+                keys(witness,["V","W","X","B","frame"],context="translation witness")
+                for values in witness.values():cls.array(values)
+                require(len(witness["frame"])==2,"translation frame needs first/last point")
+
+    @staticmethod
     def exact_rows(rows):
         require(isinstance(rows,dict),"K12: exact_resources must be object")
         result={}
@@ -3231,9 +3463,7 @@ class Certificate:
         if "schedule_hash" in b:
             require("invocation" in b,"K13: scheduled certificate lacks invocation")
         if "invocation" in b:
-            keys(b["invocation"],["args","budget"],context="invocation")
-            require(isinstance(b["invocation"]["args"],list) and len(b["invocation"]["budget"])==4,"invalid invocation shape")
-            for n in b["invocation"]["budget"]: unsigned(n)
+            cls.invocation(b["invocation"])
         keys(doc["producer"],["name","version","materialisation"],context="producer")
         keys(doc["producer"]["materialisation"],["llvm_version","pipeline","normaliser_version"],context="materialisation")
         for hash_,region in doc["regions"].items():
@@ -3247,37 +3477,50 @@ class Certificate:
                 exact=cls.exact_rows(est["exact_resources"])
                 require(region["resources"]=={n:decimal_up(q) for n,q in exact.items()},"K12: rational/display/key mismatch")
             else:
-                for q in region["resources"].values(): require(rational(q)>=0,"negative resource")
+                for q in region["resources"].values(): require(decimal_value(q)>=0,"negative resource")
             for gate in region["gates_used"].values():
                 keys(gate,["count"],["scheme","epsilon"],"gates_used")
-                integer(gate["count"],0)
+                cls.count(gate["count"])
+                if "epsilon" in gate:require(decimal_value(gate["epsilon"])>=0,"negative gate epsilon")
+                if "scheme" in gate:cls.name(gate["scheme"])
             claims=region["claims"]
-            require(isinstance(claims,list),"claims must be array")
-            for claim in claims:
-                kind=claim.get("kind")
-                required={"exhaustive":["domain","expected","subject"],"sampled":["domain","expected","subject","sampler"],"structural":["rule","subclaims","witness"],"numerical":["subject","metric","precision_bits","bound"],"channel":["subject","metric","precision_bits","bound","dual"]}
-                require(kind in required,"unknown claim kind")
-                keys(claim,["kind",*required[kind]],["label","invocation"],"claim")
-                if kind=="sampled":
-                    require(claim.get("label","evidence")=="evidence","§12.1: sampled claim is always evidence")
-                    keys(claim["sampler"],["algorithm","seed","count"],context="sampler")
-                    require(claim["sampler"]["algorithm"]=="xoshiro256**" and len(claim["sampler"]["seed"])==4,"invalid sampler")
-                    require(any(unsigned(n) for n in claim["sampler"]["seed"]),"all-zero sampler seed")
-                if "subject" in claim:
-                    keys(claim["subject"],["closure_hash","variant","inherited_controls"],["schedule_hash"],"subject")
-                    if kind in ["numerical","channel"] or claim.get("expected")=="oracle": require("schedule_hash" in claim["subject"],"K13: realised claim lacks schedule hash")
-                if kind in ["numerical","channel"]: require(rational(claim["bound"])>=0,"negative error bound")
+            for claim in cls.array(claims):cls.claim(claim,len(claims))
             verification=region["verification"]
             keys(verification,["oracle","borrow_frames","inverse_pairs","unitary","channel","fault_rate"],context="verification")
             indices=[verification["oracle"]] if verification["oracle"] is not None else []
-            for group in ["borrow_frames","unitary","channel"]: indices+=verification[group]
-            for pair in verification["inverse_pairs"]:
+            for group in ["borrow_frames","unitary","channel"]: indices+=cls.array(verification[group])
+            for pair in cls.array(verification["inverse_pairs"]):
                 keys(pair,["g","ginv","claim","budget"],["arg_tokens"],"inverse pair")
+                cls.hash(pair["g"]);cls.hash(pair["ginv"]);cls.budget(pair["budget"])
+                tokens=pair.get("arg_tokens",{})
+                require(isinstance(tokens,dict),"arg_tokens must be object")
+                for name,token in tokens.items():cls.name(name);cls.budget(token)
                 indices.append(pair["claim"])
-            for i in indices: require(isinstance(i,int) and 0<=i<len(claims),"claim index outside claims array")
+            for i in indices: require(cls.count(i)<len(claims),"claim index outside claims array")
+            fault=verification["fault_rate"]
+            keys(fault,["domain","faults_by_code","undefined_excluded","layout_dependent_excluded"],context="fault_rate")
+            cls.domain(fault["domain"])
+            require(isinstance(fault["faults_by_code"],dict),"fault counts must be object")
+            for code,count in fault["faults_by_code"].items():
+                require(0<unsigned(code)<2**64,"fault code outside nonzero i64 range");cls.count(count)
+            cls.count(fault["undefined_excluded"]);cls.count(fault["layout_dependent_excluded"])
+            require(isinstance(region["cleanup"],dict) and isinstance(region["error"],dict),"cleanup/error must be objects")
+            for key,records in region["cleanup"].items():
+                cls.variant_key(key)
+                for record in cls.array(records):
+                    keys(record,["path","realisation"],context="cleanup")
+                    cls.array(record["path"])
+                    require(record["realisation"] in ["reverse","recompute"],"unknown certificate cleanup realisation")
+            for key,error in region["error"].items():
+                cls.variant_key(key);keys(error,["local","inclusive"],context="error")
+                cls.metric_bounds(error["local"]);cls.metric_bounds(error["inclusive"])
+            for assumption in cls.array(region["definedness_assumptions"]):cls.name(assumption)
         keys(doc["composition"],["multiplicities","epsilon_total","method"],context="composition")
         require(doc["composition"]["method"]=="sum_over_multiplicities","unknown composition method")
-        for n in doc["composition"]["multiplicities"].values(): integer(n,0)
+        require(isinstance(doc["composition"]["multiplicities"],dict),"multiplicities must be object")
+        for key,n in doc["composition"]["multiplicities"].items():cls.variant_key(key,closure=True);cls.count(n)
+        keys(doc["composition"]["epsilon_total"],["diamond"],context="epsilon_total")
+        cls.metric_bounds(doc["composition"]["epsilon_total"],("diamond",))
         return cls(doc)
 
     def check_bindings(self,result):

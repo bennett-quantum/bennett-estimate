@@ -492,6 +492,60 @@ class Objects(unittest.TestCase):
 
 
 class Certificates(unittest.TestCase):
+    def certificate_document(self):
+        return e.loads((ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09/certificate.json").read_text())
+
+    def test_nested_certificate_types_and_claim_bindings_reject(self):
+        def bad_index(doc,region):region["verification"]["unitary"]=[True]
+        def bad_subject(doc,region):region["claims"][0]["subject"]["closure_hash"]="wrong"
+        def negative_controls(doc,region):region["claims"][0]["subject"]["inherited_controls"]=-1
+        def bad_budget(doc,region):region["claims"][0]["invocation"]={"args":[],"budget":["0"]*3}
+        def bad_arg(doc,region):doc["bindings"]["invocation"]["args"]=["-1"]
+        def missing_invocation(doc,region):region["claims"][0]["subject"].pop("schedule_hash")
+        def invalid_table(doc,region):region["claims"][0]["expected"]["table"][0]["before"]["bundles"]=["01"]
+        def duplicate_domain(doc,region):region["claims"][0]["domain"]["bundles"]*=2
+        def too_wide_range(doc,region):region["claims"][0]["domain"]["bundles"][0]["hi"]=2
+        def negative_error(doc,region):region["error"]["forward:0"]["local"]["operator_norm"]="-0.1"
+        def fractional_error(doc,region):region["error"]["forward:0"]["local"]["operator_norm"]="1/3"
+        def unknown_metric(doc,region):region["error"]["forward:0"]["inclusive"]["other"]=0
+        def negative_total(doc,region):doc["composition"]["epsilon_total"]["diamond"]=-1
+        def bad_composition_key(doc,region):doc["composition"]["multiplicities"]={"wrong":1}
+        def unknown_cleanup(doc,region):region["cleanup"]["forward:0"]=[{"path":[],"realisation":"measurement"}]
+        def wrong_precision(doc,region):region["claims"][1]["precision_bits"]=True
+        for change in [bad_index,bad_subject,negative_controls,bad_budget,bad_arg,missing_invocation,invalid_table,duplicate_domain,too_wide_range,negative_error,fractional_error,unknown_metric,negative_total,bad_composition_key,unknown_cleanup,wrong_precision]:
+            with self.subTest(change=change.__name__):
+                doc=self.certificate_document();region=doc["regions"][doc["bindings"]["closure_hash"]];change(doc,region)
+                with self.assertRaises(e.ContractError):e.Certificate.read(e.jcs(doc))
+
+    def test_sampled_proof_request_is_parsed_without_a_verdict(self):
+        doc=self.certificate_document();region=doc["regions"][doc["bindings"]["closure_hash"]]
+        claim=region["claims"][0];claim.update(kind="sampled",sampler={"algorithm":"xoshiro256**","seed":["1","0","0","0"],"count":"18446744073709551616"})
+        read=e.Certificate.read(e.jcs(doc));self.assertEqual(read.doc["regions"][doc["bindings"]["closure_hash"]]["claims"][0]["label"],"proof")
+        for seed,count in [(["18446744073709551616","0","0","0"],1),(["1","0","0","0"],True)]:
+            claim["sampler"].update(seed=seed,count=count)
+            with self.assertRaises(e.ContractError):e.Certificate.read(e.jcs(doc))
+
+    def test_reference_and_uniform_structural_invocations_remain_distinct(self):
+        doc=self.certificate_document();region=doc["regions"][doc["bindings"]["closure_hash"]];claim=region["claims"][0]
+        claim["subject"].pop("schedule_hash");claim["invocation"]={"args":[],"budget":["0"]*4}
+        e.Certificate.read(e.jcs(doc))
+        region["claims"].append({"kind":"structural","rule":"adjoint_table","subclaims":[],"witness":{},"invocation":{"args":"all","budget":"all"}})
+        e.Certificate.read(e.jcs(doc))
+        region["claims"][-1]["invocation"]["budget"]=["0"]*4
+        with self.assertRaises(e.ContractError):e.Certificate.read(e.jcs(doc))
+
+    def test_certificate_domains_keep_positional_labels_and_unbounded_widths(self):
+        doc=self.certificate_document();region=doc["regions"][doc["bindings"]["closure_hash"]];claim=region["claims"][0]
+        component={"name":"t","width":1,"lo":0,"hi":1}
+        claim["subject"]["inherited_controls"]=2
+        claim["domain"]["bundles"]=[dict(component),dict(component),dict(component)]
+        claim["domain"]["borrowed"]=[dict(component),dict(component)]
+        e.Certificate.read(e.jcs(doc))
+        claim["domain"]["bundles"][2]["width"]="9007199254740993"
+        e.Certificate.read(e.jcs(doc))
+        claim["domain"]["bundles"].append(dict(component))
+        with self.assertRaises(e.ContractError):e.Certificate.read(e.jcs(doc))
+
     def test_published_reader_and_frame_negatives(self):
         text = (ROOT.parent / "bennett-isa-spec/conformance/fixtures/controlled-action-09/certificate.json").read_text()
         cert = e.Certificate.read(text)

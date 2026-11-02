@@ -58,6 +58,12 @@ is contract data, not code copied from another implementation. Tests match all
 86 published K82 leaf digests and compare every complete literal profile with
 its closed-form summary.
 
+Stack copy/store/exchange summaries count address preparation and equality
+dispatch algebraically, touching only the low N bits of each K-bit cell.
+Tests cover 2^20 physical cells with bounded summary work and compare small
+controlled cases against literal expansion. Scheme workspace remains included;
+wire aliases that defeat index renaming use literal traversal.
+
 Current source coverage includes structured gates, allocation/borrowing,
 copy/XOR/exchange, predication, loops, local-region images and linear coherent
 memory, controlled action/oracle calls and qinplace, plus padded arithmetic/control

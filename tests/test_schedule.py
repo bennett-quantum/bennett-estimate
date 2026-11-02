@@ -196,6 +196,75 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_loop_reallocation_carries_changed_width_to_the_next_visit(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[3]}
+        text="perm_action @root (q:wire) () () () ()\nregs {  } bounds { 3 }\n^entry():\nc = qalloc any 1\nqloop 3 {\nx c[0]\nx c[0]\nqfree c\nc = qalloc any 2\n}\nqfree c"
+        obj=make_object(text,sig);t=target()
+        analytic=e.estimate(obj,t,"root",[],["0"]*4);actual=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
+        self.assertEqual(actual["exact_resources"],analytic["exact_resources"])
+        self.assertEqual(actual["gates"],{"x":"6"})
+        self.assertEqual(actual["resources"]["qubit_second[data]"],"16")
+        self.assertEqual([r["width"] for r in actual["frame"]["scratch"]],[1,2,2,2])
+        huge=2**40;large=make_object(text.replace('3',str(huge)),{**sig,"bounds":[huge]})
+        summary=e.estimate(large,t,"root",[],["0"]*4)
+        self.assertEqual(int(summary["resources"]["qubit_second[data]"]),6*huge-2)
+        self.assertEqual(summary["resources"]["peak_qubits[data]"],"3")
+        self.assertLess(summary["summary_operations"],100)
+
+    def test_zero_visit_loop_keeps_the_entry_binding(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[0]}
+        obj=make_object("perm_action @root (q:wire) () () () ()\nregs {  } bounds { 0 }\n^entry():\nc = qalloc any 1\nqloop 0 {\nqfree c\nc = qalloc any 2\n}\nqfree c",sig)
+        t=target();actual=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
+        self.assertEqual([r["width"] for r in actual["frame"]["scratch"]],[1])
+        self.assertEqual(actual["resources"]["peak_qubits[data]"],"2")
+
+    def test_changed_width_loop_keeps_iteration_addresses_and_inverse_lifetimes(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[3]}
+        text="perm_action @child (q:wire) () () () ()\nregs {  } bounds { 3 }\n^entry():\nc = qalloc any 1\nqloop 3 {\nx c[0]\nx c[0]\nqfree c\nc = qalloc any 2\n}\nqfree c"
+        t=target();events=[];original=e.Ledger
+        class Recording(original):
+            def gate(self,op,wires,controls=(),**kw):
+                events.append((kw["chain"][-1]["point"],kw["chain"][-1]["iteration"]))
+                return super().gate(op,wires,controls,**kw)
+        root="perm_action @root (q:wire) () () () ()\n^entry():\nadj action_call @child (q) () () ()\n"
+        obj=make_program(root+text,{"root":{**sig,"bounds":[]},"child":sig})
+        analytic=e.estimate(obj,t,"root",[],["0"]*4)
+        with patch.object(e,"Ledger",Recording):actual=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
+        self.assertEqual(actual["exact_resources"],analytic["exact_resources"])
+        self.assertEqual(actual["resources"]["qubit_second[data]"],"16")
+        self.assertEqual([r["width"] for r in actual["frame"]["scratch"]],[2,2,2,1])
+        self.assertEqual(events,[(point,[i]) for i in [2,1,0] for point in ["entry:3","entry:2"]])
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);ledger=e.Ledger(t,e.Schedule(schedule()))
+        c.ledger=ledger;q=e.Bundle("input",1,"data")
+        e.Source(obj,t,c).region("child",[],["0"]*4,{"q":q},raw_inverse=True)
+        self.assertEqual(ledger.finish()["qubit_second[data]"],16)
+        self.assertEqual([r["width"] for r in ledger.frame()["scratch"]],[2,2,2,1])
+
+    def test_reallocated_source_name_keeps_each_lifetime_shape_inside_loops(self):
+        sig={"abi":"0.9","tier":"q","kind":"action","mut":[2],"in":[],"mem":[],"args":[],"bounds":[2]}
+        obj=make_object("action @root (x:wire[2]) () () () ()\nregs {  } bounds { 2 }\n^entry():\nqloop 2 {\nd = qalloc any 1\nx d[0]\nx d[0]\nqfree d\nd = qcopy x\nquncopy x d\n}",sig)
+        t=target();analytic=e.estimate(obj,t,"root",[],["0"]*4)
+        actual=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
+        self.assertEqual(actual["exact_resources"],analytic["exact_resources"])
+        self.assertEqual(analytic["gates"],{"cx":"8","x":"4"})
+        self.assertEqual(analytic["resources"]["qubit_second[data]"],"44")
+        self.assertEqual(analytic["resources"]["peak_qubits[data]"],"4")
+        self.assertEqual([r["width"] for r in actual["frame"]["scratch"]],[1,2,1,2])
+
+    def test_reallocated_class_and_state_survive_source_adjoint(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        child="perm_action @child (q:wire) () () () ()\n^entry():\nd = qalloc data 1\nx d[0]\nx d[0]\nqfree d\nd = qborrow special 2\nx d[1]\nx d[1]\nqreturn d"
+        doc=e.loads(e.jcs(target().doc));doc["classes"]["special"]={**doc["classes"]["data"],"dirty_rate":3};t=e.Target.read(e.jcs(doc))
+        for adjoint in [False,True]:
+            obj=make_program("perm_action @root (q:wire) () () () ()\n^entry():\n"+("adj " if adjoint else "")+"action_call @child (q) () () ()\n"+child,{"root":sig,"child":sig})
+            analytic=e.estimate(obj,t,"root",[],["0"]*4);actual=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
+            self.assertEqual(actual["exact_resources"],analytic["exact_resources"])
+            self.assertEqual(actual["gates"],{"x":"4"})
+            self.assertEqual(actual["resources"]["qubit_second[data]"],"6")
+            self.assertEqual(actual["resources"]["qubit_second[special]"],"12")
+            self.assertEqual([r["width"] for r in actual["frame"]["scratch"]],[1])
+            self.assertEqual([r["width"] for r in actual["frame"]["borrow"]],[2])
+
     def test_native_accounting_resolves_each_live_operand_once(self):
         class Counting(e.Ledger):
             lookups=0

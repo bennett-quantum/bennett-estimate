@@ -47,6 +47,22 @@ This algebra is exact for sequential profiles with the stated allocation and
 target decisions. The streaming ledger handles explicit overlap separately from this algebra,
 using allocation endpoints and per-wire dependencies without retaining gates.
 
+The §3.7 stack recipes use the same address-popcount summary as §11.1
+dispatch, with C physical cells, K-bit stride and only the low N cell bits
+participating. The exact literal-X total for addresses 0 through C-1 is
+twice their binary digit sum. Balanced literal subprofiles preserve target
+scheme workspace area and peak. Tests compare all resource coordinates
+against literal expansion and bound summary work for C=2^20. Alias checks
+guard the homogeneous-wire proof; unsupported layouts retain traversal.
+
+Plain source loops build a finite transition system of immutable wire handles,
+shapes and liveness. A repeated complete binding state permits exact repetition
+of that cost cycle; prefix and suffix preserve their distinct lifetimes. This
+implements visit-local binding carry-over without a gate list or a program
+transformation. Tests cover changing width/class/state, zero visits, 2^40 visits,
+iteration coordinates, source adjoints and raw reversal. Conditional-loop/branch
+transitions remain separate work.
+
 ## Contract decisions and scope
 
 The published K12 text settles the previously open hsd/c15 choices. Implement
