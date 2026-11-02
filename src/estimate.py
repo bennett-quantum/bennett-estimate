@@ -624,6 +624,7 @@ class Catalog:
         self.call_edges=()
         self.loop_coordinates=[]
         self.source_ordinals={}
+        self.address_cache=None
         self.reverse_limits=None
         self.raw_limits=None;self.raw_cursors={}
         self.region_raw=False;self.region_oracle=False
@@ -839,11 +840,18 @@ class Catalog:
 
     def leaf_address(self,carrier=False):
         meta=self.source_context
-        chain=list(self.call_edges)
-        if meta is not None:
-            chain.append({"symbol":meta["symbol"],"point":meta["point"],"iteration":list(self.loop_coordinates[:meta["depth"]]),"instance":[]})
+        coordinates=tuple(self.loop_coordinates[:meta["depth"]]) if meta is not None else ()
+        cached=self.address_cache
+        if cached is not None and cached[0] is meta and cached[1] is self.call_edges and cached[2]==coordinates:
+            chain,canonical=cached[3:]
+        else:
+            chain=list(self.call_edges)
+            if meta is not None:
+                chain.append({"symbol":meta["symbol"],"point":meta["point"],"iteration":list(coordinates),"instance":[]})
+            canonical=jcs(chain)
+            self.address_cache=(meta,self.call_edges,coordinates,chain,canonical)
         if carrier:return {"chain":chain,"ordinal":0,"step":self.root_step,"phase":self.root_phase}
-        key=(jcs(chain),self.root_step,self.root_phase)
+        key=(canonical,self.root_step,self.root_phase)
         previous,count=self.source_ordinals.get(id(meta),(None,0))
         if previous!=key:count=0
         self.source_ordinals[id(meta)]=(key,count+1)
@@ -856,6 +864,11 @@ class Catalog:
         else:ordinal=count if self.reverse_limits is None else self.reverse_limits[id(meta)]-1-count
         require(ordinal>=0,"inverse exceeded its forward ordinal space")
         return {"chain":chain,"ordinal":ordinal,"step":self.root_step,"phase":self.root_phase}
+
+    def address_key(self,chain,step,phase):
+        cached=self.address_cache
+        canonical=cached[4] if cached is not None and chain is cached[3] else jcs(list(chain))
+        return canonical,step,phase
 
     def ordinal_sign(self):
         phase=self.root_phase
@@ -1898,7 +1911,7 @@ class OrdinalCounter:
         self.domains={};self.records=[{}];self.cleanup_decisions=[]
 
     def record(self,chain=(),ordinal=0,step=None,phase=None,**unused):
-        key=(jcs(list(chain)),step,phase);sign=self.catalog.ordinal_sign()
+        key=self.catalog.address_key(chain,step,phase);sign=self.catalog.ordinal_sign()
         count,prior=self.domains.get(key,(0,sign))
         require(prior==sign,"one point domain has conflicting inverse orientations")
         self.domains[key]=(count+1,sign)
