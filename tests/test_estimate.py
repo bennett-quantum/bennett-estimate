@@ -193,6 +193,13 @@ class Catalog(unittest.TestCase):
 
 
 class Objects(unittest.TestCase):
+    def test_wide_unwritten_location_exposes_ret_delivery_contract_gap(self):
+        obj=e.Object.read((ROOT/"tests/fixtures/ret-delivery-source-gap.bisa").read_text())
+        t=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+        with self.assertRaisesRegex(e.ContractError,"EST-SOURCE-03"):
+            e.estimate(obj,t,"root",[],["4","1","8","1"])
+        self.assertEqual(e.estimate(obj,t,"root",[],["0","1","8","1"])["label"],"exact")
+
     def test_location_and_interface_roles_are_not_width_only(self):
         oracle=(ROOT/"tests/fixtures/example1.bisa").read_text()
         action=(ROOT/"tests/fixtures/example3.bisa").read_text()
@@ -372,10 +379,25 @@ class Certificates(unittest.TestCase):
 
 
 class CommandLine(unittest.TestCase):
+    def test_vm_admits_lifted_call_and_source_step_boundary(self):
+        vm=Path(os.environ.get("BENNETT_VM_BIN",ROOT.parent/"bennett-vm/target/debug/bennett-vm"))
+        path=ROOT/"examples/lifted-call.bisa";obj=e.Object.read(path.read_text())
+        checked=json.loads(subprocess.run([str(vm),"check",str(path)],capture_output=True,text=True,timeout=30,check=True).stdout)
+        self.assertEqual(checked["object_hash"],obj.hash)
+        self.assertEqual(checked["symbols"]["root"]["closure_hash"],obj.identities(closure=True)["root"])
+        t=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+        for budget in [3,4,5]:
+            actual=json.loads(subprocess.run([str(vm),"run-oracle",str(path),"root","--input","1","--budget",f"{budget},1,8,1"],capture_output=True,text=True,timeout=30,check=True).stdout)
+            predicted=e.estimate(obj,t,"root",[],[str(budget),"1","8","1"])
+            self.assertEqual(predicted["padded_steps"],{"forward":str(budget),"inverse":str(budget)})
+            self.assertLessEqual(actual["steps"],int(predicted["padded_steps"]["forward"]))
+            if budget==4:self.assertEqual(actual["steps"],int(predicted["padded_steps"]["forward"]))
+            self.assertEqual((actual["payload"],actual["code"]),(0,1) if budget==3 else (1,0))
+
     def test_contract_dependent_outputs_are_pending_evidence(self):
         binary=os.environ["BENNETT_ESTIMATE_BIN"]
         target=str(ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json")
-        cases=[("parameter-source-gap.bisa","parameter",'["0"]',"EST-SOURCE-01"),("implicit-length-source-gap.bisa","read_byte","[]","EST-SOURCE-02"),("token-alias-source-gap.bisa","root",'[["1","0","0","0"],["1","0","0","0"]]',"EST-CONTEXT-03")]
+        cases=[("parameter-source-gap.bisa","parameter",'["0"]',"EST-SOURCE-01"),("implicit-length-source-gap.bisa","read_byte","[]","EST-SOURCE-02"),("token-alias-source-gap.bisa","root",'[["1","0","0","0"],["1","0","0","0"]]',"EST-CONTEXT-03"),("ret-delivery-source-gap.bisa","root","[]","EST-SOURCE-03")]
         for file,region,args,code in cases:
             command=[binary,str(ROOT/"tests/fixtures"/file),"--target",target,"--region",region,"--params",args,"--budget","2,0,0,0"]
             actual=subprocess.run(command,capture_output=True,text=True,timeout=30)

@@ -170,3 +170,43 @@ This is a proposed contract change, not implemented schema or policy. The
 orchestrator must file it in bennett-isa-spec under COMMON rule 14. A different
 ratified identity/equality rule could resolve it instead. Existing K12/K13
 choices have not been reopened or silently replaced.
+
+## EST-SOURCE-03: return delivery scans can exceed the history slot
+
+Local tracking: bennett-estimate-bph.6. The pinned ISA document is unchanged
+(SHA-256 021d5df978f293c36174b73de9facc0884f7502a4bc5c0ab7a621b0ca7071c25).
+Witness: tests/fixtures/ret-delivery-source-gap.bisa, object hash
+b026d3de1b9636bdb7c45deb771f3ccb468fd0e0dbb2bee38da6863500e4d500.
+The published VM admits it and returns payload 1/code 0/steps 4 with
+`run-oracle ... root --input '' --budget 4,1,8,1`.
+
+The oracle declares r:reg[1] and an unused ghost:reg[8]; its zero-argument
+lproc declares one reg[1] result. S_cells=3 gives Sc=4 and depth_limit=1
+gives Dc=2. The call's three slots have widths (4,4,2); the return's
+slots have widths (1,4,2). Section 3.6 therefore gives W=(4,4,2), so the
+published lift.ret delivery formal N=4. K25 nevertheless requires the
+complete Globals list with ghost's actual declared width 8. The recipe's
+R4 loop visits bit 0..width-1 and references delivery[4] outside that
+four-wire actual. Direct published-recipe expansion fails at that index;
+this is not a VM payload failure or a guessed lproc binding.
+
+Proposed exact normative change, UNADOPTED: append to the §3.6 Frame
+layout paragraph:
+
+> If the instantiated lproc closure contains lift.ret, W_1 is additionally
+> at least W_max (§3.7), including locations that do not occur in a row's
+> write set. The ref lift.ret formal N is this complete W_1-bit disp_1
+> slot. Every frame retains that width. This makes the complete K25
+> closure-delivery scan well-typed at every location. Other slot widths
+> remain the maxima of their listed captures and assignments.
+
+This would widen the witness's first slot from 4 to 8 and its history
+frame from 17 to 21 bits. It changes exact resource costs and must be
+published before a consumer adopts it. An equivalent ratified recipe
+change that bounds each delivery scan by min(width,N) could instead
+resolve the conflict, but no such scalar/formal adapter is currently
+specified. The estimator raises EST-SOURCE-03 for positive-B affected
+requests and emits CLI pending evidence with no resource rows. B=0 has
+no step expansion and needs no delivery access; its construction/commit
+estimate remains available. All other independent implementation work
+continues.

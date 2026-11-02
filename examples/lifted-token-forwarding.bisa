@@ -1,0 +1,24 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"6c272501ac8e4df461cc139926204600ce0f7084c1466cf5d3a4b59082617401","kind":"oracle","name":"root","signature":{"abi":"0.9","args":["token"],"fault":4,"in":[1],"kind":"oracle","mem":[],"tgt":1,"tier":"q"}},"1":{"interface_hash":"f9e5aed75bc0431d182fa01dcb2d7abb2fb9627cda61ed767eca3a351f469f8f","kind":"lproc","name":"worker","signature":{"abi":"0.9","args":[],"kind":"lproc","mem":[],"params":[1],"result":1,"tier":"q","tokens":["token"]}},"2":{"interface_hash":"bcbfe1f47aa0ad86bf2f727c453a83f462e8341b8f219b3ca9f2b6718e8e11f7","kind":"oracle","name":"child","signature":{"abi":"0.9","args":[],"fault":4,"in":[1],"kind":"oracle","mem":[],"tgt":1,"tier":"q"}}}
+
+section functions
+oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token)
+regs { r:reg[1] }
+^entry():
+r = lift.call @worker (x) (tk) () ()
+lift.retval r
+lproc @worker (v:reg[1]) (w:reg[1]) (a:token token) () ()
+regs { fr:reg[4] }
+^entry():
+fr = lift.const.i4 0
+lift.oracle_call @child a (v) w fr () ()
+lift.oracle_uncall @child a (v) w fr () ()
+lift.ret v
+oracle @child (x:wire in) (t:wire) (f:wire[4]) () ()
+^entry():
+lift.retval x
+
+section layout
+{"A_tab":0,"H":1,"S_cells":3,"globals":{},"heap_base":1,"heap_limit_max":1,"interface_regions":{},"null_size":1,"ptr_width":32}

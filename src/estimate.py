@@ -691,7 +691,7 @@ class Catalog:
             require(name not in seen, "duplicate formal")
             seen.add(name)
             kind = "integer" if isinstance(formal, str) else formal["type"]
-            if kind == "integer": value = scalar(actual, caller)
+            if kind == "integer": value = integer(scalar(actual, caller))
             elif kind in ["wire", "environment"]:
                 value = wire(actual, caller)
                 if kind == "wire": require(sum(b.width for b in value) == scalar(formal["width"], env), "K19: wire width mismatch")
@@ -2254,6 +2254,8 @@ class Source:
             for j,w in enumerate(ws):
                 if j == len(slot_widths): slot_widths.append(w)
                 else: slot_widths[j] = max(slot_widths[j],w)
+        if B and any(row.op=="lift.ret" for record,row in rows):
+            require(max(location["width"] for location in locations)<=slot_widths[0],"EST-SOURCE-03: published lift.ret scans a location wider than its delivery history slot; see docs/CONTRACT_GAPS.md")
         Q = 2*P + sum(slot_widths) + 1
         pc,nextpc = self.fresh("pc",P), self.fresh("pc_prime",P)
         faulted,code,result = self.fresh("faulted",1),self.fresh("code",Fwidth),self.fresh("result_val",T)
@@ -2355,6 +2357,10 @@ class Source:
                     regions[n]=(int(shape[1]),int(shape[2]),env[n])
                 adapter=Instruction("action_call" if op=="lift.perm_call" else "oracle_call",a,[],block=row.block,ordinal=row.ordinal)
                 body=self.action_nodes([adapter],env,regions,controls,function_name=owner.name)
+                if self.catalog.ledger is not None:
+                    for node in body:
+                        prior=self.catalog.source_metadata[id(node)][1]
+                        self.catalog.source_metadata[id(node)]=(node,{**meta,**{k:prior[k] for k in ["call","oracle_call","call_index"] if k in prior}})
                 if op=="lift.oracle_uncall":
                     # K65/K81: this intrinsic alone owns its cleanup carrier.
                     # Reverse is the adjoint of its exact computing call.
@@ -2402,7 +2408,7 @@ class Source:
         env=root_env;env["$source_rows"]=row_templates;env["$source_next"]=next_templates
         if self.catalog.ledger is not None:
             return self.oracle_stream(fn,env,budget,controls,P,N,Q,Fwidth,T,pc,nextpc,faulted,code,result,"$source_rows","$source_next",state,raw_inverse)
-        step=self.catalog.recipe("step",[P,N,Q,pc,nextpc,frame,"$source_rows","$source_next"],env,controls)
+        step=self.catalog.recipe("step",[P,N,Q,pc,nextpc,frame,"$source_rows","$source_next"],env,controls) if B else Profile()
         require(all(v==0 for v in step.delta.values()),"unbalanced step workspace")
         target=env[fn.groups[1][0][0]];fault=env[fn.groups[2][0][0]]
         # Exactly the published commit segment, with the source-bound state.
@@ -3095,6 +3101,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
     if step_bound is not None:
         result["bound_assumptions"]=[f"classical execution terminates within {steps} source instructions, including callees"]
         result["rational_upper_bounds"]=result.pop("exact_resources")
+    if fn.kind=="oracle":result["padded_steps"]={"forward":budget[0],"inverse":budget[0]}
     if ledger is not None:
         result["resolved_default_epsilon_share"]={"numerator":str(ledger.default_share.numerator),"denominator":str(ledger.default_share.denominator)}
         result["frame"]=ledger.frame()
@@ -3292,14 +3299,14 @@ def main(argv=None):
     except (ContractError,OSError,ValueError,KeyError,TypeError,RecursionError) as ex:
         print(f"bennett-estimate: {ex}",file=sys.stderr)
         code=str(ex).split(":",1)[0]
-        if isinstance(ex,ContractError) and code in ["EST-SOURCE-01","EST-SOURCE-02","EST-CONTEXT-03"]:
+        if isinstance(ex,ContractError) and code in ["EST-SOURCE-01","EST-SOURCE-02","EST-SOURCE-03","EST-CONTEXT-03"]:
             # The request remains concrete/reviewable while the missing
             # published binding is tracked. No resource number is invented.
             pending={"schema":"bennett-estimate/0.1","label":"pending evidence","object_hash":obj.hash,"target_hash":target.hash,
                      "region":region,"variant":a.variant,"inherited_controls":a.inherited_controls,
                      "invocation":{"args":params,"budget":budget},"params_hash":digest(jcs(params)),
                      "epsilon":exact_decimal(decimal_value(a.epsilon)),
-                     "pending":[{"code":code,"reason":str(ex).split(":",1)[1].strip(),"bead":"bennett-estimate-bph.5" if code=="EST-CONTEXT-03" else "bennett-estimate-bph.4"}]}
+                     "pending":[{"code":code,"reason":str(ex).split(":",1)[1].strip(),"bead":{"EST-CONTEXT-03":"bennett-estimate-bph.5","EST-SOURCE-03":"bennett-estimate-bph.6"}.get(code,"bennett-estimate-bph.4")}]}
             print(jcs(pending))
             return 3
         return 1

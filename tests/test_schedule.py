@@ -52,7 +52,7 @@ class Selectors(unittest.TestCase):
         records=[{"id":0,"width":2,"location":{"range":"f","from":1,"to":3}}]
         self.assertEqual(c.recipe("record-capture",["f",records],env).gates,{"x":2})
         c.recipes["record-capture"]["body"]=[]
-        invalid=[records+records,[{**records[0],"width":3}],[{**records[0],"extra":1}]]
+        invalid=[records+records,[{**records[0],"width":3}],[{**records[0],"extra":1}],[{**records[0],"id":True}]]
         for values in invalid:
             with self.assertRaises(e.ContractError):c.recipe("record-capture",["f",values],env)
 
@@ -196,6 +196,44 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_lproc_forwards_its_fixed_token_to_nested_oracle_invocations(self):
+        obj=e.Object.read((ROOT/"examples/lifted-token-forwarding.bisa").read_text());t=target()
+        budget=["1","1","8","1"];nested=["2","0","0","0"]
+        baseline=e.estimate(obj,t,"root",[nested],budget)
+        result=e.estimate(obj,t,"root",[nested],budget,include_frame=True)
+        self.assertEqual(result["exact_resources"],baseline["exact_resources"])
+        contexts=result["invocation_contexts"][1:]
+        self.assertEqual([c["region"] for c in contexts],["child"]*4)
+        self.assertEqual([c["invocation"]["budget"] for c in contexts],[nested]*4)
+        self.assertEqual([c["raw_inverse"] for c in contexts],[False,True,False,True])
+        self.assertEqual([c["path"][-1]["instance"] for c in contexts],[[0]]*4)
+        self.assertEqual([r["width"] for r in result["frame"]["history"]],[21]+[3]*8)
+        obj.sections["schedule"]=result["effective_schedule"]
+        selector={**point(obj.symbol("worker")["interface_hash"],"entry:1"),"instance":[0]}
+        obj.sections["schedule"]["entries"]=[entry(path=[selector],step=2,phase="fwd",realisation="missing")]
+        with self.assertRaisesRegex(e.ContractError,"realisation"):
+            e.estimate(obj,t,"root",[nested],budget)
+
+    def test_recursive_fixed_instances_keep_separate_row_domains_for_equal_values(self):
+        obj=e.Object.read((ROOT/"tests/fixtures/fixed-procedure-instances.bisa").read_text());t=target()
+        budget=["1","1","8","1"];args=[["1","0","0","0"],["1","0","0","0"],"0"]
+        baseline=e.estimate(obj,t,"root",args,budget)
+        events=set();original=e.Ledger;symbol=obj.symbol("worker")["interface_hash"]
+        class Recording(original):
+            def gate(self,op,wires,controls=(),**kw):
+                if kw["chain"][-1]["symbol"]==symbol:events.add((len(kw["chain"]),tuple(kw["chain"][-1]["instance"]),kw["phase"]))
+                return super().gate(op,wires,controls,**kw)
+        with patch.object(e,"Ledger",Recording):actual=e.estimate(obj,t,"root",args,budget,include_frame=True)
+        self.assertEqual(actual["exact_resources"],baseline["exact_resources"])
+        self.assertEqual([r["width"] for r in actual["frame"]["history"]],[18])
+        self.assertEqual(events,{(1,key,phase) for key in [(0,1,2),(1,0,2)] for phase in ["fwd","rev"]})
+        selected={**point(symbol),"instance":[1,0,2]}
+        bound=actual["effective_schedule"];bound["entries"]=[entry(path=[selected],realisation="native")]
+        e.Schedule(bound,obj,"root")
+        selected["instance"]=[999]
+        with self.assertRaisesRegex(e.ContractError,"fixed-binding instance"):
+            e.Schedule(bound,obj,"root")
+
     def test_nested_inverse_reacquires_the_captured_scratch_binding(self):
         t=target();ledger=e.Ledger(t,e.Schedule(schedule()))
         q=e.Bundle("q",1,"data");ledger.interface("mut:0",q)
