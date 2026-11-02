@@ -814,7 +814,7 @@ class Catalog:
             if self.ledger is None and self.closed_form and name=="value.literal":
                 p=self.literal_summary(bound,controls)
                 if p is not None:return p
-            if self.ledger is None and self.closed_form and name in ["dispatch.copy","dispatch.store","dispatch.exchange"] and not self.target.doc.get("topology"):
+            if self.ledger is None and self.closed_form and name in ["dispatch.copy","dispatch.store","dispatch.exchange","stack.copy","stack.store","stack.exchange"] and not self.target.doc.get("topology"):
                 p=self.dispatch_summary(name,bound,controls)
                 if p is not None: return p
             return self.body(r["body"], bound, controls, inverse)
@@ -836,36 +836,40 @@ class Catalog:
         return out
 
     def dispatch_summary(self,name,env,controls):
-        A,C,W=env["A"],env["C"],env["W"]
-        require(0<=C<=1<<A and W>0,"invalid address dispatch shape")
-        cells=wire(env["cells"],env)
-        if len(cells)!=1: return None
+        stack=name.startswith("stack.")
+        A,C,W=(env["S"],env["C"],env["N"]) if stack else (env["A"],env["C"],env["W"])
+        stride=env["K"] if stack else W
+        require(0<=C<=1<<A and (0<=W<=stride if stack else W>0),"invalid address dispatch shape")
+        cells=wire(env["stack" if stack else "cells"],env)
+        value=wire(env["v"],env)
+        if len(cells)!=1 or len(value)!=1 or isinstance(cells[0],RecordField) or isinstance(value[0],RecordField):return None
         if C==0: return Profile()
+        cell,value=cells[0],value[0]
+        # Index renaming must preserve effective control multiplicities and
+        # operand distinctness, including an alias in a later physical cell.
+        if any(identity==b.identity and b.offset<=index<b.offset+b.width for identity,index,_ in controls for b in [cell,value]):return None
+        if cell.identity==value.identity and max(cell.offset,value.offset)<min(cell.offset+cell.width,value.offset+value.width):return None
         # Literal equality inputs vary by address; their total X count has an
         # exact binary digit sum. The comparator and each cell operation are
         # invariant under renaming homogeneous cell wires.
         self.serial+=1
         counter=Bundle(f"dispatch:{self.serial}:counter",A,self.default_class)
         eq=Bundle(f"dispatch:{self.serial}:eq",1,self.default_class)
-        compare=self.recipe("bind.value.icmp.eq",[A,env["a"],counter,eq],env,controls)
-        value=wire(env["v"],env)
-        if len(value)!=1: return None
-        leaf="swap" if name=="dispatch.exchange" else "cx"
+        address=env["address" if stack else "a"]
+        compare=self.recipe("bind.value.icmp.eq",[A,address,counter,eq],env,controls)
+        uncompare=self.recipe("bind.value.icmp.eq",[A,address,counter,eq],env,controls,True)
+        leaf="swap" if name.endswith(".exchange") else "cx"
         joined=tuple(dict.fromkeys(controls+bits([eq])))
-        cell=cells[0]
-        ws=[value[0].bit(0),cell.bit(0)] if name=="dispatch.store" else [cell.bit(0),value[0].bit(0)]
-        data=self.body([{"gate":leaf,"wires":ws}],env,joined).repeat(W)
-        base=space_profile(counter.cls,"clean",A).then(space_profile(eq.cls,"clean",1)).then(compare).then(data).then(compare).then(space_profile(eq.cls,"clean",-1)).then(space_profile(counter.cls,"clean",-A))
+        data=Profile()
+        if W:
+            ws=[value.bit(0),cell.bit(0)] if name.endswith(".store") else [cell.bit(0),value.bit(0)]
+            data=self.body([{"gate":leaf,"wires":ws}],env,joined).repeat(W)
+        base=space_profile(counter.cls,"clean",A).then(space_profile(eq.cls,"clean",1)).then(compare).then(data).then(uncompare).then(space_profile(eq.cls,"clean",-1)).then(space_profile(counter.cls,"clean",-A))
         p=base.repeat(C)
         ones=sum((C>>(b+1))*(1<<b)+max(0,C% (1<<(b+1))-(1<<b)) for b in range(A))
-        literals=self.gate_event("x",[counter.bit(0)],controls,own=0).repeat(2*ones) if ones else Profile()
-        p.time+=literals.time
-        p.counts=add_maps(p.counts,literals.counts)
-        p.gates=add_maps(p.gates,literals.gates)
-        p.error+=literals.error
-        p.inexact_operations+=literals.inexact_operations
-        p.area[(counter.cls,"clean")]=p.area.get((counter.cls,"clean"),0)+A*literals.time
-        p.area[(counter.cls,"total")]=p.area.get((counter.cls,"total"),0)+A*literals.time
+        if ones:
+            literal=space_profile(counter.cls,"clean",A).then(self.gate_event("x",[counter.bit(0)],controls,own=0)).then(space_profile(counter.cls,"clean",-A))
+            p=p.then(literal.repeat(2*ones))
         return p
 
     @staticmethod
@@ -1943,20 +1947,19 @@ class Ledger:
         for bit in controls:unique.setdefault((bit[0],bit[1]),bit)
         return actual,tuple(unique.values())
 
-    def _minimum(self,wires):
+    def _minimum(self,wires,records=None):
         minimum=0
-        for bit in wires:
-            r=self._find(self._bit_bundle(bit))
-            minimum=max(minimum,r["start"],self.dependencies.get((r["id"],bit[1]),F(0)))
+        if records is None:records=[self._find(self._bit_bundle(bit)) for bit in wires]
+        for bit,r in zip(wires,records):
+            minimum=max(minimum,r["start"],self.dependencies.get((r["id"],bit[1]),0))
         return minimum
 
-    def _native(self,op,wires,own,controls,eps,start):
-        records=[self._find(self._bit_bundle(w)) for w in wires]
-        classes=[r["class"] for r in records]
-        p=self.target.native_gate(op,classes,controls,eps,own)
-        require(p is not None,f"E_GATE_UNSUPPORTED: native scheme leaf {op}, c={controls}, classes={classes}")
+    def _native(self,op,wires,own,controls,eps,start,records=None,profile=None):
+        if records is None:records=[self._find(self._bit_bundle(w)) for w in wires]
+        p=profile if profile is not None else self.target.native_gate(op,[r["class"] for r in records],controls,eps,own)
+        if p is None:raise ContractError(f"E_GATE_UNSUPPORTED: native scheme leaf {op}, c={controls}, classes={[r['class'] for r in records]}")
         require(not self.require_exact or p.error==0,"E_GATE_UNSUPPORTED: permutation region requires exact gates")
-        require(start>=self._minimum(wires),"E_SCHEDULE_INFEASIBLE: native leaf violates dependency")
+        require(start>=self._minimum(wires,records),"E_SCHEDULE_INFEASIBLE: native leaf violates dependency")
         top=self.target.doc.get("topology")
         if top:
             vertices=[r["vertices"][w[1]-r["bundle"].offset] for r,w in zip(records,wires)]
@@ -1991,15 +1994,18 @@ class Ledger:
         combined=tuple(unique.values())
         wires=combined+targets
         choice=self._decision("gate",chain,ordinal,step,phase) or {}
-        eps=rational(choice.get("epsilon_share",0 if self.target.exact_native(op,[self.resolved_class(self._bit_bundle(w)) for w in wires],len(combined),own) else self.default_share))
-        start=self._start(chain,ordinal,step,phase,self._minimum(wires))
-        realisation=choice.get("realisation")
-        classes=[self.resolved_class(self._bit_bundle(w)) for w in wires]
+        # Resolve each physical lifetime once for this operation. No lifetime
+        # reference is cached across a release/reacquire or scheme allocation.
+        records=[self._find(self._bit_bundle(w)) for w in wires]
+        classes=[r["class"] for r in records]
         is_exact=self.target.exact_native(op,classes,len(combined),own)
+        eps=rational(choice.get("epsilon_share",0 if is_exact else self.default_share))
+        start=self._start(chain,ordinal,step,phase,self._minimum(wires,records))
+        realisation=choice.get("realisation")
         if not is_exact:self.nonexact_native_operations+=1
         if self.count_only:return Profile()
         native=self.target.native_gate(op,classes,len(combined),eps,own)
-        if realisation in [None,"native"] and native is not None:return self._native(op,wires,own,len(combined),eps,start)
+        if realisation in [None,"native"] and native is not None:return self._native(op,wires,own,len(combined),eps,start,records,native)
         require(realisation!="native",f"E_GATE_UNSUPPORTED: selected native {op} has no match")
         candidates=[s for s in self.target.doc["schemes"] if self.target.covers(s["realises"],op,len(combined)) and (realisation is None or s["name"]==realisation)]
         require(candidates,f"E_GATE_UNSUPPORTED: no selected realisation for {op}")

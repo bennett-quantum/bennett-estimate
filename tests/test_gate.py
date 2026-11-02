@@ -47,6 +47,8 @@ class Hook(unittest.TestCase):
         selected=[identity for identities in groups.values() for identity in identities]
         self.assertEqual(sorted(selected),sorted(t.id() for t in tests))
         self.assertEqual(len(selected),len(set(selected)))
+        recursive=next(t for t in tests if t.id().endswith('.test_recursive_fixed_instances_keep_separate_row_domains_for_equal_values'))
+        self.assertEqual(runner.group(recursive),'selectors')
 
 
 

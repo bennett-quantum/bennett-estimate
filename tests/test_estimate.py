@@ -237,6 +237,48 @@ class Catalog(unittest.TestCase):
         self.assertGreater(p.time,C*W)
         self.assertLess(self.c.visits-before,500)
 
+    def test_stack_summary_preserves_stride_padding_and_controls(self):
+        for S,C,K,N in [(0,1,4,2),(2,3,5,2),(3,5,4,0)]:
+            env={n:e.Bundle(n,width,"data") for n,width in [("address",S),("stack",C*K),("v",N)]}
+            for name in ["stack.copy","stack.store","stack.exchange"]:
+                for controls in [(),(("external",0,"data"),)]:
+                    self.c.closed_form=False
+                    literal=self.c.recipe(name,[S,C,K,N,"address","stack","v"],env,controls)
+                    self.c.closed_form=True
+                    self.assertEqual(self.c.recipe(name,[S,C,K,N,"address","stack","v"],env,controls),literal,(S,C,K,N,name,controls))
+
+    def test_large_stack_summary_does_not_scan_cells(self):
+        class BoundedWork(e.Catalog):
+            def body(self,*args,**kw):
+                if self.visits>1000:raise AssertionError("stack cells were enumerated")
+                return super().body(*args,**kw)
+        c=BoundedWork((ROOT/"data/ref-0.9.json").read_text(),self.t)
+        S,C,K,N=21,2**20,64,32
+        env={n:e.Bundle(n,width,"data") for n,width in [("address",S),("stack",C*K),("v",N)]}
+        for name in ["stack.copy","stack.store","stack.exchange"]:
+            c.visits=0;p=c.recipe(name,[S,C,K,N,"address","stack","v"],env)
+            self.assertGreater(p.time,C*N);self.assertLess(c.visits,500)
+            self.assertTrue(all(v==0 for v in p.delta.values()))
+
+    def test_dispatch_literal_schemes_preserve_workspace_area(self):
+        doc=e.loads(e.jcs(self.t.doc))
+        doc["classes"]["special"]=dict(doc["classes"]["data"])
+        next(g for g in doc["gates"] if g["op"]=="x")["controls"]["min"]=1
+        doc["schemes"]=[{"name":"x-via-hssh","realises":{"op":"x","controls":{"min":0,"max":0}},"ancillae":{"count":2,"class":"special","state":"clean"},"template":[{"gate":g,"wires":["t"]} for g in ["h","s","s","h"]]}]
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),e.Target.read(e.jcs(doc)))
+        env={"a":e.Bundle("a",2,"data"),"cells":e.Bundle("cells",6,"data"),"v":e.Bundle("v",2,"data")}
+        c.closed_form=False;literal=c.recipe("dispatch.copy",[2,3,2,"a","cells","v"],env)
+        c.closed_form=True;self.assertEqual(c.recipe("dispatch.copy",[2,3,2,"a","cells","v"],env),literal)
+
+    def test_dispatch_control_aliases_require_literal_fallback(self):
+        doc=e.loads(e.jcs(self.t.doc))
+        next(g for g in doc["gates"] if g["op"]=="cx")["cost"]["time"]={"var":"c"}
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),e.Target.read(e.jcs(doc)))
+        env={"a":e.Bundle("a",2,"data"),"cells":e.Bundle("cells",6,"data"),"v":e.Bundle("v",2,"data")}
+        controls=(("cells",2,"data"),)
+        c.closed_form=False;literal=c.recipe("dispatch.copy",[2,3,2,"a","cells","v"],env,controls)
+        c.closed_form=True;self.assertEqual(c.recipe("dispatch.copy",[2,3,2,"a","cells","v"],env,controls),literal)
+
 
 class Objects(unittest.TestCase):
     def test_literal_allocator_length_uses_the_existing_length_binding_gap(self):

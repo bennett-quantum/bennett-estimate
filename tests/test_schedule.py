@@ -196,6 +196,20 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_native_accounting_resolves_each_live_operand_once(self):
+        class Counting(e.Ledger):
+            lookups=0
+            def _find(self,b):
+                self.lookups+=1;return super()._find(b)
+        t=target();ledger=Counting(t,e.Schedule(schedule()))
+        q=e.Bundle("q",1,"data");ledger.allocate(q)
+        ledger.lookups=0;ledger.gate("x",[q]);self.assertEqual(ledger.lookups,1)
+        ledger.release(q);ledger.allocate(q)
+        ledger.lookups=0;ledger.gate("x",[q]);self.assertEqual(ledger.lookups,1)
+        ledger.release(q)
+        self.assertEqual(ledger.finish()["qubit_second[data]"],2)
+        self.assertEqual(ledger.gates,{"x":2})
+
     def test_procedure_dynamic_jump_binds_absolute_canonical_end(self):
         obj=e.Object.read((ROOT/"examples/lifted-jump.bisa").read_text());t=target();seen=[];original=e.Catalog
         class Recording(original):

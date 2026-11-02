@@ -17,6 +17,10 @@ def group(test):
     module=test.__class__.__module__
     if module=="test_estimate":return "objects"
     if module=="test_schedule":
+        # The recursive fixed-instance witness checks both selector domains
+        # and a full activation replay. Run that long case beside the other
+        # selector tests so the accounting worker does not serialize both.
+        if test._testMethodName=="test_recursive_fixed_instances_keep_separate_row_domains_for_equal_values":return "selectors"
         return "accounting" if test.__class__.__name__=="Accounting" else "selectors"
     return "other"
 
