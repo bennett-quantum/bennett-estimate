@@ -30,24 +30,35 @@ def require(condition, message):
 
 def keys(value, required, optional=(), context="record"):
     require(isinstance(value, dict), f"{context}: expected object")
-    require(set(required) <= value.keys(), f"{context}: missing {set(required) - value.keys()}")
-    require(value.keys() <= set(required) | set(optional), f"{context}: unknown {value.keys() - set(required) - set(optional)}")
+    expected=set(required)
+    if not expected <= value.keys():
+        raise ContractError(f"{context}: missing {expected - value.keys()}")
+    allowed=expected | set(optional)
+    if not value.keys() <= allowed:
+        raise ContractError(f"{context}: unknown {value.keys() - allowed}")
 
 
 def rational(value):
+    if type(value) is int:return value
+    if type(value) is F:return value.numerator if value.denominator==1 else value
     require(not isinstance(value, bool), "boolean is not a number")
     require(isinstance(value, (int, Decimal, F, str)), "expected exact rational")
     try:
-        return F(value)
+        result=F(value)
+        return result.numerator if result.denominator==1 else result
     except (ValueError, ZeroDivisionError, OverflowError) as ex:
         raise ContractError(f"invalid rational: {value}") from ex
 
 
 def integer(value, minimum=None):
+    if type(value) is int:
+        if minimum is not None and value<minimum:
+            raise ContractError(f"integer below {minimum}: {value}")
+        return value
     q = rational(value)
-    require(q.denominator == 1, f"expected integer, got {value}")
+    if q.denominator != 1:raise ContractError(f"expected integer, got {value}")
     n = q.numerator
-    require(minimum is None or n >= minimum, f"integer below {minimum}: {n}")
+    if minimum is not None and n<minimum:raise ContractError(f"integer below {minimum}: {n}")
     return n
 
 
@@ -193,7 +204,7 @@ def expression(expr, env, tables):
     b = expression(args[1], env, tables)
     if op == "/":
         require(b != 0, "§8.1: division by zero")
-        return a / b
+        return rational(F(a) / b)
     return {"+": lambda: a+b, "-": lambda: a-b, "*": lambda: a*b,
             "max": lambda: max(a,b), "min": lambda: min(a,b)}[op]()
 
@@ -235,7 +246,7 @@ class Profile:
         return Profile(self.time*n, {k: v*n for k,v in self.counts.items()},
                        {k: v*n for k,v in self.delta.items()},
                        {k: v + max(0, (n-1)*self.delta.get(k, 0)) for k,v in self.peak.items()},
-                       {k: self.area.get(k, 0)*n + v*self.time*n*(n-1)/2 for k,v in self.delta.items()},
+                       {k: self.area.get(k, 0)*n + v*self.time*(n*(n-1)//2) for k,v in self.delta.items()},
                        {k: v*n for k,v in self.gates.items()}, self.error*n)
 
     def resources(self, target, interface=None):
@@ -1624,8 +1635,8 @@ class Ledger:
         self.target,self.schedule=target,schedule
         self.default_share=rational(default_share);self.require_exact=exact
         self.count_only=count_only;self.nonexact_native_operations=0
-        self.cursor=self.makespan=F(0)
-        self.counts={};self.gates={};self.error=F(0)
+        self.cursor=self.makespan=0
+        self.counts={};self.gates={};self.error=0
         self.records=[];self.dependencies={};self.parallel_events={}
         self.live={}
         self.cleanup_decisions=[]
@@ -1638,7 +1649,7 @@ class Ledger:
 
     def _start(self,chain,ordinal,step,phase,minimum=F(0)):
         chosen=self._decision("start",chain,ordinal,step,phase)
-        if self.count_only:return F(0)
+        if self.count_only:return 0
         start=rational(chosen["time"]) if chosen is not None else max(self.cursor,minimum)
         require(start>=minimum,"E_SCHEDULE_INFEASIBLE: start violates data or wire-lifetime dependency")
         return start
@@ -1695,7 +1706,7 @@ class Ledger:
         self.order+=1
         record={"bundle":b,"class":cls,"state":"clean" if slot is not None else b.state,"start":start,"end":None,"start_order":self.order,"end_order":None,"vertices":placement,"slot":slot,"category":category,"scheme":scheme,"id":f"{b.identity}@{self.sequence}"}
         self.records.append(record)
-        record["latest_use_end"]=F(0)
+        record["latest_use_end"]=0
         self.live.setdefault(b.identity,[]).append(record)
         return record
 
@@ -1705,7 +1716,7 @@ class Ledger:
             require(self.interface_index<len(specified),"too few interface placement arrays")
             vertices=specified[self.interface_index]
         self.interface_index+=1
-        self._register(b,F(0),"any",vertices,slot=slot)
+        self._register(b,0,"any",vertices,slot=slot)
 
     def allocate(self,b,chain=(),ordinal=0,step=None,phase=None,requested=None,category="scratch",scheme=None,start=None,vertices=None,select=True):
         # Resolve all selectors before applying any realisation to this leaf.
@@ -1740,7 +1751,7 @@ class Ledger:
         return actual,tuple(unique.values())
 
     def _minimum(self,wires):
-        minimum=F(0)
+        minimum=0
         for bit in wires:
             r=self._find(self._bit_bundle(bit))
             minimum=max(minimum,r["start"],self.dependencies.get((r["id"],bit[1]),F(0)))
@@ -2129,6 +2140,15 @@ class Source:
             elif op=="qjump": body=[]
             elif op=="qbranch": body=[invoke(op,[P,labels[a[1][1:]],labels[a[2][1:]],a[0],successor])]
             elif op=="qjumpr": body=[invoke(op,[P,Fwidth,0,N,a[0],successor,flag,faulted,code])]
+            elif op in ["lift.oracle_call","lift.perm_call"]:
+                if op=="lift.perm_call":
+                    require(self.obj.functions[a[0].removeprefix("@")].kind=="perm_action","lift.perm_call requires permutation action")
+                regions={}
+                for n,ty,role in fn.groups[3]:
+                    shape=re.fullmatch(r"region\[([0-9]+),([0-9]+)\]",ty)
+                    regions[n]=(int(shape[1]),int(shape[2]),env[n])
+                adapter=Instruction("oracle_call" if op=="lift.oracle_call" else "action_call",a,[],block=row.block,ordinal=row.ordinal)
+                body=self.action_nodes([adapter],env,regions,controls)
             elif op in ["lift.load","lift.store"] or op=="lift.boundscheck" and re.fullmatch(r"0|[1-9][0-9]*",a[1]):
                 raise ContractError("EST-SOURCE-02: published ref source binding does not fix implicit/literal length wires; see docs/CONTRACT_GAPS.md")
             else: raise ContractError(f"oracle source binding not implemented: {row.op}; no row omitted")
@@ -2142,7 +2162,9 @@ class Source:
             next_templates.append({"parameters":template_formal+[{"name":"next","type":"wire","width":P}],"body":nxt})
             if self.catalog.ledger is not None:
                 meta={"symbol":self.obj.symbol(fn.name)["interface_hash"],"point":f"{row.block}:{row.ordinal}","depth":0,"kind":row.op,"exact":True}
-                for node in body+nxt:self.catalog.source_metadata[id(node)]=(node,meta)
+                for node in body+nxt:
+                    prior=self.catalog.source_metadata.get(id(node),(None,{}))[1]
+                    self.catalog.source_metadata[id(node)]=(node,{**meta,**{k:prior[k] for k in ["call","oracle_call","call_index"] if k in prior}})
         if self.catalog.ledger is not None:
             return self.oracle_stream(fn,env,budget,controls,P,N,Q,Fwidth,T,pc,nextpc,faulted,code,result,row_templates,next_templates,state,raw_inverse)
         step=self.catalog.recipe("step",[P,N,Q,pc,nextpc,frame,row_templates,next_templates],env,controls)
@@ -2601,7 +2623,7 @@ class Source:
                 for i,b in enumerate(all_wires):
                     for other in all_wires[:i]: require(b.identity!=other.identity or b.offset+b.width<=other.offset or other.offset+other.width<=b.offset,"overlapping action call arguments")
                 caller=self.obj.functions[self.calls[-1]]
-                caller_types={n:ty for n,ty,r in caller.groups[3]}
+                caller_types={n:ty for n,ty,r in (caller.groups[4] if caller.kind=="oracle" else caller.groups[2]+caller.groups[3] if caller.kind=="lproc" else caller.groups[3])}
                 for (n,ty,r),actual in zip(fn.groups[3],actual_groups[3]):
                     require(caller_types.get(actual)==ty,"action call classical argument type mismatch")
                     child[n]=env[actual]
@@ -2630,7 +2652,8 @@ class Source:
                         child[n]=ws;wires+=ws
                 for i,b in enumerate(wires):
                     for other in wires[:i]:require(b.identity!=other.identity or b.offset+b.width<=other.offset or other.offset+other.width<=b.offset,"overlapping oracle call arguments")
-                caller_types={n:ty for n,ty,r in self.obj.functions[function].groups[3]}
+                caller=self.obj.functions[function]
+                caller_types={n:ty for n,ty,r in (caller.groups[4] if caller.kind=="oracle" else caller.groups[2]+caller.groups[3] if caller.kind=="lproc" else caller.groups[3])}
                 arguments=[]
                 for (n,ty,r),actual in zip(fn.groups[4],actual_groups[4]):
                     require(caller_types.get(actual)==ty,"oracle call classical argument type mismatch")
@@ -2782,7 +2805,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
             while True:
                 require(count not in seen,"E_SCHEDULE_INFEASIBLE: class/accuracy default resolution has no stable operation count")
                 seen.add(count)
-                share=accuracy/count if count else F(0)
+                share=F(accuracy)/count if count else F(0)
                 catalog=Catalog(globals().get("CATALOG_TEXT") or (Path(__file__).resolve().parents[1]/"data/ref-0.9.json").read_text(),target)
                 ledger=Ledger(target,Schedule(effective_schedule,obj,region),default_share=share,exact=fn.kind in ["perm_action","oracle"])
                 catalog.ledger=ledger;source=Source(obj,target,catalog)

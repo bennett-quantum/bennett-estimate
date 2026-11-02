@@ -167,6 +167,39 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_lifted_region_rows_keep_nested_budget_arguments_and_reverse_context(self):
+        root={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":["token","i1"]}
+        child={**root,"args":["i1"]}
+        flip={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":["i1"],"bounds":[1]}
+        text="oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token, a:i1)\nregs { r:reg[1], fr:reg[4] }\n^entry():\nlift.oracle_call @child tk (x) r fr () (a)\nlift.perm_call @flip (r) () () (a)\nlift.retval r\noracle @child (x:wire in) (t:wire) (f:wire[4]) () (a:i1)\n^entry():\nlift.retval x\nperm_action @flip (r:wire) () () (a:i1) ()\nregs {  } bounds { 1 }\n^entry():\nqloop 1 {\nx r\n}"
+        obj=make_program(text,{"root":root,"child":child,"flip":flip});t=target()
+        budget=["1","0","0","0"];nested=["2","0","0","0"];args=[nested,"1"]
+        baseline=e.estimate(obj,t,"root",args,budget)
+        events=[];original=e.Ledger;symbol=obj.symbol("child")["interface_hash"]
+        class Recording(original):
+            def gate(self,op,wires,controls=(),**kw):
+                if kw["chain"][-1]["symbol"]==symbol:
+                    events.append((kw["step"],kw["phase"],kw["chain"][-2]["point"],kw["chain"][-2]["entered_invocation"]))
+                return super().gate(op,wires,controls,**kw)
+        with patch.object(e,"Ledger",Recording):actual=e.estimate(obj,t,"root",args,budget,include_frame=True)
+        self.assertEqual(actual["exact_resources"],baseline["exact_resources"])
+        contexts=actual["invocation_contexts"]
+        self.assertEqual([c["region"] for c in contexts],["root","child","flip","flip","child"])
+        for context in contexts[1:]:
+            self.assertEqual(context["invocation"]["args"],["1"])
+            self.assertEqual(context["invocation"]["budget"],nested if context["region"]=="child" else budget)
+            self.assertEqual(context["inherited_controls"],1)
+        for phase in ["fwd","rev"]:
+            for step in [1,2]:self.assertIn((1,phase,"entry:0",[step,"fwd"]),events)
+        # Erasing only the two D-row bodies leaves identical outer dispatch,
+        # successor, history and construction charges.
+        empty=text.replace("lift.oracle_call @child tk (x) r fr () (a)","qjump ^second\n^second():").replace("lift.perm_call @flip (r) () () (a)","qjump ^done\n^done():")
+        base=e.estimate(make_program(empty,{"root":root,"child":child,"flip":flip}),t,"root",args,budget)
+        nested_cost=e.estimate(obj,t,"child",["1"],nested,inherited_controls=1)
+        flip_cost=e.estimate(obj,t,"flip",["1"],budget,inherited_controls=1)
+        for key in ["time","gate_count"]:
+            self.assertEqual(F(actual["resources"][key])-F(base["resources"][key]),2*(F(nested_cost["resources"][key])+F(flip_cost["resources"][key])))
+
     def test_raw_inverse_oracle_swaps_support_partition_and_step_traversal(self):
         action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1,4],"in":[1,1],"mem":[],"args":["token"],"bounds":[]}
         oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}

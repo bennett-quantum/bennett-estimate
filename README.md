@@ -18,8 +18,10 @@ target/debug/bennett-estimate tests/fixtures/example1.bisa \
   --region inc8 --budget 1048576,0,0,0 --params '[]'
 ```
 
-The CLI writes one deterministic JSON object, or a diagnostic on stderr with
-nonzero exit status and empty stdout. `--params` is the complete K13 argument
+The CLI writes one deterministic JSON object. Invalid input produces a
+diagnostic on stderr, nonzero exit status and empty stdout. A request affected
+by a filed contract gap instead emits a `pending evidence` JSON report with
+its request bindings and issue code, no resource rows, and exit status 3. `--params` is the complete K13 argument
 array, inline or `@file`. Integer arguments are unsigned decimal **strings**,
 f64 arguments are binary64 hex bit patterns, and tokens are four-string tuples.
 No missing argument becomes zero. `--region` is required for multiple entries.
@@ -35,11 +37,14 @@ occupancy, placements and topology checks.
 `exact_resources` stores reduced arbitrary-precision rational values.
 `resources` contains the K12 upward 34-significant-digit decimal display and
 escaped class keys, including zero rows for unused classes. `exact` labels the
-resource calculation for the stated sequential realisation; it does not certify
+resource calculation for the stated realisation; it does not certify
 program correctness, optimality, or structure recovery. A
 `--classical-step-bound N` report instead labels a **conditional** upper bound
 and states the termination assumption. It contains `rational_upper_bounds`,
 never a fabricated exact cost. This option applies to purely classical objects.
+
+Raw reversal of an expanded call retains its forward ordinals and support
+points; source action adjoints are formed separately before expansion.
 
 The Rust binary embeds both the independent Python arithmetic engine and the
 published JSON catalog. It needs no installed source tree at runtime. Python
@@ -55,7 +60,7 @@ copy/XOR/exchange, predication, loops, local-region images and linear coherent
 memory, controlled action/oracle calls and qinplace, plus padded arithmetic/control
 oracles, lifted allocation with all four history slots, and layout-state/global-address construction. Each nested oracle retains
 its own resolved token. Unused resolved arguments retain their typed invocation
-bindings. Full lifted memory/activation rows, complete source adjoint/cleanup
+bindings. Full lifted memory/activation rows, complete cleanup
 partitioning, remaining register/effect histories and certificate proof checking still require work.
 Unsupported paths fail explicitly; they remain requirements.
 
