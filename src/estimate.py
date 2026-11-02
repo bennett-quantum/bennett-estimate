@@ -1270,7 +1270,67 @@ class Object:
         names=[s["name"] for s in symbols.values()]
         require(len(names)==len(set(names)),"duplicate symbol name")
         require(set(out.functions)=={s["name"] for s in symbols.values() if s["kind"]!="data"},"function definitions and symbols differ")
+        for fn in out.functions.values():
+            for inst in fn.code:
+                if inst.op!="call":continue
+                require(inst.args and re.fullmatch("@"+NAME,inst.args[0]),"§4.1: call requires a bare symbol operand")
+                target=out.functions.get(inst.args[0][1:])
+                require(target is not None or inst.args[0][1:] in out.sections.get("imports",{}),"call names no function or declared import")
+                if target is None:continue  # declared imports are checked at link
+                allowed=["cc","r"] if fn.kind=="cc" else ["r"]
+                require(target.kind in allowed,"§3.1: classical call tier violation (R may call only R)")
+                require(len(inst.args)-1==len(target.groups[0]) and len(inst.lhs)==len(target.groups[1]),"§4.1: call argument/result arity mismatch")
+        out.validate_region_graph()
         return out
+
+    def validate_region_graph(self):
+        """§5.1 includes semantic calls in the complete lifted closure."""
+        imports=self.sections.get("imports",{})
+        def linked(name,kinds):
+            require(re.fullmatch("@"+NAME,name),"region/lifted call needs a symbol operand")
+            name=name[1:]
+            require(name in self.functions or name in imports,"call names no definition or declared import")
+            kind=self.functions[name].kind if name in self.functions else imports[name].get("signature",{}).get("kind")
+            require(kind in kinds,"§3.1/§4.7: incompatible callee kind")
+            return name
+        calls={};lifted={}
+        for name,fn in self.functions.items():
+            calls[name]=set();lifted[name]=set()
+            for inst in fn.code:
+                op,args=inst.op,inst.args
+                while op in ["adj","ctl"]:
+                    index=1 if op=="ctl" else 0
+                    require(len(args)>index,"incomplete controlled/adjoint region call")
+                    op,args=args[index],args[index+1:]
+                if op in ["oracle_call","lift.oracle_call","lift.oracle_uncall","budget.mint"]:
+                    require(args,"missing oracle call target")
+                    child=linked(args[0],["oracle"])
+                    if op!="budget.mint":calls[name].add(child)
+                elif op in ["action_call","lift.perm_call"]:
+                    require(args,"missing action call target")
+                    calls[name].add(linked(args[0],["action","perm_action"]))
+                elif op=="qinplace":
+                    require(len(args)>=2,"missing qinplace pair")
+                    calls[name].update(linked(a,["oracle"]) for a in args[:2])
+                elif op=="lift.call":
+                    require(args,"missing lifted call target")
+                    lifted[name].add(linked(args[0],["lproc"]))
+        graph={}
+        for name,fn in self.functions.items():
+            if fn.kind not in ["oracle","action","perm_action"]:continue
+            graph[name]=set();pending=[name];seen=set()
+            while pending:
+                function=pending.pop()
+                if function in seen or function not in self.functions:continue
+                seen.add(function);graph[name].update(calls[function]);pending.extend(lifted[function])
+        visiting=set();finished=set()
+        def visit(name):
+            if name in finished or name not in graph:return
+            require(name not in visiting,"§5.1: region call graph must be acyclic (cycle found)")
+            visiting.add(name)
+            for child in graph[name]:visit(child)
+            visiting.remove(name);finished.add(name)
+        for name in graph:visit(name)
 
     def symbol(self, name):
         matches = [s for s in self.sections["symbols"].values() if s["name"] == name]
@@ -2143,7 +2203,19 @@ class Source:
         quantum basis tuple, and no oracle is executed on such a tuple.
         """
         parsed = resolved_arguments([ty for n,ty,r in fn.groups[0]],args,self.obj)
-        initial = {n:(v,type_width(ty,self.obj.ptr) if ty != "token" else 0) for (n,ty,r),v in zip(fn.groups[0],parsed)}
+        @dataclass(frozen=True)
+        class MintedToken:
+            identity:int
+            budget:tuple
+        def equal_values(left,right):
+            if len(left)!=len(right):return False
+            for (x,wx),(y,wy) in zip(left,right):
+                if wx!=wy:return False
+                if wx==0 and isinstance(x,list) and isinstance(y,list) and x==y and x is not y:
+                    raise ContractError("EST-CONTEXT-03: token identity aliasing is absent from tuple-only root arguments; an explicit conditional step bound is available")
+                if x!=y:return False
+            return True
+        initial = {n:(v,type_width(ty,self.obj.ptr)) if ty!="token" else (list(v),0) for (n,ty,r),v in zip(fn.groups[0],parsed)}
         memory, allocations = {}, {}
         clock=0
         layout = self.obj.sections.get("layout",{})
@@ -2236,7 +2308,7 @@ class Source:
                         if not pending:return p,steps,[],True
                         segment=max(pending,key=lambda s:s["end"])
                         arguments=[get(n) for n in list_operand(a[1])];results=[get(n) for n in list_operand(a[2])]
-                        if segment["name"]!=a[0].removeprefix("@") or segment["args"]!=arguments or segment["results"]!=results or any(f["active"] and not f["pure"] and not f["marker"] for f in history[segment["end"]:frame_index]):return p,steps,[],True
+                        if segment["name"]!=a[0].removeprefix("@") or any(f["active"] and not f["pure"] and not f["marker"] for f in history[segment["end"]:frame_index]) or not equal_values(segment["args"],arguments) or not equal_values(segment["results"],results):return p,steps,[],True
                         old_memory,old_allocations,bump,clock,atop=segment["before"]
                         memory.clear();memory.update(old_memory);allocations.clear();allocations.update(old_allocations)
                         for n,version in segment["produced"].items():
@@ -2264,6 +2336,16 @@ class Source:
                         else:
                             value=get(a[1])[0]
                             memory.update({address+i:(value>>(8*i))&255 for i in range(size)})
+                    elif op=="budget.mint":
+                        require(len(a)==5 and a[0].startswith("@"),"budget.mint needs oracle and four i64 components")
+                        name=a[0][1:]
+                        require(name in self.obj.functions and self.obj.functions[name].kind=="oracle","budget.mint requires linked oracle")
+                        components=[get(n) for n in a[1:]]
+                        require(all(width==64 for value,width in components),"budget.mint components must be i64")
+                        token=[str(value) for value,width in components]
+                        try:validate_budget(token,self.obj)
+                        except ContractError:return p,steps,[],True
+                        result=(MintedToken(frame_index,tuple(token)),0)
                     elif op=="effect":
                         dev=a[0]
                         if dev not in ["clock.read","entropy.read","console.write","block.read","block.write"]: return p,steps,[],True
@@ -2299,7 +2381,7 @@ class Source:
             function=self.calls[-1]
             meta={"symbol":self.obj.symbol(function)["interface_hash"],"point":f"{inst.block}:{inst.ordinal}","depth":depth,"kind":op,"call":op in ["action_call","oracle_call"],"oracle_call":op=="oracle_call","exact":self.obj.functions[function].kind=="perm_action"}
             if op in GATES or op == "mcx":
-                require(self.obj.functions[function].kind!="perm_action" or op in ["x","cx","ccx","mcx","swap"],"§5.3: non-permutation source gate in permutation action")
+                require(not any(self.obj.functions[n].kind in ["oracle","perm_action"] for n in self.calls) or op in ["x","cx","ccx","mcx","swap"],"§5.3: non-permutation source gate in permutation action")
                 params = []
                 if op in ["rx","ry","rz"]:
                     theta,*a = a
@@ -2585,8 +2667,17 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
             # A caller-supplied termination assumption is explicit evidence,
             # never a proof that an unbounded classical program terminates.
             resolved_arguments([ty for n,ty,r in fn.groups[0]],args,obj)
-            classical_ops={"add","sub","mul","and","or","xor","shl","lshr","ashr","udiv","urem","sdiv","srem","select","alloc","free","br","call","uncall","ret","trap","fault","effect","hostcall","inttoptr"}
-            for f in obj.functions.values():
+            classical_ops={"add","sub","mul","and","or","xor","shl","lshr","ashr","udiv","urem","sdiv","srem","select","alloc","free","br","call","uncall","ret","trap","fault","effect","hostcall","inttoptr","budget.mint"}
+            reachable=set();pending=[region]
+            while pending:
+                name=pending.pop()
+                if name in reachable:continue
+                require(name in obj.functions,"step-only bound has an unresolved call")
+                reachable.add(name)
+                for inst in obj.functions[name].code:
+                    if inst.op=="call":pending.append(inst.args[0].removeprefix("@"))
+            for name in reachable:
+                f=obj.functions[name]
                 require(f.kind in ["cc","r"],"step-only classical bound cannot omit quantum regions")
                 require(all(i.op in classical_ops or i.op.startswith(("const.i","icmp.","load.i","store.i","zext.i","sext.i","trunc.i","ptrtoint.i")) for i in f.code),"step-only bound cannot omit quantum/register operations")
             steps=integer(step_bound,0)

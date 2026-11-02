@@ -205,6 +205,14 @@ class Objects(unittest.TestCase):
         for text in [oracle.replace("one = lift.const.i8 1","one = budget.mint @inc8 one one one one"),oracle.replace("lift.retval r","lift.ret r"),oracle.replace("lift.retval r","r = lift.add x one"),action.replace("cx x b[0]","br ^entry()",1)]:
             with self.assertRaises(e.ContractError):e.Object.read(text)
 
+    def test_r_to_cc_call_edge_rejected(self):
+        sig=lambda kind:{"abi":"0.9","tier":kind,"kind":kind,"params":[],"results":[]}
+        symbols={str(i):{"name":name,"kind":kind,"signature":sig(kind),"interface_hash":"0"*64} for i,(name,kind) in enumerate([("root","r"),("child","cc")])}
+        header=(ROOT/"tests/fixtures/example1.bisa").read_text().split("\n\nsection symbols",1)[0]
+        text=header+"\n\nsection symbols\n"+e.jcs(symbols)+"\n\nsection functions\nfn r @root () () () () ()\n^entry():\ncall @child\nret\nfn cc @child () () () () ()\n^entry():\nret\n"
+        with self.assertRaisesRegex(e.ContractError,"tier"):
+            e.Object.read(text)
+
     def test_rung3_nested_uncall_and_impure_fault_prefix(self):
         obj=e.Object.read((ROOT.parent/"bennett-conformance/ladder/rung-3/fixtures/executor-control.bisa").read_text())
         target=e.Target.read((ROOT/"data/classical-step-16.json").read_text())

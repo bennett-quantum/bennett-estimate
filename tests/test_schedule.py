@@ -44,6 +44,22 @@ def make_program(text,signatures,data=None,layout=None):
 
 
 class Selectors(unittest.TestCase):
+    def test_region_graph_includes_lproc_closure_but_allows_lproc_recursion(self):
+        root={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":["token"]}
+        worker={"abi":"0.9","tier":"q","kind":"lproc","params":[1],"result":1,"tokens":["token"],"args":[],"mem":[]}
+        layout={"ptr_width":32,"H":1,"A_tab":0,"S_cells":4,"globals":{},"interface_regions":{},"heap_base":1,"heap_limit_max":1,"null_size":1}
+        text="oracle @root (x:wire in) (t:wire) (f:wire[4]) () (tk:token)\nregs { r:reg[1] }\n^entry():\nr = lift.call @worker (x) (tk) () ()\nlift.retval r\nlproc @worker (x:reg[1]) (r:reg[1]) (tk:token token) () ()\nregs { u:reg[1], fr:reg[4] }\n^entry():\nlift.oracle_call @root tk (x) u fr () (tk)\nr = lift.mov x\nlift.ret r"
+        with self.assertRaisesRegex(e.ContractError,"cycle|acyclic"):
+            make_program(text,{"root":root,"worker":worker},layout=layout)
+        recursive=text.replace("lift.oracle_call @root tk (x) u fr () (tk)","r = lift.call @worker (x) (tk) () ()")
+        obj=make_program(recursive,{"root":root,"worker":worker},layout=layout)
+        self.assertEqual(obj.functions["worker"].kind,"lproc")
+
+    def test_region_cycles_are_rejected_even_in_zero_trip_loops(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[0]}
+        with self.assertRaisesRegex(e.ContractError,"cycle|acyclic"):
+            make_object("perm_action @root (t:wire) () () () ()\nregs {  } bounds {0}\n^entry():\nqloop 0 {\naction_call @root (t) () () ()\n}",sig)
+
     def test_published_k82_all_86_expansion_digests(self):
         doc=e.loads((ROOT.parent/"bennett-isa-spec/conformance/fixtures/accepted-k82-09/k82.json").read_text())
         count=0
@@ -151,6 +167,47 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_fresh_mints_keep_identity_even_for_equal_budget_tuples(self):
+        cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        sink={"abi":"0.9","tier":"r","kind":"r","params":["token"],"results":[]}
+        text="fn cc @root () () () () ()\n^entry():\none = const.i64 1\nzero = const.i64 0\na = budget.mint @identity one zero zero zero\nb = budget.mint @identity one zero zero zero\ncall @sink a\nuncall @sink (b) ()\nret\noracle @identity (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x\nfn r @sink (tk:token) () () () ()\n^entry():\nret"
+        obj=make_program(text,{"root":cc,"identity":oracle,"sink":sink})
+        self.assertEqual(e.estimate(obj,target(),"root",[],["0"]*4)["classical_steps"],"7")
+        same=make_program(text.replace("uncall @sink (b)","uncall @sink (a)"),{"root":cc,"identity":oracle,"sink":sink})
+        self.assertEqual(e.estimate(same,target(),"root",[],["0"]*4)["classical_steps"],"8")
+
+    def test_tuple_only_root_tokens_do_not_guess_unknown_aliases(self):
+        cc={"abi":"0.9","tier":"cc","kind":"cc","params":["token","token"],"results":[]}
+        sink={"abi":"0.9","tier":"r","kind":"r","params":["token"],"results":[]}
+        oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        obj=make_program("fn cc @root (a:token, b:token) () () () ()\n^entry():\ncall @sink a\nuncall @sink (b) ()\nret\nfn r @sink (tk:token) () () () ()\n^entry():\nret\noracle @identity (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x",{"root":cc,"sink":sink,"identity":oracle})
+        args=[["1","0","0","0"],["1","0","0","0"]]
+        with self.assertRaisesRegex(e.ContractError,"token.*alias"):
+            e.estimate(obj,target(),"root",args,["0"]*4)
+        with self.assertRaisesRegex(e.ContractError,"token.*alias"):
+            e.estimate(obj,target(),"root",[args[0],args[0]],["0"]*4)
+        bound=e.estimate(obj,target(),"root",args,["0"]*4,step_bound=4)
+        self.assertEqual(bound["label"],"bound")
+
+    def test_transitive_permutation_action_rejects_phase_body(self):
+        root={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        child={**root,"kind":"action"}
+        obj=make_program("perm_action @root (t:wire) () () () ()\n^entry():\naction_call @child (t) () () ()\naction @child (t:wire) () () () ()\n^entry():\nh t",{"root":root,"child":child})
+        with self.assertRaisesRegex(e.ContractError,"permutation"):
+            e.estimate(obj,target(),"root",[],["0"]*4)
+
+    def test_classical_budget_mint_has_no_quantum_execution_cost(self):
+        classical={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":["i64"]}
+        oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        obj=make_program("fn cc @root () (answer:i64) () () ()\n^entry():\none = const.i64 1\nzero = const.i64 0\ntk = budget.mint @child one zero zero zero\nret one\noracle @child (x:wire in) (t:wire) (f:wire[4]) () ()\n^entry():\nlift.retval x",{"root":classical,"child":oracle})
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual(result["classical_steps"],"4")
+        self.assertEqual(result["gates"],{})
+        bound=e.estimate(obj,target(),"root",[],["0"]*4,step_bound=4)
+        self.assertEqual(bound["label"],"bound")
+        self.assertEqual(bound["rational_upper_bounds"]["time"],{"numerator":"4","denominator":"1"})
+
     def test_interface_width_above_2pow53_is_decimal_string_bound(self):
         width=2**53+1
         sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[str(width)],"in":[],"mem":[],"args":[],"bounds":[0]}

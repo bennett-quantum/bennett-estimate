@@ -112,3 +112,61 @@ source witnesses, exact resource/ordinal witnesses and any resulting expansion
 identity update. Pending that decision, layout/state construction and other
 unambiguous implementation work can continue, but full K12 parameterised/source
 coverage cannot honestly be marked complete.
+
+## EST-CONTEXT-03: token identity aliasing is not encoded by K13 tuples
+
+K12/K13 correctly fix decimal handling and tuple-only parameter encoding. This
+is a separate context question: §5.3 matched pairs retain token identities as
+well as tuples, §5.4 produces a fresh token for each successful budget.mint,
+and §4.1 uncall compares recorded boundary argument values. Equal four-string
+tuples do not say whether two input operands are one handle or two handles.
+
+`tests/fixtures/token-alias-source-gap.bisa` is VM-admitted with object hash
+`cda0f55ff3f299b165453ff9162b051ddf96856a799d22e09499c226bf35c011`.
+Its CC root calls a no-op R function with token a, then uncalls with token b.
+Under handle identity equality, the same handle at both positions completes in
+four source steps; two distinct handles for the same tuple fault at the third
+step. Both encode as args [["1","0","0","0"],["1","0","0","0"]] and have the
+same K13 params_hash. These two counts are derived from the printed instructions,
+not claimed as a VM execution differential: the installed run-cc binary reports
+budget.mint unimplemented, and run-program cannot expand lift.retval yet.
+The oracle declaration provides a program oracle for validating host tokens.
+
+There is also a Q-region consequence: two oracle-call occurrences using a and b
+may or may not be a K81 matched pair, so cleanup-carrier applicability/selection
+can depend on the same absent alias relation. This must be decided before
+implementations guess a root alias policy. Current code distinguishes known fresh
+mints, preserves forwarding of a single argument, and raises EST-CONTEXT-03 only
+when an unresolved equality actually matters; a stated conditional step bound
+remains available. Reusing a Python list is not an alias declaration in JCS.
+
+Proposed normative text (UNADOPTED, preserving identity-based matching):
+
+> Token identity context. A resolved invocation additionally carries
+> token_aliases, an array of nonnegative integer identity-class labels. Position
+> zero denotes the separately supplied invocation token; subsequent positions
+> denote token-typed arguments in signature order. Equal labels denote the same
+> valid token identity and require equal tuples; unequal labels denote distinct
+> identities even when their tuples agree. Labels are canonical by first
+> occurrence, starting at zero. This records equality, never a process-local
+> handle. With no token arguments the array is [0]; otherwise the request MUST
+> supply it and a missing or conflicting context is E_ARG.
+>
+> bindings.invocation and schedule bindings carry this token_aliases array. It is
+> copied and compared as part of request/schedule/certificate matching. The
+> existing params_hash remains SHA-256 of the args array. Source forwarding and
+> fixed-binding formation preserve these identity classes; a successful
+> budget.mint introduces a fresh identity class attached to its defining
+> occurrence. Nested contexts preserve the resolved classes through their call
+> paths instead of reconstructing identities from tuple equality.
+>
+> The estimate request accepts token_aliases_jcs and token_aliases_len following
+> params_len; the scheduler exposes bennett_sched_request_set_token_aliases with
+> the same JCS array. Their parsers validate canonical labels, arity and tuple
+> consistency before realisation. Certificate invocation schemas admit the
+> token_aliases field and require it for scheduled identity-dependent subjects.
+
+This is a proposed contract change, not implemented schema or policy. The
+orchestrator must file it in bennett-isa-spec under COMMON rule 14. A different
+ratified identity/equality rule could resolve it instead. Existing K12/K13
+choices have not been reopened or silently replaced.

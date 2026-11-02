@@ -24,12 +24,10 @@ signature, bounds, native inventory, exact rows and frame requirements. CLI
 certificate output enriches supplied proof metadata for the same invocation;
 correctness claims and nested composition are not verified or invented.
 
-Verified checkpoint: headless `timeout 180 scripts/pre-push --working-tree`
-passed 69 tests, fmt, strict Clippy and shell syntax checks. Later focused tests
-cover backdated release peaks, fixed scheme ancilla classes, K12 certificate
-production/recheck/determinism, native inventory/signature rejection and widths
-above 2^53. A new full gate is running; see .tmp/PROGRESS.md for its session and
-final result before asserting the latest tree green. Hook orchestration uses a
+Verified: headless `timeout 180 scripts/pre-push --working-tree` exited 0 with
+76 tests, Rust fmt, strict Clippy and shell syntax. This includes backdated release
+peaks, fixed scheme ancilla classes, K12 production/recheck/determinism, native
+inventory/signature rejection and widths above 2^53. Hook orchestration uses a
 VCS double; actual pushed-SHA clean-worktree execution belongs to the runner.
 
 Differential evidence: rung-3 sum inputs 0/1/3/7/255 match VM steps/time

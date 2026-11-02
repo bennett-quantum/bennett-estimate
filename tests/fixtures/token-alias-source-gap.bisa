@@ -1,0 +1,17 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"16f0e44fcc060dc42849f18fe6c8e9096691a08b385fb32339fe96b62c1417a3","kind":"cc","name":"root","signature":{"abi":"0.9","kind":"cc","params":["token","token"],"results":[],"tier":"cc"}},"1":{"interface_hash":"a9d1186ddbf4bb0769c35ba697d3df41271051d5f95a394358efbe98946e24c2","kind":"r","name":"sink","signature":{"abi":"0.9","kind":"r","params":["token"],"results":[],"tier":"r"}},"2":{"interface_hash":"0e18ef52a5c0ed81f251f18386260de0674ef47515431eae848e9995f1064dd8","kind":"oracle","name":"identity","signature":{"abi":"0.9","args":[],"fault":4,"in":[1],"kind":"oracle","mem":[],"tgt":1,"tier":"q"}}}
+
+section functions
+fn cc @root (a:token, b:token) () () () ()
+^entry():
+call @sink a
+uncall @sink (b) ()
+ret
+fn r @sink (tk:token) () () () ()
+^entry():
+ret
+oracle @identity (x:wire in) (t:wire) (f:wire[4]) () ()
+^entry():
+lift.retval x
