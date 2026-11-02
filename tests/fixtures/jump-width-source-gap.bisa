@@ -1,0 +1,13 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"36b366835ee485cc34ce608de846f422da6fb69c0e1482ddfbea9ca691c2d863","kind":"oracle","name":"root","signature":{"abi":"0.9","args":[],"fault":4,"in":[3,4,1],"kind":"oracle","mem":[],"tgt":1,"tier":"q"}}}
+
+section functions
+oracle @root (a:wire[3] in, b:wire[4] in, x:wire in) (t:wire) (f:wire[4]) () ()
+^entry():
+qjumpr a
+^second():
+qjumpr b
+^done():
+lift.retval x

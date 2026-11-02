@@ -196,6 +196,15 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_procedure_dynamic_jump_binds_absolute_canonical_end(self):
+        obj=e.Object.read((ROOT/"examples/lifted-jump.bisa").read_text());t=target();seen=[];original=e.Catalog
+        class Recording(original):
+            def recipe(self,name,args,*rest,**kw):
+                if name=="qjumpr":seen.append(tuple(args[2:4]))
+                return super().recipe(name,args,*rest,**kw)
+        with patch.object(e,"Catalog",Recording):e.estimate(obj,t,"root",[],["1","1","8","1"])
+        self.assertEqual(seen,[(2,6)])
+
     def test_lproc_forwards_its_fixed_token_to_nested_oracle_invocations(self):
         obj=e.Object.read((ROOT/"examples/lifted-token-forwarding.bisa").read_text());t=target()
         budget=["1","1","8","1"];nested=["2","0","0","0"]

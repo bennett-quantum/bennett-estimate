@@ -113,6 +113,22 @@ class Profiles(unittest.TestCase):
 
 
 class Catalog(unittest.TestCase):
+    def test_literal_summary_counts_set_bits_without_visiting_zero_bits(self):
+        original=e.Catalog
+        class BoundedWork(original):
+            def body(self,*args,**kw):
+                if self.visits>100:raise AssertionError("literal bit span was enumerated")
+                return super().body(*args,**kw)
+        c=BoundedWork((ROOT/"data/ref-0.9.json").read_text(),self.t)
+        for value in [0,1,(1<<4095)+1]:
+            p=c.recipe("value.literal",[4096,value,"t"],{"t":e.Bundle("t",4096,"data")})
+            self.assertEqual(p.counts.get("gate_count",0),value.bit_count())
+            self.assertLess(c.visits,10)
+        for n,value in [(0,0),(3,1025),(8,255),(8,129)]:
+            env={"t":e.Bundle("t",n,"data")}
+            self.c.closed_form=False;literal=self.c.recipe("value.literal",[n,value,"t"],env)
+            self.c.closed_form=True;self.assertEqual(self.c.recipe("value.literal",[n,value,"t"],env),literal)
+
     def test_implicit_length_width_changes_exact_cost(self):
         wires={n:e.Bundle(n,width,"data") for n,width in [("address",32),("base",32),("size",32),("live",1),("pinned",1),("atop",1),("flag",1),("faulted",1),("code",4),("value",8),("displaced",8),("cells",8)]}
         layout=[{"base":0,"extent":1,"cells":wires["cells"]}]
@@ -193,6 +209,25 @@ class Catalog(unittest.TestCase):
 
 
 class Objects(unittest.TestCase):
+    def test_signed_lifted_literals_match_unsigned_encoding(self):
+        sig={"abi":"0.9","tier":"q","kind":"oracle","in":[],"tgt":8,"fault":4,"mem":[],"args":[]}
+        def obj(value):return object_with_signatures(f"oracle @root () (t:wire[8]) (f:wire[4]) () ()\nregs {{ w:reg[8] }}\n^entry():\nw = lift.const.i8 {value}\nlift.retval w",{"root":sig})
+        t=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text());budget=["1","0","0","0"]
+        for signed,unsigned in [(-1,255),(-128,128),(-3,253)]:
+            first=e.estimate(obj(signed),t,"root",[],budget);second=e.estimate(obj(unsigned),t,"root",[],budget)
+            self.assertEqual(first["exact_resources"],second["exact_resources"])
+            self.assertEqual(first["gates"],second["gates"])
+        for invalid in [-129,256]:
+            with self.assertRaisesRegex(e.ContractError,"literal"):
+                e.estimate(obj(invalid),t,"root",[],budget)
+
+    def test_distinct_legal_jump_widths_expose_ref_binding_gap(self):
+        obj=e.Object.read((ROOT/"tests/fixtures/jump-width-source-gap.bisa").read_text())
+        t=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+        with self.assertRaisesRegex(e.ContractError,"EST-SOURCE-04"):
+            e.estimate(obj,t,"root",[],["3","0","0","0"])
+        self.assertEqual(e.estimate(obj,t,"root",[],["0"]*4)["label"],"exact")
+
     def test_wide_unwritten_location_exposes_ret_delivery_contract_gap(self):
         obj=e.Object.read((ROOT/"tests/fixtures/ret-delivery-source-gap.bisa").read_text())
         t=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
@@ -397,7 +432,7 @@ class CommandLine(unittest.TestCase):
     def test_contract_dependent_outputs_are_pending_evidence(self):
         binary=os.environ["BENNETT_ESTIMATE_BIN"]
         target=str(ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json")
-        cases=[("parameter-source-gap.bisa","parameter",'["0"]',"EST-SOURCE-01"),("implicit-length-source-gap.bisa","read_byte","[]","EST-SOURCE-02"),("token-alias-source-gap.bisa","root",'[["1","0","0","0"],["1","0","0","0"]]',"EST-CONTEXT-03"),("ret-delivery-source-gap.bisa","root","[]","EST-SOURCE-03")]
+        cases=[("parameter-source-gap.bisa","parameter",'["0"]',"EST-SOURCE-01"),("implicit-length-source-gap.bisa","read_byte","[]","EST-SOURCE-02"),("token-alias-source-gap.bisa","root",'[["1","0","0","0"],["1","0","0","0"]]',"EST-CONTEXT-03"),("ret-delivery-source-gap.bisa","root","[]","EST-SOURCE-03"),("jump-width-source-gap.bisa","root","[]","EST-SOURCE-04")]
         for file,region,args,code in cases:
             command=[binary,str(ROOT/"tests/fixtures"/file),"--target",target,"--region",region,"--params",args,"--budget","2,0,0,0"]
             actual=subprocess.run(command,capture_output=True,text=True,timeout=30)

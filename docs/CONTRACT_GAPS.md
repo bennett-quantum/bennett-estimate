@@ -210,3 +210,42 @@ requests and emits CLI pending evidence with no resource rows. B=0 has
 no step expansion and needs no delivery access; its construction/commit
 estimate remains available. All other independent implementation work
 continues.
+
+## EST-SOURCE-04: qjumpr needs independent address and pc widths
+
+Local tracking: bennett-estimate-bph.7. The pinned §3.3 Lifted width rules
+allow each qjumpr operand any width A satisfying 2^A > n. The published
+ref qjumpr has only P and requires both a:wire[P] and succ:wire[P], while
+§3.6 gives the complete oracle one common pc/successor width.
+
+Witness tests/fixtures/jump-width-source-gap.bisa has n=3 and two qjumpr
+rows, with address widths 3 and 4. Both satisfy the source width rule;
+no single P can bind both rows to the published recipe. Object hash:
+d111d27b9a049d152963dfb76cc2c9365d99b74c4f7eb885894be7ec943ea1ba.
+The published VM returns payload1/code0/steps3 at input 1,2,1 and tuple
+3,0,0,0. Current direct recipe binding fails K19 wire width mismatch.
+Choosing one larger pc width cannot resolve the two different widths;
+truncation would also incorrectly remove out-of-range high-bit checks.
+
+Proposed exact ref source-binding change, UNADOPTED:
+
+> qjumpr has separate integer formals P and A: P is the containing
+> oracle's pc/successor width; A is the source address operand's declared
+> width, with 2^A > n. Its wire formals are a:wire[A] and succ:wire[P].
+> Bind First to the containing instance's first canonical index and End
+> to First plus its row count. Compare a with First and End at width A;
+> Bind an integer CopyWidth=min(P,A); XOR only those low CopyWidth bits
+> of a into succ, leaving higher succ bits zero when P>A. Preserve the effective fault
+> writes and the §3.6 flagged successor rule. No source wire is resized
+> and no extra state allocation is introduced.
+
+The exact JSON-recipe transformation is: add A and CopyWidth after P in the integer
+parameter list; change a.width to A; change every old P occurrence in
+the current body to A except the bound of the a-to-succ XOR loop, which
+becomes CopyWidth. This uses the existing scalar language and also covers
+permitted wider pc constructions. Keep succ.width=P, First/End meanings and all other parameters.
+Publish the amended catalog bytes/envelope hash before adoption. The
+estimator currently reports EST-SOURCE-04/pending evidence for generated
+rows requiring this missing adapter; B=0 has no such generated row and
+its construction/commit estimate remains available. Independent work
+continues, without changing the legal source width rule.

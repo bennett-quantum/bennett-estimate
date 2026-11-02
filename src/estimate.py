@@ -790,12 +790,29 @@ class Catalog:
                 for n in interface:bound[n]=wire(n,env or {})
             self.binding_serial+=1
             bound[_BINDING_SCOPE]=self.binding_serial
+            if self.ledger is None and self.closed_form and name=="value.literal":
+                p=self.literal_summary(bound,controls)
+                if p is not None:return p
             if self.ledger is None and self.closed_form and name in ["dispatch.copy","dispatch.store","dispatch.exchange"] and not self.target.doc.get("topology"):
                 p=self.dispatch_summary(name,bound,controls)
                 if p is not None: return p
             return self.body(r["body"], bound, controls, inverse)
         finally:
             self.stack.pop()
+
+    def literal_summary(self,env,controls):
+        n=integer(env["N"],0);value=env["C"];targets=wire(env["t"],env)
+        if not n:return Profile()
+        require(value>=0,"K23: negative bit operand")
+        if any(control[0]==b.identity for control in controls for b in targets):return None
+        out=Profile();offset=0;size=value.bit_length()
+        for b in targets:
+            selected=value>>offset if offset<size else 0
+            if selected.bit_length()>b.width:selected&=(1<<b.width)-1
+            count=selected.bit_count()
+            if count:out=out.then(self.gate_event("x",[b.bit(0)],controls).repeat(count))
+            offset+=b.width
+        return out
 
     def dispatch_summary(self,name,env,controls):
         A,C,W=env["A"],env["C"],env["W"]
@@ -2292,8 +2309,22 @@ class Source:
                     value=integer(entry["base"],0)
                 else:
                     value=int(a[0]) if op=="lift.const" else labels[a[0].removeprefix("^")]
-                require(0<=value<1<<width,"lifted literal out of range")
-                body=[invoke(op,[width,value,slot,w])]
+                require(value.bit_length()<=width if value>=0 else op=="lift.const" and (-value-1).bit_length()<width,"lifted literal out of range")
+                if value<0 and self.catalog.ledger is None:
+                    # The canonical unsigned word is 2^width+value. Its set
+                    # bits number width-popcount(-value-1), without building
+                    # that potentially enormous integer or its gate sequence.
+                    def signed_literal(joined,inverse,call_env,n=width,zero_bits=(-value-1).bit_count(),target=env[w],temporary=slot):
+                        scratch=wire(temporary,call_env)
+                        literal=self.catalog.gate_event("x",[scratch[0].bit(0)],joined).repeat(n-zero_bits)
+                        exchange=self.catalog.recipe("bind.qexch",[n,temporary,target],call_env,joined,inverse)
+                        return exchange.then(literal) if inverse else literal.then(exchange)
+                    capture=f"$constant:{self.serial}";self.serial+=1
+                    env[capture]=Captured([],{},controls,builder=signed_literal)
+                    body=[{"splice":capture}]
+                else:
+                    if value<0:value%=1<<width
+                    body=[invoke(op,[width,value,slot,w])]
             elif op in ["lift.add","lift.sub","lift.mul","lift.and","lift.or","lift.xor","lift.shl","lift.lshr","lift.ashr"]:
                 body=[invoke(op,[width,*a,slot,w])]
             elif op.startswith("lift.icmp."):
@@ -2327,7 +2358,10 @@ class Source:
             elif op=="fault": body=[invoke("fault",[Fwidth,int(a[0]) or 4,faulted,code])]
             elif op=="qjump": body=[]
             elif op=="qbranch": body=[invoke(op,[P,labels[a[1][1:]],labels[a[2][1:]],a[0],successor])]
-            elif op=="qjumpr": body=[invoke(op,[P,Fwidth,instance["first"],len(owner.code),a[0],successor,flag,faulted,code])]
+            elif op=="qjumpr":
+                require(widths[a[0]]>=P,"qjumpr width cannot represent the canonical index space")
+                require(not B or widths[a[0]]==P,"EST-SOURCE-04: published qjumpr binds its address and successor to one width; ISA permits distinct address widths; see docs/CONTRACT_GAPS.md")
+                body=[invoke(op,[P,Fwidth,instance["first"],instance["first"]+len(owner.code),a[0],successor,flag,faulted,code])]
             elif op=="lift.call":
                 callee=by_instance[instance["calls"][id(row)]]
                 formals=callee["function"].groups[0];actuals=list_operand(a[1]);m=len(actuals)
@@ -3299,14 +3333,14 @@ def main(argv=None):
     except (ContractError,OSError,ValueError,KeyError,TypeError,RecursionError) as ex:
         print(f"bennett-estimate: {ex}",file=sys.stderr)
         code=str(ex).split(":",1)[0]
-        if isinstance(ex,ContractError) and code in ["EST-SOURCE-01","EST-SOURCE-02","EST-SOURCE-03","EST-CONTEXT-03"]:
+        if isinstance(ex,ContractError) and code in ["EST-SOURCE-01","EST-SOURCE-02","EST-SOURCE-03","EST-SOURCE-04","EST-CONTEXT-03"]:
             # The request remains concrete/reviewable while the missing
             # published binding is tracked. No resource number is invented.
             pending={"schema":"bennett-estimate/0.1","label":"pending evidence","object_hash":obj.hash,"target_hash":target.hash,
                      "region":region,"variant":a.variant,"inherited_controls":a.inherited_controls,
                      "invocation":{"args":params,"budget":budget},"params_hash":digest(jcs(params)),
                      "epsilon":exact_decimal(decimal_value(a.epsilon)),
-                     "pending":[{"code":code,"reason":str(ex).split(":",1)[1].strip(),"bead":{"EST-CONTEXT-03":"bennett-estimate-bph.5","EST-SOURCE-03":"bennett-estimate-bph.6"}.get(code,"bennett-estimate-bph.4")}]}
+                     "pending":[{"code":code,"reason":str(ex).split(":",1)[1].strip(),"bead":{"EST-CONTEXT-03":"bennett-estimate-bph.5","EST-SOURCE-03":"bennett-estimate-bph.6","EST-SOURCE-04":"bennett-estimate-bph.7"}.get(code,"bennett-estimate-bph.4")}]}
             print(jcs(pending))
             return 3
         return 1
