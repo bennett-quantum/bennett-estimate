@@ -286,6 +286,48 @@ class Accounting(unittest.TestCase):
                 result=e.estimate(obj,target(),"root",args,["0"]*4,token_aliases=[0,0],include_frame=True)
                 self.assertEqual([c["path"][-1]["call_index"] for c in result["invocation_contexts"][1:]],[0,0,1])
 
+    def test_oracle_pair_source_adjoint_and_raw_inverse_keep_distinct_paths(self):
+        obj=self.oracle_pair_object();t=target();args=[["1","0","0","0"]]*2
+        doc=e.estimate(obj,t,"root",args,["0"]*4,token_aliases=[0,0])["effective_schedule"]
+        doc["entries"]=[entry("cleanup",realisation="recompute")]
+        rows=[]
+        for adjoint,raw,points,indices in [(False,False,["entry:0","entry:1","entry:1"],[0,0,1]),(False,True,["entry:1","entry:1","entry:0"],[1,0,0]),(True,False,["entry:1","entry:0","entry:0"],[0,0,1])]:
+            with self.subTest(adjoint=adjoint,raw=raw):
+                c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t)
+                c.ledger=e.Ledger(t,e.Schedule(doc,obj,"root"),exact=True)
+                source=e.Source(obj,t,c)
+                source.region("root",args,["0"]*4,adjoint=adjoint,raw_inverse=raw,token_context=("same","same"))
+                rows.append(c.ledger.finish())
+                contexts=source.invocations[1:]
+                self.assertEqual([ctx["path"][-1]["point"] for ctx in contexts],points)
+                self.assertEqual([ctx["path"][-1]["call_index"] for ctx in contexts],indices)
+                self.assertEqual([d["chain"][-1]["point"] for d in c.ledger.cleanup_decisions],["entry:0" if adjoint else "entry:1"])
+        self.assertEqual(rows[0],rows[1]);self.assertEqual(rows[0],rows[2])
+
+    def test_oracle_pair_matches_control_sets_and_indivisible_outputs(self):
+        root={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1,4,4],"in":[1,2],"mem":[],"args":["token"],"bounds":[]}
+        oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        prefix="perm_action @root (t:wire, f:wire[4], h:wire[4]) (x:wire in, c:wire[2] in) () (tk:token) ()\n^entry():\n"
+        suffix="\noracle @identity (x:wire in) (t:wire) (f:wire[4]) () ()\nregs {  }\n^entry():\nlift.retval x"
+        cases=[("ctl c[0] ctl c[1] oracle_call @identity tk (x) t f () ()\nctl c[1] ctl c[0] oracle_call @identity tk (x) t f () ()",["entry:1"]),("oracle_call @identity tk (x) t f () ()\noracle_call @identity tk (x) t h () ()\noracle_call @identity tk (x) t f () ()",[]),("oracle_call @identity tk (x) t f () ()\noracle_call @identity tk (x) t h () ()\noracle_call @identity tk (x) t h () ()\noracle_call @identity tk (x) t f () ()",["entry:2","entry:3"])]
+        for body,expected in cases:
+            with self.subTest(body=body):
+                obj=make_program(prefix+body+suffix,{"root":root,"identity":oracle})
+                result=e.estimate(obj,target(),"root",[["1","0","0","0"]],["0"]*4,token_aliases=[0],include_frame=True)
+                self.assertEqual([d["chain"][-1]["point"] for d in result["cleanup_decisions"]],expected)
+
+    def test_oracle_pairs_survive_disjoint_rows_and_restored_primitive_versions(self):
+        root={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1,4,1,1],"in":[],"mem":[],"args":["token"],"bounds":[]}
+        oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        prefix="perm_action @root (t:wire, f:wire[4], x:wire, spare:wire) () () (tk:token) ()\n^entry():\n"
+        suffix="\noracle @identity (x:wire in) (t:wire) (f:wire[4]) () ()\nregs {  }\n^entry():\nlift.retval x"
+        call="oracle_call @identity tk (x) t f () ()"
+        for middle,expected in [("x spare",["entry:2"]),("x x",[]),("x x\nx x",["entry:3"]),("x t",[]),("x t\nx t",["entry:3"]),("cx x spare\nx x\nx x\ncx x spare",["entry:5"])]:
+            with self.subTest(middle=middle):
+                obj=make_program(prefix+call+"\n"+middle+"\n"+call+suffix,{"root":root,"identity":oracle})
+                result=e.estimate(obj,target(),"root",[["1","0","0","0"]],["0"]*4,token_aliases=[0],include_frame=True)
+                self.assertEqual([d["chain"][-1]["point"] for d in result["cleanup_decisions"]],expected)
+
     def test_cc_register_ids_are_opaque_except_equality_and_zero(self):
         sig={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
         body="fn cc @root () () () () ()\n^entry():\nq = qreg.new data 1\nid = qreg.id q\nc = const.i64 {literal}\np = icmp.eq id c\nbr p ^yes() ^no()\n^yes():\ntrap\n^no():\nqreg.free q\nret"

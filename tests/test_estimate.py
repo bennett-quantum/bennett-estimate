@@ -637,6 +637,42 @@ class Certificates(unittest.TestCase):
         claim["invocation"]["token_aliases"]=[]
         with self.assertRaises(e.ContractError):e.Certificate.read(e.jcs(doc))
 
+    def test_inverse_pair_alias_reader_validates_partition_and_known_tuple_order(self):
+        pair={"g":"a"*64,"ginv":"b"*64,"claim":0,"budget":["2","0","0","0"],"arg_tokens":{"k":["2","0","0","0"]},"token_aliases":[0,0]}
+        doc=self.certificate_document();region=doc["regions"][doc["bindings"]["closure_hash"]]
+        region["claims"][0]["expected"]="inverse_pair"
+        region["verification"]["inverse_pairs"]=[pair]
+        e.Certificate.read(e.jcs(doc))
+        for aliases in [[],[0],[1,1],[0,2],[False,False]]:
+            with self.subTest(aliases=aliases),self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
+                e.Certificate.inverse_pair({**pair,"token_aliases":aliases})
+        with self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
+            e.Certificate.inverse_pair({**pair,"arg_tokens":{"k":["3","0","0","0"]}})
+        # A standalone signature has no formal names: never substitute JCS
+        # object-key order for the callee's declaration order.
+        pair["arg_tokens"]={"z":["3","0","0","0"],"a":["2","0","0","0"]}
+        pair["token_aliases"]=[0,1,0]
+        e.Certificate.inverse_pair(pair)
+        e.Certificate.inverse_pair(pair,token_order=["z","a"])
+        with self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
+            e.Certificate.inverse_pair(pair,token_order=["a","z"])
+
+    def test_inverse_pair_budget_coverage_also_binds_alias_partition(self):
+        pair={"g":"a"*64,"ginv":"b"*64,"claim":0,"budget":["2","0","0","0"],"arg_tokens":{"k":["2","0","0","0"]},"token_aliases":[0,0]}
+        self.assertTrue(e.Certificate.inverse_pair_context_covers(pair,["2","0","0","0"],{"k":["2","0","0","0"]},[0,0]))
+        self.assertFalse(e.Certificate.inverse_pair_context_covers(pair,["3","0","0","0"],{"k":["2","0","0","0"]},[0,1]))
+        self.assertFalse(e.Certificate.inverse_pair_context_covers(pair,["3","0","0","0"],{"k":["3","0","0","0"]},[0,0]))
+        with self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
+            e.Certificate.inverse_pair_context_covers(pair,["3","0","0","0"],{"k":["2","0","0","0"]},[0,0])
+        distinct={**pair,"token_aliases":[0,1]}
+        self.assertTrue(e.Certificate.inverse_pair_context_covers(distinct,["3","0","0","0"],{"k":["2","0","0","0"]},[0,1]))
+        self.assertFalse(e.Certificate.inverse_pair_context_covers(distinct,["1","0","0","0"],{"k":["2","0","0","0"]},[0,1]))
+        token_free={k:v for k,v in pair.items() if k not in ["arg_tokens","token_aliases"]}
+        self.assertTrue(e.Certificate.inverse_pair_context_covers(token_free,["3","0","0","0"],{},[0]))
+        legacy={k:v for k,v in pair.items() if k!="token_aliases"}
+        with self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
+            e.Certificate.inverse_pair_context_covers(legacy,["2","0","0","0"],{"k":["2","0","0","0"]},[0,0])
+
     def test_nested_certificate_types_and_claim_bindings_reject(self):
         def bad_index(doc,region):region["verification"]["unitary"]=[True]
         def bad_subject(doc,region):region["claims"][0]["subject"]["closure_hash"]="wrong"

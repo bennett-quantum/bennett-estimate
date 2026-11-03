@@ -73,8 +73,10 @@ correctness/error claims or nested composition.
 
 Last full gate before the shift4 instruction: headless scripts/pre-push
 --working-tree exited0,168 tests in26.04s plus fmt/strict Clippy/shell. Current
-reversal changes pass cargo build --offline --locked -j4 and29 focused
-source/history/differential cases in8.041s; test_gate's2 cases also pass.
+changes pass cargo build --offline --locked -j4 and70 focused
+source/history/certificate/selector/CLI/differential cases in8.802s;
+test_gate's2 cases also passed earlier in this shift. There are194 discovered
+tests; this is not a current full-suite pass.
 The shift4 binding reserves all further full gates, pushed-SHA and hook checks
 for the orchestrator. No git process ran. The current batch requires review
 before main is pushed.
@@ -103,12 +105,35 @@ The sibling working document has since advanced independently; the job still
 uses the pinned text. Catalog bytes/hash remain unchanged. Published K12 fixes
 the old hsd/c15 decimal and parameter questions; no proposal was adopted.
 
+K91 is published at fd626d37aba1f719c3b7b2059be46cbfaf462886, document SHA
+bbd887c7841f4eed40f7b3518270a8f2cf781204c14ac4cc3eabca5c5b4b8c3b.
+SPEC_VERSIONS.toml pins the additive token_aliases/1 feature separately without
+claiming full adoption of K85–K93. CLI/API explicit partitions validate canonical
+labels, arity and equal-label tuple consistency. Root CC tokens, nested Q calls,
+fixed lproc bindings, captures, qinplace, source adjoints and raw inversion
+preserve global identity while serializing local canonical partitions.
+params_hash is unchanged; schedule hashes include supplied aliases. Schedule
+and invocation/structural certificate readers accept the new field. Strict
+legacy cutover, inverse-pair bindings and complete certificate contexts remain.
+The old EST-CONTEXT-03 proposal is historical; its decision is resolved and .5
+tracks adoption. Legacy tuple-only requests retain base-profile behavior.
+
+For flat oracle-only action bodies, joint occurrence versions now form K81
+independent call pairs using token identity and read/control versions. Recompute
+keeps original caller targets and uses fresh T/F, compute/XOR/uncompute/releases;
+fresh call indices are0/1. K63 validates indices against actual selected domains
+before target costs when known, unioning covered invocations. Tests cover token
+partitions, intervening joint outputs, nested inverses, control-set order, ties,
+exact time/count/peak/area formulas and source-adjoint/raw-inverse paths. General
+release-ended chains and action-call prehistory/window checking remain required.
+
 Pending source/context cases report deterministic pending evidence JSON,
 complete request bindings, no resource rows and exit 3: classical
 pseudo-locations (EST-SOURCE-01); implicit/literal length carriers including
 literal alloc (02); return delivery too narrow for an unused location (03);
-heterogeneous legal jump address widths versus shared pc width (04); token
-alias relations absent from tuple-only contexts (EST-CONTEXT-03). Exact text
+heterogeneous legal jump address widths versus shared pc width (04). Legacy
+tuple-only token requests may report EST-CONTEXT-03; explicit K91 partitions
+resolve that input. Exact text
 and VM-admitted witnesses are in docs/CONTRACT_GAPS.md and the orchestrator queue
 .tmp/sol-estimate/cross-repo-beads.md. Proposals remain unadopted. Positive-B
 03/04 cases are pending; B=0 construction remains exact. Independent work must
@@ -120,7 +145,7 @@ preserved. CC/R topology allocation and potentially applicable nested quantum
 schedules report pending implementation instead of claiming unchecked exact
 resources. Schedule replay remains required under bph.2.
 
-Open work: bph/.1/.2/.3; bph.4/.5/.6/.7 track contract decisions. Complete
+Open work: bph/.1/.2/.3; bph.4/.6/.7 track contract decisions and .5 K91 adoption. Complete
 source admission/type and remaining register/effect paths, remaining loop/record scaling, CC/R K55 propagation, K81 release-ended/independent-call cleanup
 partition and window proofs, borrow-owner accounting and
 nested certificate/error composition remain. Prioritized design-review issues

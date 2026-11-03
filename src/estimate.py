@@ -749,6 +749,7 @@ class Catalog:
         self.source_metadata={}
         self.source_context=None
         self.call_edges=()
+        self.call_domains={}
         self.loop_coordinates=[]
         self.source_ordinals={}
         self.address_cache=None
@@ -1275,6 +1276,10 @@ class Catalog:
                 joined = tuple(dict.fromkeys(controls + captured.controls))
                 edges,coordinates=self.call_edges,self.loop_coordinates
                 if marked is not None and marked[1].get("call"):
+                    address=self.leaf_address(carrier=True)
+                    key=jcs(address["chain"])
+                    count=marked[1].get("call_index",0)+1
+                    self.call_domains[key]=(address["chain"],max(count,self.call_domains.get(key,(None,0))[1]))
                     edge={"symbol":marked[1]["symbol"],"point":marked[1]["point"],"iteration":list(coordinates[:marked[1]["depth"]]),"instance":marked[1].get("instance",[]),"call_index":marked[1].get("call_index",0)}
                     if marked[1].get("oracle_call"):edge["entered_invocation"]=[None,None]
                     self.call_edges=edges+(edge,);self.loop_coordinates=[]
@@ -2074,7 +2079,7 @@ class Schedule:
                         op,args=args[skip-1],args[skip:]
                     require(op in ["action_call","oracle_call","lift.oracle_call","lift.oracle_uncall","lift.perm_call","qinplace"],"path descends through a non-call point")
                     targets=[a.removeprefix("@") for a in args[:2 if op=="qinplace" else 1]]
-                    if op=="lift.oracle_uncall":targets*=2
+                    if op=="lift.oracle_uncall" or op=="oracle_call" and fn.kind in ["action","perm_action"]:targets*=2
                     call_index=element.get("call_index","*")
                     require(call_index=="*" or integer(call_index,0)<len(targets),"semantic call occurrence outside expansion")
                     if i+1<len(path):
@@ -2083,6 +2088,31 @@ class Schedule:
                         for target in allowed:
                             for symbol,instances in domain(target).items():context.setdefault(symbol,set()).update(instances)
                         require(path[i+1]["symbol"] in context,"path callee does not match source call")
+
+    def validate_call_domains(self,domains):
+        """K63 actual occurrence counts, unioned across covered invocations.
+
+        Unknown token-forwarded domains remain deferred by K55. A wildcard
+        may cover both reverse and recompute contexts; one observed context
+        with the selected occurrence is sufficient for path admission.
+        """
+        for entry in self.entries:
+            for index,element in enumerate(entry["path"]):
+                selected=element.get("call_index","*")
+                if selected=="*":continue
+                counts=[]
+                for chain,count in domains.values():
+                    if len(chain)!=index+1:continue
+                    matches=True
+                    for i,(selector,actual) in enumerate(zip(entry["path"],chain)):
+                        if any(selector[k]!=actual[k] for k in ["symbol","point"]):matches=False;break
+                        for k in ["iteration","instance","call_index"]:
+                            if k=="call_index" and i==index:continue
+                            expected=selector.get(k,"*")
+                            if expected!="*" and expected!=actual.get(k,[] if k!="call_index" else None):matches=False;break
+                        if not matches:break
+                    if matches:counts.append(count)
+                if counts:require(integer(selected,0)<max(counts),"semantic call occurrence outside expansion")
 
     @staticmethod
     def specificity(entry):
@@ -2585,7 +2615,7 @@ class Source:
         return prefix+body+suffix
 
     def oracle_pairs(self,fn,env,controls,adjoint=False):
-        """K81 joint versions for flat oracle-call bodies, before expansion.
+        """K81 joint versions for flat permutation/call bodies, before expansion.
 
         These bodies have no release or intrinsic boundaries. Other source
         families still need the complete release-ended partition pass.
@@ -2595,10 +2625,11 @@ class Source:
         for inst in fn.code:
             op,args=inst.op,inst.args;own=[]
             while op in ["adj","ctl"]:
+                require(len(args)>=(3 if op=="ctl" else 2),"wrapped region call arity")
                 if op=="ctl":own+=bits(wire(args[0],env));op,args=args[1],args[2:]
                 else:op,args=args[0],args[1:]
-            if op!="oracle_call":return set()
-            rows.append((inst,args,tuple(dict.fromkeys(controls+tuple(own)))))
+            if op not in ["oracle_call","x","cx","ccx","mcx","swap","qxor","qexch"]:return set()
+            rows.append((inst,op,args,tuple(sorted(set(controls+tuple(own))))))
         versions=WireVersions();intervals={}
         parts=[b for group in fn.groups[:3] for n,ty,role in group for b in wire(n,env)]
         parts += [Bundle(identity,1,cls,index) for identity,index,cls in controls]
@@ -2610,18 +2641,37 @@ class Source:
                 else:merged.append((lo,hi))
             versions.ranges[identity]=tuple((lo,hi,0,False) for lo,hi in merged)
         history={};pairs=set();serial=0
-        for inst,a,joined in reversed(rows) if adjoint else rows:
-            callee=a[0].removeprefix("@");child=self.obj.functions[callee]
-            outputs=wire([a[3],a[4]],env)
-            reads=wire(list_operand(a[2])+list_operand(a[5]),env)+[Bundle(identity,1,cls,index) for identity,index,cls in joined]
-            actuals=list_operand(a[6]);types=child.groups[4]
-            identities=self.token_context(env,[a[1]]+[n for (name,ty,role),n in zip(types,actuals) if ty=="token"])
+        for inst,op,a,joined in reversed(rows) if adjoint else rows:
             geometry=lambda ws:tuple((b.identity,b.offset,b.width) for b in ws)
-            key=(callee,geometry(outputs),geometry(reads),jcs([env[n] for n in actuals]),identities)
+            if op=="oracle_call":
+                require(len(a)==7,"oracle_call needs token, inputs, target, fault, memory and argument groups")
+                callee=a[0].removeprefix("@");child=self.obj.functions[callee]
+                outputs=wire([a[3],a[4]],env)
+                reads=wire(list_operand(a[2])+list_operand(a[5]),env)
+                actuals=list_operand(a[6]);types=child.groups[4]
+                require(len(actuals)==len(types) and all(n in env for n in actuals),"oracle call classical argument arity/binding")
+                identities=self.token_context(env,[a[1]]+[n for (name,ty,role),n in zip(types,actuals) if ty=="token"])
+                binding=(callee,jcs([env[n] for n in actuals]),identities)
+            else:
+                if op in ["qxor","qexch"]:
+                    require(len(a)==2,"wire operation arity")
+                    if op=="qexch":reads=[];outputs=wire(a,env)
+                    else:reads=wire(a[0],env);outputs=wire(a[1],env)
+                else:
+                    ws=wire([list_operand(n) if n.startswith("(") else n for n in a],env)
+                    require(ws and all(b.width>0 for b in ws),"gate has no wire operands")
+                    if op=="swap":reads=[];outputs=ws
+                    else:
+                        outputs=[ws[-1].bit(ws[-1].width-1)]
+                        reads=ws[:-1]+([ws[-1].slice(0,ws[-1].width-1)] if ws[-1].width>1 else [])
+                binding=()
+            reads += [Bundle(identity,1,cls,index) for identity,index,cls in joined]
+            key=(op,geometry(outputs),geometry(reads),binding)
             before=versions.capture(outputs);inputs=versions.capture(reads)
             entry=history.get((key,inputs,before))
             if entry is not None:
-                versions.restore(entry);pairs.add((inst.block,inst.ordinal))
+                versions.restore(entry)
+                if op=="oracle_call":pairs.add((inst.block,inst.ordinal))
             else:
                 serial+=1;versions.assign(outputs,serial,False)
                 history[(key,inputs,versions.capture(outputs))]=before
@@ -3908,6 +3958,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
         admission_catalog.ledger=Admission(Schedule(effective_schedule,obj,region))
         admission_controls=tuple(("inherited",i,admission_catalog.default_class) for i in range(inherited_controls))
         Source(obj,target,admission_catalog).region(region,args,budget,controls=admission_controls,token_context=root_token_context)
+        admission_catalog.ledger.schedule.validate_call_domains(admission_catalog.call_domains)
     ledger=None
     default_share=F(0)
     finite_capacity=any(c["capacity"]!="unbounded" for c in target.doc["classes"].values())
@@ -3987,6 +4038,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
             require(ledger.error<=accuracy,"E_SCHEDULE_INFEASIBLE: achieved error exceeds request accuracy")
         if accuracy and ledger is None:require(p.error<=accuracy,"E_SCHEDULE_INFEASIBLE: achieved error exceeds request accuracy")
         steps = None
+    if ledger is not None:ledger.schedule.validate_call_domains(catalog.call_domains)
     rows=ledger.finish() if ledger is not None else p.resources(target,interface)
     for cls,desc in target.doc["classes"].items():
         peak = rows.get("peak_qubits["+escape(cls)+"]",0)
@@ -4045,6 +4097,42 @@ class Certificate:
     def budget(cls,value):
         require(len(cls.array(value))==4,"K13: budget needs four components")
         for part in value:unsigned(part)
+
+    @classmethod
+    def inverse_pair(cls,pair,token_order=None):
+        keys(pair,["g","ginv","claim","budget"],["arg_tokens","token_aliases"],"inverse pair")
+        cls.hash(pair["g"]);cls.hash(pair["ginv"]);cls.budget(pair["budget"]);cls.count(pair["claim"])
+        tokens=pair.get("arg_tokens",{})
+        require(isinstance(tokens,dict),"arg_tokens must be object")
+        for name,token in tokens.items():cls.name(name);cls.budget(token)
+        if token_order is not None:
+            require(len(token_order)==len(tokens) and set(token_order)==set(tokens),"inverse pair token argument inventory mismatch")
+        if "token_aliases" in pair:
+            # With several token arguments, a standalone certificate does not
+            # supply formal declaration order. Defer tuple checks until linked;
+            # JCS dictionary-key order is not signature order.
+            values=([tokens[n] for n in token_order] if token_order is not None else list(tokens.values()) if len(tokens)<=1 else [None]*len(tokens))
+            validate_token_aliases(pair["token_aliases"],[pair["budget"]]+values)
+
+    @classmethod
+    def inverse_pair_context_covers(cls,pair,budget,argument_tokens,token_aliases):
+        """K4/K91 token metadata coverage, not proof or args-domain checking.
+
+        The caller supplies token arguments in callee declaration order. A
+        successful result discharges only tuple/identity/budget conditions.
+        """
+        cls.budget(budget)
+        require(isinstance(argument_tokens,dict),"argument_tokens must be an ordered mapping")
+        for name,token in argument_tokens.items():cls.name(name);cls.budget(token)
+        validate_token_aliases(token_aliases,[budget]+list(argument_tokens.values()))
+        cls.inverse_pair(pair)
+        if set(pair.get("arg_tokens",{}))!=set(argument_tokens):return False
+        cls.inverse_pair(pair,list(argument_tokens))
+        if argument_tokens:require("token_aliases" in pair,"E_ARG: inverse pair requires token_aliases upgrade")
+        aliases=pair.get("token_aliases",[0])
+        return (aliases==token_aliases and
+                all(unsigned(a)<=unsigned(b) for a,b in zip(pair["budget"],budget)) and
+                all(tuple(map(unsigned,pair["arg_tokens"][n]))==tuple(map(unsigned,value)) for n,value in argument_tokens.items()))
 
     @classmethod
     def invocation(cls,value,uniform=False,kind=None):
@@ -4255,11 +4343,7 @@ class Certificate:
             indices=[verification["oracle"]] if verification["oracle"] is not None else []
             for group in ["borrow_frames","unitary","channel"]: indices+=cls.array(verification[group])
             for pair in cls.array(verification["inverse_pairs"]):
-                keys(pair,["g","ginv","claim","budget"],["arg_tokens"],"inverse pair")
-                cls.hash(pair["g"]);cls.hash(pair["ginv"]);cls.budget(pair["budget"])
-                tokens=pair.get("arg_tokens",{})
-                require(isinstance(tokens,dict),"arg_tokens must be object")
-                for name,token in tokens.items():cls.name(name);cls.budget(token)
+                cls.inverse_pair(pair)
                 indices.append(pair["claim"])
             for i in indices: require(cls.count(i)<len(claims),"claim index outside claims array")
             fault=verification["fault_rate"]

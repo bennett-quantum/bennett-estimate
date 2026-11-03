@@ -18,7 +18,7 @@ task tracker. Durable implementation work is `bennett-estimate-bph` and children
 | EST-10 Structured memory, predicates, loops and calls preserve full-domain costs | ISA-4.3 through ISA-4.7, K19–K28, K62, K77 | Primitive source adapters, basic controlled action calls and catalog constructor algebra present; trillion-iteration qloop takes constant summary work. A 2^20-cell source lookup uses fewer than 1000 constructor visits; small dispatch summaries equal literal traversal. Action/oracle calls retain token channels and invocation paths; qinplace uses the published private allocation/release sequence. K62 primitive/call source replacements and intrinsic copy/load/oracle-uncall recompute are present. Raw call reversal retains forward ordinals; nested oracle calls use explicit per-call tuples. Complete adjoint and K81 release-ended/call cleanup partitioning remain `.1`/`.2`. |
 | EST-11 Consume all 219 published ref recipes without exchanging implementation code | ISA-11.1-P1 through ISA-11.1-P29 | Byte-identical public JSON is vendored and envelope hash checked. Generic constructors are interpreted as cost summaries. K25 record fields are captured/validated even in unvisited arrays; immutable integer/wire records reuse validation only for matching canonical schemas and outer shape bindings. Mutated/incompatible schemas revalidate. Nested inverse scratch identity is checked. Literal and image summaries preserve exact set-bit/class costs. This does not claim each recipe/source binding has an instantiated conformance witness. |
 | EST-12 Match schedules verbatim: paths, specificity, ties, per-kind defaults, stages and placements | ISA-11; K55, K63, K64, K65, K80, K81 | Default empty schedule is explicit and hashed. Supported action/oracle paths consume matching nonempty schedules and topology. Selectors resolve independently per kind with ties; K64 support points and inverse-step forward ordinals are tested. K55 known Q-domain ties are checked at admission before target realization; root-token-forwarded nested oracle domains retain concrete-time checks. CC/R budget propagation, topology/nested-schedule replay and K81 cleanup partitioning remain `.2`; potentially applicable unimplemented replay paths report pending instead of silently emitting exact costs. |
-| EST-13 Bind complete resolved arguments and each token's own tuple | ISA-10.1/K12; ISA-12.3/K13; K77 | Typed argument range/arity/hash encoding implemented. CLI prints explicit invocation; unused i128/f64/token bindings preserve exact values and hashes without adding quantum wires. Read pseudo-location binding is a demonstrated contract gap (EST-SOURCE-01); complete nested token channels remain `.1`. |
+| EST-13 Bind complete resolved arguments and each token's own tuple/identity | ISA-10.1/K12; ISA-12.3/K13; K77, K91 | Typed argument range/arity/hash encoding implemented. CLI prints explicit invocation; unused i128/f64/token bindings preserve exact values and hashes without adding quantum wires. Additive explicit token_aliases validates canonical partitions and preserves identity through CC/Q calls, fixed bindings, captures, qinplace and reversal. Only oracles prepend a primary token. Read pseudo-location binding remains EST-SOURCE-01. Strict legacy cutover and complete certificate-context adoption remain `.5`. |
 | EST-14 Report all scalar resource rows, escaped per-class zero rows, exact fractions and upward decimals | ISA-10.1/K12 | Implemented for supported cost paths. Independent tests cover 1/3, 2/3, terminating values, large/small exponents and percent escaping. Never compare rounded displays for admission. |
 | EST-15 Read typed certificate frames, claims and estimate rows; distinguish reading from proof | ISA-9.4, ISA-12.1, ISA-12.2, ISA-12.3/K12/K13 | Reader checks the published controlled-action certificate, nested invocation/claim/domain/table/sampler/structural/interval schemas, verification indices/fault counts, cleanup/error/composition fields, frame expressions/ranges and reduced exact-resource/display rows. Positional control/borrow labels and unbounded legal widths/counts are preserved; producer labels remain requests. Full domain resolution needs the linked object. B5 descriptors reconstruct every streamed lifetime, and root certificate frame widths/classes/states/order are independently cross-checked. Complete nested domain/claim validation and correctness checking remain `.2`. No proof label is inferred from a producer's resource map. |
 | EST-16 Bind/rebuild executable estimate certificates, complete frames and contexts | ISA-10.1/K12 certificate binding; ISA-12.1 invocation contexts | K12 resource cross-check entry exists for supported estimates; Streamed root frame and nested invocation records are produced; K12 resource certificate output enriches supplied, identically bound proof metadata and independently rechecks rows/frame. Nested common-context/error composition and independent correctness evidence remain `.2`. CLI is not a complete launch-ABI implementation. |
@@ -90,10 +90,23 @@ and occupancy, so one must not be silently chosen as a published estimate.
 Exact text and witnesses are queued for `bennett-isa-spec` in
 `.tmp/sol-estimate/cross-repo-beads.md` under COMMON rule 14, with local tracking
 `bennett-estimate-bph.4`. The sandbox has read-only access to sibling databases.
-The proposed policies remain unadopted pending upstream decision. EST-CONTEXT-03
-(local `.5`) also records the alias relation absent from tuple-only token argument
-encoding. The CLI marks these requests pending evidence with their complete request
-bindings and no resource rows; independent estimates continue.
+The source proposals remain unadopted pending upstream decision. K91 now resolves
+EST-CONTEXT-03; local `.5` tracks adoption of its published token equality contract.
+SPEC_VERSIONS.toml pins this additive partial feature separately. Explicit
+partitions preserve identities and affect schedule hashes without changing
+params_hash or object/catalog bytes. Legacy tuple-only behavior retains the base
+profile until strict cutover. Source-gap requests retain complete bindings and
+no resource rows; independent estimates continue.
+
+K81 independent oracle-call pairs are implemented for flat oracle-only action
+bodies with explicit token contexts. Current joint output versions, read/control
+versions and token identities determine the source partition before expansion.
+Reverse retains written paths; recompute retains caller targets and assigns fresh
+T/F compute/XOR/uncompute to the carrier, with separate call indices0/1. Source
+adjoints and raw inverses have distinct path behavior. Focused tests check all
+resource coordinates, carrier ties before target costs and K63 actual call domains.
+Release-ended chains, action-call prehistory, general source families and window
+proofs remain required by EST-10/12; this family does not complete the partition.
 
 The pinned published text includes K82. Typed recipes are closed; the 54
 named-interface recipes import only their lexical free wire names. Direct

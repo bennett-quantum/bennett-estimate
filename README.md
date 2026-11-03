@@ -28,6 +28,15 @@ No missing argument becomes zero. `--region` is required for multiple entries.
 The CLI's explicit default budget is `0,0,0,0`; its variant is `forward` and
 inherited control count is zero. Those values appear in the result.
 
+`--token-aliases '[0,0]'` supplies the published K91 equality partition.
+Oracle contexts list their primary token followed by token arguments; actions
+and CC/R entries list only token arguments. Equal labels require equal tuples;
+distinct labels preserve distinct identities even when tuples agree. Nested
+calls, fixed bindings, captures and reversal retain those identities. This
+additive feature is pinned separately in SPEC_VERSIONS.toml and remains partial:
+strict rejection of every legacy token request and complete certificate contexts
+still require implementation. Legacy requests retain the base pinned profile.
+
 `--epsilon` accepts exact decimal accuracy text. Default shares use exact
 fractions, including nonterminating values such as 1/30. Matching action and
 supported oracle schedules are consumed verbatim, with per-kind selector
@@ -66,7 +75,8 @@ wire aliases that defeat index renaming use literal traversal.
 
 Seven complete CC program differentials agree with the VM on all resource
 rows, source steps and terminal status: a paired action, slice/concat register
-views, a stale-alias fault and a block-image effect. CC/R register accounting includes dynamic widths,
+views, a stale-alias fault, block-image effects, disjoint register inverses,
+quantum segment uncall and nested classical uncall. CC/R register accounting includes dynamic widths,
 aliases, opaque IDs, slices/concat and source-frame history reversal, including quantum calls. Reversed classical
 frames are charged separately from forward source steps. Measurement and generic
 cleanliness evidence remain required.
@@ -83,6 +93,14 @@ its own resolved token. Unused resolved arguments retain their typed invocation
 bindings. Remaining lifted memory rows and published source-binding gaps, complete cleanup
 partitioning, remaining register/effect histories and certificate proof checking still require work.
 Unsupported paths fail explicitly; they remain requirements.
+
+Flat actions made entirely of oracle calls now match joint source occurrences
+using actual token identities, current target versions and read/control versions.
+Their independent cleanup carriers support reverse and fresh T/F recompute,
+including nonzero caller targets. Fresh calls have separate occurrence indices;
+source adjoints form new pairs while raw inverse retains forward paths. General
+release-ended chains, action-call histories and cleanup window validation remain
+required; this family does not complete K81.
 
 CC/R register placement on topology targets and potentially applicable nested
 quantum schedules still require replay integration. Those paths report pending
