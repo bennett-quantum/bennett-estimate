@@ -738,6 +738,17 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(invalid.returncode,1);self.assertEqual(invalid.stdout,"")
         self.assertIn("E_ARG",invalid.stderr)
 
+    def test_classical_revoked_token_fixture_admission_and_failed_prefix(self):
+        vm=Path(os.environ.get("BENNETT_VM_BIN",ROOT.parent/"bennett-vm/target/debug/bennett-vm"))
+        path=ROOT/"examples/revoked-token-program.bisa";obj=e.Object.read(path.read_text())
+        checked=json.loads(subprocess.run([str(vm),"check",str(path)],capture_output=True,text=True,timeout=30,check=True).stdout)
+        self.assertEqual(checked["object_hash"],obj.hash)
+        self.assertEqual(checked["symbols"]["main"]["closure_hash"],obj.identities(closure=True)["main"])
+        t=e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+        result=e.estimate(obj,t,"main",[],["0"]*4)
+        self.assertEqual((result["classical_status"],result["classical_steps"],result["reversed_classical_steps"]),("FAILED","10","4"))
+        self.assertEqual(result["resources"],{"gate_count":"0","peak_qubits[data]":"6","qubit_second[data]":"9","time":"14"})
+
     def test_vm_and_reader_admit_published_dynamic_register_width_form(self):
         vm=Path(os.environ.get("BENNETT_VM_BIN",ROOT.parent/"bennett-vm/target/debug/bennett-vm"))
         path=ROOT/"tests/fixtures/dynamic-qreg-width.bisa"
