@@ -1,0 +1,26 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"8bfc2e271aff79361bac1ec258d461f58d212d89072d924c5b870df7ada03510","kind":"r","name":"mint","signature":{"abi":"0.9","kind":"r","params":[],"results":["token"],"tier":"r"}},"1":{"interface_hash":"90d3b68882ac87b05414d6edc48f1130a0864d491fb86ae003069bbb3c1dd5fb","kind":"oracle","name":"origin","signature":{"abi":"0.9","args":[],"fault":4,"in":[1],"kind":"oracle","mem":[],"tgt":1,"tier":"q"}},"2":{"interface_hash":"79b147e8928cc825764a24ec0207d97596126c0196f067d7a42966ed9678a28a","kind":"cc","name":"main","signature":{"abi":"0.9","kind":"cc","params":[],"results":[],"tier":"cc"}}}
+
+section functions
+fn cc @main () () () () ()
+^entry():
+tk = call @mint
+br ^next(tk)
+^next(alias:token):
+uncall @mint () (tk)
+x = qreg.new data 1
+t = qreg.new data 1
+f = qreg.new data 4
+oracle_call @origin alias (x) t f () ()
+ret
+fn r @mint () (tk:token) () () ()
+^entry():
+z = const.i64 0
+tk = budget.mint @origin z z z z
+ret tk
+oracle @origin (x:wire in) (t:wire) (f:wire[4]) () ()
+regs {  }
+^entry():
+lift.retval x

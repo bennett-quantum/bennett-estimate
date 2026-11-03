@@ -269,7 +269,7 @@ class Accounting(unittest.TestCase):
     def test_reader_enforces_the_published_static_register_view_rules(self):
         cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
         identity={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
-        child="\nperm_action @identity (t:wire) () () () ()\n^entry():"
+        child="\nperm_action @identity (t:wire) () () () ()\n^entry():\nx t\nx t"
         prefix="fn cc @root () () () () ()\n^entry():\nq = qreg.new data 2\ns = qreg.slice q 0 1\n"
         cases=["n = qreg.width s\naction_call @identity (s) () () ()\nret", "n = qreg.width q\naction_call @identity (s) () () ()\nret", "ret", "br ^work(s)\n^work(v:qreg[1]):\naction_call @identity (v) () () ()\nret", "action_call @identity (s) () () ()\naction_call @identity (s) () () ()\nret", "br ^work()\n^work():\nbr ^end()\n^end():\nret"]
         for body in cases:
@@ -277,7 +277,7 @@ class Accounting(unittest.TestCase):
                 make_program(prefix+body+child,{"root":cc,"identity":identity})
         obj=make_program(prefix+"br ^work()\n^work():\naction_call @identity (s) () () ()\nqreg.free q\nret"+child,{"root":cc,"identity":identity})
         result=e.estimate(obj,target(),"root",[],["0"]*4)
-        self.assertEqual((result["classical_steps"],result["resources"]["qubit_second[data]"]),("6","8"))
+        self.assertEqual((result["classical_steps"],result["resources"]["qubit_second[data]"]),("6","12"))
 
     def test_cc_control_views_are_consumed_once_by_wrapped_region_calls(self):
         cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
@@ -435,7 +435,7 @@ class Accounting(unittest.TestCase):
         mint={**cc,"tier":"r","kind":"r","results":["token"]}
         oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
         action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":["token"],"bounds":[]}
-        template="fn cc @root () () () () ()\n^entry():\ntk = call @mint\nbr ^next(tk)\n^next(alias:token):\n{undo}x = qreg.new data 1\nt = qreg.new data 1\nf = qreg.new data 4\n{call}\nret\nfn r @mint () (tk:token) () () ()\n^entry():\nz = const.i64 0\ntk = budget.mint @origin z z z z\nret tk\noracle @origin (x:wire in) (t:wire) (f:wire[4]) () ()\nregs {{  }}\n^entry():\nlift.retval x\noracle @other (x:wire in) (t:wire) (f:wire[4]) () ()\nregs {{  }}\n^entry():\nlift.retval x\nperm_action @sink () () () (tk:token) ()\n^entry():"
+        template="fn cc @root () () () () ()\n^entry():\ntk = call @mint\nbr ^next(tk)\n^next(alias:token):\n{undo}x = qreg.new data 1\nt = qreg.new data 1\nf = qreg.new data 4\n{call}\nret\nfn r @mint () (tk:token) () () ()\n^entry():\nz = const.i64 0\ntk = budget.mint @origin z z z z\nret tk\noracle @origin (x:wire in) (t:wire) (f:wire[4]) () ()\nregs {{  }}\n^entry():\nlift.retval x\noracle @other (x:wire in) (t:wire) (f:wire[4]) () ()\nregs {{  }}\n^entry():\nlift.retval x\nperm_action @sink () () () (tk:token) ()\n^entry():\nscratch = qalloc any 1\nqfree scratch"
         signatures={"root":cc,"mint":mint,"origin":oracle,"other":oracle,"sink":action}
         for call in ["oracle_call @other alias (x) t f () ()","action_call @sink () () () (alias)"]:
             obj=make_program(template.format(undo="uncall @mint () (tk)\n",call=call),signatures)
@@ -582,6 +582,17 @@ class Accounting(unittest.TestCase):
         with self.assertRaisesRegex(e.ContractError,"changed its tuple"):
             source.region("root",[["2","0","0","0"]],["0"]*4,token_context=("argument",))
 
+    def test_classical_step_bound_cannot_relabel_a_quantum_entry(self):
+        obj=e.Object.read((ROOT/"examples/native-pair-program.bisa").read_text())
+        with self.assertRaisesRegex(e.ContractError,"E_ARG.*classical.*CC/R"):
+            e.estimate(obj,target(),"pair",[],["0"]*4,step_bound=1)
+
+    def test_reader_rejects_empty_blocks_in_actions_as_the_text_grammar_requires(self):
+        signature={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        for body in ["^entry():", "^entry():\nx q\n^empty():"]:
+            with self.subTest(body=body),self.assertRaisesRegex(e.ContractError,"§16.2.*instruction"):
+                make_object("perm_action @root (q:wire) () () () ()\n"+body,signature)
+
     def test_cc_register_program_matches_complete_native_vm_ledger(self):
         obj=e.Object.read((ROOT/"examples/native-pair-program.bisa").read_text())
         result=e.estimate(obj,target(),"main",[],["0"]*4)
@@ -627,7 +638,7 @@ class Accounting(unittest.TestCase):
         self.assertEqual(result["resources"],{"gate_count":"2","peak_qubits[data]":"3","qubit_second[data]":"23","time":"10"})
         # A dynamic width mismatch is a terminal failed prefix, before the call.
         dynamic={**root,"params":["i64"]}
-        obj=make_program("fn r @root (n:i64) () () () ()\n^entry():\nq = qreg.new data n\naction_call @identity (q) () () ()\nret\nperm_action @identity (x:wire) () () () ()\n^entry():",{"root":dynamic,"identity":identity})
+        obj=make_program("fn r @root (n:i64) () () () ()\n^entry():\nq = qreg.new data n\naction_call @identity (q) () () ()\nret\nperm_action @identity (x:wire) () () () ()\n^entry():\nx x\nx x",{"root":dynamic,"identity":identity})
         result=e.estimate(obj,target(),"root",["2"],["0"]*4)
         self.assertEqual((result["classical_steps"],result["gates"]),("2",{}))
         self.assertEqual(result["resources"]["qubit_second[data]"],"2")

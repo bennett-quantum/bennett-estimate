@@ -1465,6 +1465,7 @@ def parse_function(lines):
                 stack.append((current, inst))
                 current = inst.body
     require(not stack and blocks, "unclosed scope or no blocks")
+    require(all(code for params,code in blocks.values()),"§16.2: every block requires at least one instruction")
     action_ops={"qalloc","qborrow","qfree","qreturn","qcopy","quncopy","qxor","qexch","qinplace","qregion","qload","qunload","qstore","qexchm","qpred","qunpred","qif","qloop","mcx"}
     region_calls={"oracle_call","action_call","adj","ctl"}
     for inst in root:
@@ -3787,6 +3788,7 @@ class Source:
 
 def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=0,step_bound=None,epsilon="0",include_frame=False,token_aliases=None):
     require(region in obj.functions,"unknown entry region")
+    require(step_bound is None or obj.functions[region].kind in ["cc","r"],"E_ARG: classical step bound requires a CC/R entry")
     args=loads(jcs(args));budget=list(budget)
     if token_aliases is not None:
         fn=obj.functions[region]
