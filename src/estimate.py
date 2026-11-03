@@ -2932,6 +2932,19 @@ class Source:
             next_register+=1
             registers[next_register]={"parts":tuple(parts),"state":"live","parent":parent}
             return (RegisterRef(next_register),"qreg")
+        def register_snapshot():
+            return ({identity:dict(record) for identity,record in registers.items()},dict(physical),dict(register_states.ranges))
+        def restore_registers(snapshot):
+            old_registers,old_physical,old_states=snapshot
+            profile=Profile()
+            for identity in physical.keys()-old_physical.keys():
+                b=physical[identity];profile=profile.then(space_profile(b.cls,"clean",-b.width))
+            for identity in old_physical.keys()-physical.keys():
+                b=old_physical[identity];profile=profile.then(space_profile(b.cls,"clean",b.width))
+            registers.clear();registers.update({identity:dict(record) for identity,record in old_registers.items()})
+            physical.clear();physical.update(old_physical)
+            register_states.ranges.clear();register_states.ranges.update(old_states)
+            return profile
         def register_width(record):return sum(part.width for part in record["parts"])
         def overlaps(a,b):
             return any(x.identity==y.identity and x.offset<y.offset+y.width and y.offset<x.offset+x.width for x in a for y in b)
@@ -2984,9 +2997,11 @@ class Source:
             image = bytes.fromhex(self.obj.sections["data"][g["image"]])
             allocations[base] = (len(image),True)
             memory.update({base+i:b for i,b in enumerate(image)})
-        atop=len(allocations);history=[];segments=[];version_serial=0
+        atop=len(allocations);history=[];segments=[];version_serial=0;reversed_steps=0
+        def valid_token(value):
+            return not isinstance(value,MintedToken) or history[value.identity]["active"]
         def execute(function, values):
-            nonlocal bump,clock,atop,version_serial
+            nonlocal bump,clock,atop,version_serial,reversed_steps
             env = dict(values)
             versions={n:0 for n in env}
             def put(n,value):
@@ -3027,6 +3042,7 @@ class Source:
                     op,a = inst.op,inst.args
                     pure=op in ["br","add","sub","mul","and","or","xor","shl","lshr","ashr","udiv","urem","sdiv","srem","select","inttoptr","qreg.width","qreg.id","qreg.from_id"] or op.startswith(("const.i","icmp.","load.i","zext.i","sext.i","trunc.i","ptrtoint.i"))
                     frame_index=len(history);history.append({"active":True,"pure":pure,"marker":op=="uncall"})
+                    if op in ["qreg.new","qreg.free","qreg.slice","qreg.concat","action_call","oracle_call","adj","ctl"]:history[frame_index]["registers"]=register_snapshot()
                     p = p.then(Profile(time=rational(self.target.doc["capabilities"]["classical_step_time"])))
                     steps += 1
                     result = None
@@ -3076,14 +3092,14 @@ class Source:
                         actuals=[get(actual) for actual in a[1:]]
                         if not all(transfer(ty,value) for (n,ty,r),value in zip(params,actuals)):return p,steps,[],True
                         before=(dict(memory),dict(allocations),bump,clock,atop,dict(blocks))
-                        before_registers=({identity:dict(record) for identity,record in registers.items()},dict(physical),dict(register_states.ranges))
+                        before_registers=register_snapshot()
                         previous={n:(env.get(n),versions.get(n)) for n in inst.lhs}
                         cp,cs,results,failed=execute(callee,{n:value for (n,ty,r),value in zip(params,actuals)})
                         p=p.then(cp);steps+=cs
                         if failed: return p,steps,[],True
                         require(len(results)==len(inst.lhs),"call result arity")
                         for n,value in zip(inst.lhs,results):put(n,value)
-                        segments.append({"name":callee.name,"args":actuals,"results":results,"start":frame_index,"end":len(history),"active":True,"before":before,"before_registers":before_registers,"quantum_gates":bool(cp.gates),"env":env,"versions":versions,"previous":previous,"produced":{n:versions[n] for n in inst.lhs}})
+                        segments.append({"name":callee.name,"args":actuals,"results":results,"start":frame_index,"end":len(history),"active":True,"before":before,"before_registers":before_registers,"env":env,"versions":versions,"previous":previous,"produced":{n:versions[n] for n in inst.lhs}})
                         continue
                     elif op=="uncall":
                         require(len(a)==3,"uncall needs argument/result lists")
@@ -3092,15 +3108,13 @@ class Source:
                         segment=max(pending,key=lambda s:s["end"])
                         arguments=[get(n) for n in list_operand(a[1])];results=[get(n) for n in list_operand(a[2])]
                         if segment["name"]!=a[0].removeprefix("@") or any(f["active"] and not f["pure"] and not f["marker"] for f in history[segment["end"]:frame_index]) or not equal_values(segment["args"],arguments) or not equal_values(segment["results"],results):return p,steps,[],True
-                        require(not segment["quantum_gates"],"quantum segment-uncall reversal costs remain pending; no exact estimate emitted")
-                        old_registers,old_physical,old_states=segment["before_registers"]
-                        for identity in physical.keys()-old_physical.keys():
-                            b=physical[identity];p=p.then(space_profile(b.cls,"clean",-b.width))
-                        for identity in old_physical.keys()-physical.keys():
-                            b=old_physical[identity];p=p.then(space_profile(b.cls,"clean",b.width))
-                        registers.clear();registers.update({identity:dict(record) for identity,record in old_registers.items()})
-                        physical.clear();physical.update(old_physical)
-                        register_states.ranges.clear();register_states.ranges.update(old_states)
+                        for frame in reversed(history[segment["start"]:segment["end"]]):
+                            if not frame["active"] or frame["marker"]:continue
+                            p=p.then(Profile(time=rational(self.target.doc["capabilities"]["classical_step_time"])));reversed_steps+=1
+                            if "inverse" in frame:p=p.then(frame["inverse"]())
+                            if "registers" in frame:p=p.then(restore_registers(frame["registers"]))
+                            frame["active"]=False
+                        p=p.then(restore_registers(segment["before_registers"]))
                         old_memory,old_allocations,bump,clock,atop,old_blocks=segment["before"]
                         memory.clear();memory.update(old_memory);allocations.clear();allocations.update(old_allocations)
                         blocks.clear();blocks.update(old_blocks)
@@ -3109,7 +3123,6 @@ class Source:
                             value,prior_version=segment["previous"][n]
                             if prior_version is None:segment["env"].pop(n,None);segment["versions"].pop(n,None)
                             else:segment["env"][n]=value;segment["versions"][n]=prior_version
-                        for frame in history[segment["start"]:segment["end"]]:frame["active"]=False
                         for child in segments:
                             if segment["start"]<=child["start"] and child["end"]<=segment["end"]:child["active"]=False
                     elif op=="alloc":
@@ -3148,6 +3161,7 @@ class Source:
                         result=(MintedToken(frame_index,tuple(token)),0)
                     elif op=="qreg.new":
                         cls,n=a;size=unsigned64(n,1)
+                        require(not size or "topology" not in self.target.doc,"CC/R register topology placement remains pending; no exact estimate emitted")
                         choices=sorted(self.target.doc["classes"],key=lambda name:name.encode("utf-16-be")) if cls=="any" else [cls]
                         require(all(c in self.target.doc["classes"] for c in choices),"unknown register class")
                         def available(c):
@@ -3214,6 +3228,7 @@ class Source:
                         if call_op=="action_call":actual_groups=[list_operand(x) for x in actual[1:]];tuple_=["0"]*4
                         else:
                             token,token_width=get(actual[1]);require(token_width==0,"oracle invocation requires token")
+                            if not valid_token(token):return p,steps,[],True
                             tuple_=list(token.budget) if isinstance(token,MintedToken) else list(token)
                             actual_groups=[list_operand(actual[2]),[actual[3]],[actual[4]],list_operand(actual[5]),list_operand(actual[6])]
                         groups=child.groups[:5] if child.kind=="oracle" else child.groups[:4]
@@ -3230,12 +3245,24 @@ class Source:
                                 slots.append((parts,readonly));records.append((record,readonly));interface[name]=list(parts)
                         for (name,ty,role),argument in zip(groups[-1],actual_groups[-1]):
                             value,w=get(argument)
+                            if ty=="token" and (w!=0 or not valid_token(value)):return p,steps,[],True
                             encoded.append(list(value.budget) if isinstance(value,MintedToken) else value if ty in ["f64","token"] else str(value))
                         call_arguments=[get(argument) for argument in actual_groups[-1]]
                         if call_op=="oracle_call":call_arguments.append((token,token_width))
                         controls=tuple(bit for b in controlled for bit in bits([b]))
+                        candidate=self.obj.sections.get("schedule",{})
+                        if candidate.get("entries") or "interface_vertices" in candidate:
+                            bound=candidate["bindings"]
+                            known={"region":child.name,"target_hash":self.target.hash,"params_hash":digest(jcs(encoded)),"inherited_controls":len(set((bit[0],bit[1]) for bit in controls))}
+                            matches=all(bound.get(key)==value for key,value in known.items())
+                            matches=matches and [integer(n,0) for n in bound["budget"]]==[integer(n,0) for n in tuple_] and decimal_value(bound["epsilon"])==0
+                            if matches:matches=bound["closure_hash"]==self.obj.identities(closure=True)[child.name]
+                            require(not matches,"CC/R nested quantum schedule replay remains pending for these invocation bindings")
                         cp=self.region(child.name,encoded,tuple_,interface,controls,source_adjoint)
                         p=p.then(cp)
+                        def reverse_region(name=child.name,values=list(encoded),budget=list(tuple_),bindings=dict(interface),control_context=controls,adjoint=source_adjoint):
+                            return self.region(name,values,budget,bindings,control_context,adjoint,raw_inverse=True)
+                        history[frame_index]["inverse"]=reverse_region
                         identity=child.kind in ["action","perm_action"] and identity_body(child)
                         # Source-call occurrences retain joint entry versions.
                         # Only a matching inverse on every touched allocation
@@ -3284,6 +3311,7 @@ class Source:
                 if block is None:return p,steps,[],True
         p,steps,_,failed=execute(fn,initial)
         self.classical_status="FAILED" if failed else "COMPLETED"
+        self.reversed_classical_steps=reversed_steps
         return p,steps
 
     @staticmethod
@@ -3761,7 +3789,8 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
                 require(f.kind in ["cc","r"],"step-only classical bound cannot omit quantum regions")
                 require(all(i.op in classical_ops or i.op.startswith(("const.i","icmp.","load.i","store.i","zext.i","sext.i","trunc.i","ptrtoint.i")) for i in f.code),"step-only bound cannot omit quantum/register operations")
             steps=integer(step_bound,0)
-            p=Profile(time=rational(target.doc["capabilities"]["classical_step_time"])*steps)
+            reversals=any(i.op=="uncall" for name in reachable for i in obj.functions[name].code)
+            p=Profile(time=rational(target.doc["capabilities"]["classical_step_time"])*steps*(2 if reversals else 1))
         interface = {}
     else:
         controls = tuple(("inherited",i,source.cls) for i in range(inherited_controls))
@@ -3822,8 +3851,11 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
             "error_bound":str(ledger.error if ledger is not None else p.error),"summary_operations":catalog.visits}
     if step_bound is not None:
         result["bound_assumptions"]=[f"classical execution terminates within {steps} source instructions, including callees"]
+        if reversals:result["bound_assumptions"].append("each source frame is reversed at most once; at most twice the forward instruction bound is charged")
         result["rational_upper_bounds"]=result.pop("exact_resources")
-    elif fn.kind in ["cc","r"]:result["classical_status"]=source.classical_status
+    elif fn.kind in ["cc","r"]:
+        result["classical_status"]=source.classical_status
+        result["reversed_classical_steps"]=str(source.reversed_classical_steps)
     if fn.kind=="oracle":result["padded_steps"]={"forward":budget[0],"inverse":budget[0]}
     if ledger is not None:
         result["resolved_default_epsilon_share"]={"numerator":str(ledger.default_share.numerator),"denominator":str(ledger.default_share.denominator)}

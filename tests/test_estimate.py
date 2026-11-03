@@ -468,10 +468,11 @@ class Objects(unittest.TestCase):
     def test_rung3_nested_uncall_and_impure_fault_prefix(self):
         obj=e.Object.read((ROOT.parent/"bennett-conformance/ladder/rung-3/fixtures/executor-control.bisa").read_text())
         target=e.Target.read((ROOT/"data/classical-step-16.json").read_text())
-        for name,steps in [("nested",11),("impure",8)]:
+        for name,steps,reverse in [("nested",11,5),("impure",8,0)]:
             result=e.estimate(obj,target,name,[],["0"]*4)
             self.assertEqual(result["classical_steps"],str(steps))
-            self.assertEqual(result["resources"]["time"],str(steps))
+            self.assertEqual(result["reversed_classical_steps"],str(reverse))
+            self.assertEqual(result["resources"]["time"],str(steps+reverse))
 
     def test_unused_resolved_parameters_preserve_binding_without_extra_wires(self):
         sig={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":["i128","f64","token"]}
@@ -805,7 +806,8 @@ class CommandLine(unittest.TestCase):
         self.assertEqual((native["vm_native_gate_count"],native["estimate_native_gate_count"]),("8","8"))
         self.assertEqual((native["vm_program_time"],native["vm_classical_steps"],native["vm_nonclassical_time"],native["estimate_action_time"]),("25",7,"18","18"))
         self.assertEqual((native["estimate_action_occupancy"],native["vm_program_occupancy"],native["space_relation"]),("72","84","action <= program"))
-        self.assertEqual([(r["status"],r["steps"],r["resources"]["time"],r["resources"]["qubit_second[data]"]) for r in report["native_programs"]],[("COMPLETED",7,"25","84"),("COMPLETED",7,"9","20"),("FAILED",5,"5","6"),("COMPLETED",12,"12","0"),("COMPLETED",11,"15","26")])
+        self.assertEqual([(r["status"],r["steps"],r["resources"]["time"],r["resources"]["qubit_second[data]"]) for r in report["native_programs"]],[("COMPLETED",7,"25","84"),("COMPLETED",7,"9","20"),("FAILED",5,"5","6"),("COMPLETED",12,"12","0"),("COMPLETED",11,"15","26"),("COMPLETED",6,"12","8"),("COMPLETED",11,"16","0")])
+        self.assertEqual([r["reversed_classical_steps"] for r in report["native_programs"]],["0","0","0","0","0","4","5"])
         self.assertIn(report["rung2"]["status"],["unavailable","objects_available"])
 
 

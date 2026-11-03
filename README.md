@@ -64,11 +64,12 @@ Tests cover 2^20 physical cells with bounded summary work and compare small
 controlled cases against literal expansion. Scheme workspace remains included;
 wire aliases that defeat index renaming use literal traversal.
 
-Four complete CC program differentials agree with the VM on all resource
+Seven complete CC program differentials agree with the VM on all resource
 rows, source steps and terminal status: a paired action, slice/concat register
 views, a stale-alias fault and a block-image effect. CC/R register accounting includes dynamic widths,
-aliases, opaque IDs, slices/concat and register-only history reversal. Remaining
-measurement, generic cleanliness and quantum segment-reversal paths stay required.
+aliases, opaque IDs, slices/concat and source-frame history reversal, including quantum calls. Reversed classical
+frames are charged separately from forward source steps. Measurement and generic
+cleanliness evidence remain required.
 
 Current source coverage includes structured gates, allocation/borrowing,
 copy/XOR/exchange, predication, loops, local-region images and linear coherent

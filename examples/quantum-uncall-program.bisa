@@ -1,0 +1,19 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"4a97b79c3cf761b842e2fe99bad3888af1a3e612dd609068fbb5ad36a2ba5a95","kind":"cc","name":"main","signature":{"abi":"0.9","kind":"cc","params":[],"results":[],"tier":"cc"}},"1":{"interface_hash":"0d6b0ad044d332d35c0e31952163795742c66316678443291cc375b615181735","kind":"cc","name":"worker","signature":{"abi":"0.9","kind":"cc","params":[],"results":["qreg[1]"],"tier":"cc"}},"2":{"interface_hash":"5a6b2bb51698aae5b30d6d60f45723d4ab992806ae22e12a70eaa99cd567cff8","kind":"perm_action","name":"flip","signature":{"abi":"0.9","args":[],"bounds":[],"in":[],"kind":"perm_action","mem":[],"mut":[1],"tier":"q"}}}
+
+section functions
+fn cc @main () () () () ()
+^entry():
+q = call @worker
+uncall @worker () (q)
+ret
+fn cc @worker () (q:qreg[1]) () () ()
+^entry():
+q = qreg.new data 1
+action_call @flip (q) () () ()
+ret q
+perm_action @flip (q:wire) () () () ()
+^entry():
+x q

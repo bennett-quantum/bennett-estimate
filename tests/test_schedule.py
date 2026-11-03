@@ -243,7 +243,7 @@ class Accounting(unittest.TestCase):
         result=e.estimate(obj,target(),"root",[],["0"]*4)
         self.assertEqual(result["classical_steps"],"18")
         self.assertEqual(result["resources"]["peak_qubits[data]"],"2")
-        self.assertEqual(result["resources"]["qubit_second[data]"],"22")
+        self.assertEqual(result["resources"]["qubit_second[data]"],"26")
 
     def test_reader_checks_register_result_and_operand_arities(self):
         sig={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
@@ -389,8 +389,16 @@ class Accounting(unittest.TestCase):
         with self.assertRaisesRegex(e.ContractError,"inactive wire range"):
             states.capture([e.Bundle(q.identity,1,"data",q.width)])
 
+    def test_nested_uncall_skips_cancelled_register_frames_and_pure_id_queries(self):
+        cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        create={**cc,"results":["qreg[1]"]}
+        code="fn cc @root () () () () ()\n^entry():\ncall @outer\nuncall @outer () ()\nret\nfn cc @outer () () () () ()\n^entry():\nq = call @create\nw = qreg.width q\nuncall @create () (q)\nret\nfn cc @create () (q:qreg[1]) () () ()\n^entry():\nq = qreg.new data 1\nret q"
+        result=e.estimate(make_program(code,{"root":cc,"outer":cc,"create":create}),target(),"root",[],["0"]*4)
+        self.assertEqual((result["classical_steps"],result["reversed_classical_steps"]),("9","6"))
+        self.assertEqual(result["resources"],{"gate_count":"0","peak_qubits[data]":"1","qubit_second[data]":"5","time":"15"})
+
     def test_classical_and_quantum_segment_reversal_charge_active_frames(self):
-        obj=e.Object.read((ROOT/".tmp/sol-estimate/tmp/quantum-uncall.bisa").read_text())
+        obj=e.Object.read((ROOT/"examples/quantum-uncall-program.bisa").read_text())
         result=e.estimate(obj,target(),"main",[],["0"]*4)
         self.assertEqual((result["classical_steps"],result["reversed_classical_steps"]),("6","4"))
         self.assertEqual(result["resources"],{"gate_count":"2","peak_qubits[data]":"1","qubit_second[data]":"8","time":"12"})
@@ -402,6 +410,55 @@ class Accounting(unittest.TestCase):
         bound=e.estimate(obj,target(),"root",[],["0"]*4,step_bound=5)
         self.assertEqual(bound["resources"]["time"],"10")
         self.assertIn("reversed", " ".join(bound["bound_assumptions"]))
+
+    def test_quantum_segment_reversal_uses_adjoint_target_cost_and_lifetime_order(self):
+        obj=e.Object.read((ROOT/"examples/quantum-uncall-program.bisa").read_text())
+        cc=obj.symbol("main")["signature"];worker=obj.symbol("worker")["signature"]
+        phase={**obj.symbol("flip")["signature"],"kind":"action"}
+        code=obj.functions["main"].raw+"\n"+obj.functions["worker"].raw+"\n"+obj.functions["flip"].raw.replace("perm_action @flip","action @flip").replace("x q","t q")
+        obj=make_program(code,{"main":cc,"worker":worker,"flip":phase})
+        doc=e.loads(e.jcs(target().doc))
+        next(g for g in doc["gates"] if g["op"]=="t")["cost"]["time"]=2
+        next(g for g in doc["gates"] if g["op"]=="tdg")["cost"]["time"]=7
+        result=e.estimate(obj,e.Target.read(e.jcs(doc)),"main",[],["0"]*4)
+        self.assertEqual(result["gates"],{"t":"1","tdg":"1"})
+        self.assertEqual(result["resources"],{"gate_count":"2","peak_qubits[data]":"1","qubit_second[data]":"15","time":"19"})
+        for n in [1,1<<40]:
+            cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+            code=f"fn cc @root () () () () ()\n^entry():\ncall @worker\nuncall @worker () ()\nret\nfn cc @worker () () () () ()\n^entry():\nq = qreg.new data {n}\nqreg.free q\nret"
+            result=e.estimate(make_program(code,{"root":cc,"worker":cc}),target(),"root",[],["0"]*4)
+            self.assertEqual((result["classical_steps"],result["reversed_classical_steps"]),("6","4"))
+            self.assertEqual(result["resources"],{"gate_count":"0","peak_qubits[data]":str(n),"qubit_second[data]":str(2*n),"time":"10"})
+
+    def test_classical_minted_token_validity_follows_active_history(self):
+        cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        mint={**cc,"tier":"r","kind":"r","results":["token"]}
+        oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":["token"],"bounds":[]}
+        template="fn cc @root () () () () ()\n^entry():\ntk = call @mint\nbr ^next(tk)\n^next(alias:token):\n{undo}x = qreg.new data 1\nt = qreg.new data 1\nf = qreg.new data 4\n{call}\nret\nfn r @mint () (tk:token) () () ()\n^entry():\nz = const.i64 0\ntk = budget.mint @origin z z z z\nret tk\noracle @origin (x:wire in) (t:wire) (f:wire[4]) () ()\nregs {{  }}\n^entry():\nlift.retval x\noracle @other (x:wire in) (t:wire) (f:wire[4]) () ()\nregs {{  }}\n^entry():\nlift.retval x\nperm_action @sink () () () (tk:token) ()\n^entry():"
+        signatures={"root":cc,"mint":mint,"origin":oracle,"other":oracle,"sink":action}
+        for call in ["oracle_call @other alias (x) t f () ()","action_call @sink () () () (alias)"]:
+            obj=make_program(template.format(undo="uncall @mint () (tk)\n",call=call),signatures)
+            result=e.estimate(obj,target(),"root",[],["0"]*4)
+            self.assertEqual((result["classical_status"],result["classical_steps"],result["reversed_classical_steps"]),("FAILED","10","4"))
+            self.assertEqual(result["resources"],{"gate_count":"0","peak_qubits[data]":"6","qubit_second[data]":"9","time":"14"})
+            live=make_program(template.format(undo="",call=call),signatures)
+            # §5.4 explicitly permits a token minted for another oracle.
+            self.assertEqual(e.estimate(live,target(),"root",[],["0"]*4)["classical_status"],"COMPLETED")
+
+    def test_cc_quantum_replay_does_not_silently_ignore_topology_or_callee_schedule(self):
+        obj=e.Object.read((ROOT/"examples/native-pair-program.bisa").read_text())
+        doc=e.loads(e.jcs(target().doc));doc["topology"]={"vertices":[{"class":"data"} for _ in range(4)],"edges":[]}
+        with self.assertRaisesRegex(e.ContractError,"CC/R.*topology.*pending"):
+            e.estimate(obj,e.Target.read(e.jcs(doc)),"main",[],["0"]*4)
+        action=e.estimate(obj,target(),"pair",[],["0"]*4)
+        root=obj.symbol("pair")["interface_hash"]
+        obj.sections["schedule"]={"bindings":action["effective_schedule"]["bindings"],"entries":[entry("gate",path=[point(root,"entry:0")],realisation="missing-scheme")]}
+        with self.assertRaisesRegex(e.ContractError,"CC/R.*schedule.*pending"):
+            e.estimate(obj,target(),"main",[],["0"]*4)
+        obj.sections["schedule"]["bindings"]={**obj.sections["schedule"]["bindings"],"budget":["1","0","0","0"]}
+        # An unmatched tuple does not select that schedule.
+        self.assertEqual(e.estimate(obj,target(),"main",[],["0"]*4)["resources"]["time"],"25")
 
     def test_cc_register_program_matches_complete_native_vm_ledger(self):
         obj=e.Object.read((ROOT/"examples/native-pair-program.bisa").read_text())
@@ -431,7 +488,7 @@ class Accounting(unittest.TestCase):
         obj=make_program(text,{"root":root,"create":create})
         result=e.estimate(obj,target(),"root",[],["0"]*4)
         self.assertEqual(result["classical_steps"],"6")
-        self.assertEqual(result["resources"],{"gate_count":"0","peak_qubits[data]":"2","qubit_second[data]":"6","time":"6"})
+        self.assertEqual(result["resources"],{"gate_count":"0","peak_qubits[data]":"2","qubit_second[data]":"10","time":"9"})
         echo={**root,"params":["qreg[*]"],"results":["qreg[*]"]}
         obj=make_program("fn cc @root () () () () ()\n^entry():\nq = qreg.new data 2\na = call @echo q\nqreg.free a\nstale = qreg.width q\nret\nfn cc @echo (q:qreg[*]) (r:qreg[*]) () () ()\n^entry():\nret q",{"root":root,"echo":echo})
         result=e.estimate(obj,target(),"root",[],["0"]*4)

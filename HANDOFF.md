@@ -32,12 +32,12 @@ and retain allocation endpoints, so their work can grow with the budget.
 
 CC/R register accounting now covers new/free, aliases, width/id/from_id,
 slice consumption, concat wire order, dynamic widths (including zero), capacity
-fault prefixes, classical-call transfers and register-only uncall snapshots.
+fault prefixes, classical-call transfers and source-history uncall snapshots.
 Ids remain opaque and never reused after reversal; supported equality/zero
 checks and whole64-bit memory round trips retain identity. Joint source-call
 entry versions and sufficient source identity proofs establish cleanliness for
-supported frees. Unproved cleanliness and quantum-gated segment uncall remain
-explicit implementation work. No basis state or gate list is materialised.
+supported frees. Unproved cleanliness remains explicit implementation work. Quantum-gated
+segment uncall charges active classical frames and raw inverse region costs. No basis state or gate list is materialised.
 
 The reader enforces register result/operand arity, the lexical view rule across
 CFG paths, device declarations, data-symbol completeness and whole512-byte
@@ -71,19 +71,19 @@ certificate bindings/rows are rebuilt independently. Certificate output enriches
 supplied, identically bound proof metadata; it does not verify or invent
 correctness/error claims or nested composition.
 
-Verified: headless scripts/pre-push --working-tree exited 0 with 164 Python
-tests across four disjoint cargo groups, 56.04 seconds for tests, plus Rust
-fmt, strict Clippy and shell syntax. Internal test timeout remains 180 seconds.
-The expensive recursive activation witness runs in the selector batch to keep
-four workers occupied; the partition test proves every discovered case runs
-exactly once. Native accounting resolves each live operand once per operation
-and tests release/reacquire behavior. Gate result/log are in
-.tmp/sol-estimate/gate-latest.exit and gate-latest.log.
+Last full gate before the shift4 instruction: headless scripts/pre-push
+--working-tree exited0,168 tests in26.04s plus fmt/strict Clippy/shell. Current
+reversal changes pass cargo build --offline --locked -j4 and27 focused
+source/history/differential cases in6.675s; test_gate's2 cases also pass.
+The shift4 binding reserves all further full gates, pushed-SHA and hook checks
+for the orchestrator. No git process ran. The current batch requires review
+before main is pushed.
 
 All 86 published K82 normalized leaf digests and complete literal resource
 profiles agree; all 16 binding cases pass. Rung-3 VM sums 0/1/3/7/255 match
 steps/time 6/11/21/41/1281; three fault prefixes match 3; nested/impure uncall
-match 11/8. Rung-2 has no ISA object/count yet. VM also admits the allocator,
+match11/8 forward steps; nested target time is16, including five reversed
+classical frames. A forward step count is not the total target time. Rung-2 has no ISA object/count yet. VM also admits the allocator,
 lifted-call, local-jump and nested-token-forwarding examples. Oracle output
 exposes padded forward/inverse steps; source counts are compared as bounds,
 with equality at the lifted-call B=4 boundary. The owned native-pair-program
