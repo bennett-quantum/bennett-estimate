@@ -750,6 +750,7 @@ class Catalog:
         self.source_context=None
         self.call_edges=()
         self.call_domains={}
+        self.prebound_interfaces=False
         self.loop_coordinates=[]
         self.source_ordinals={}
         self.address_cache=None
@@ -1477,6 +1478,9 @@ def parse_function(lines):
     region_calls={"oracle_call","action_call","adj","ctl"}
     for inst in root:
         op=inst.op
+        if op=="measure" or op.startswith("measure.i"):
+            require(len(inst.lhs)==len(inst.args)==1,"§3.3: measurement result/operand arity mismatch")
+            if op!="measure":require(1<=integer(op[9:],1)<=128,"§3.3: measurement width must be in 1..128")
         if op.startswith("qreg."):
             expected={"new":2,"free":1,"slice":3,"concat":2,"width":1,"id":1,"from_id":1}[op[5:]]
             require(len(inst.lhs)==(0 if op=="qreg.free" else 1),"§4.8: register result arity mismatch")
@@ -1653,8 +1657,45 @@ class Object:
                 require(target.kind in allowed,"§3.1: classical call tier violation (R may call only R)")
                 require(len(inst.args)-1==len(target.groups[0]) and len(inst.lhs)==len(target.groups[1]),"§4.1: call argument/result arity mismatch")
         out.validate_region_graph()
+        out.validate_measurement_types()
         out.validate_register_views()
         return out
+
+    def validate_measurement_types(self):
+        """Check declared/block-local measurement widths; linking stays separate."""
+        def fixed(ty):
+            m=re.fullmatch(r"qreg\[([1-9][0-9]*)\]",ty or "")
+            return int(m[1]) if m else None
+        for fn in self.functions.values():
+            if not any(i.op=="measure" or i.op.startswith("measure.i") for i in fn.code):continue
+            for params,code in fn.blocks.values():
+                types={n:ty for n,ty,r in fn.groups[0]+params}
+                for row in code:
+                    op,a=row.op,row.args;produced=None
+                    if op in ["qreg.new","qreg.slice"]:
+                        size=a[-1];produced="qreg["+(size if size.isdigit() else "*")+"]"
+                    elif op=="qreg.concat":
+                        operands=[types.get(n) for n in a];sizes=[fixed(ty) for ty in operands]
+                        if all(n is not None for n in sizes):produced=f"qreg[{sum(sizes)}]"
+                        elif all(ty is not None for ty in operands):produced="qreg[*]"
+                    elif op=="qreg.from_id":produced="qreg[*]"
+                    elif op in ["qreg.width","qreg.id"]:produced="i64"
+                    elif op.startswith("const.i"):produced="i"+op[7:]
+                    elif op=="call" and a[0][1:] in self.functions:
+                        types.update({name:ty for name,(n,ty,r) in zip(row.lhs,self.functions[a[0][1:]].groups[1])})
+                        continue
+                    elif op=="measure" or op.startswith("measure.i"):
+                        ty=types.get(a[0]);width=fixed(ty)
+                        if ty is not None:
+                            require(ty=="qreg[*]" or width is not None,"§3.3: measure requires a register")
+                            if width is not None:
+                                require(width<=128,"§3.3: measure result width exceeds 128")
+                                require(op=="measure" or integer(op[9:],1)==width,"§3.3: measure fixed width mismatch")
+                            else:require(op!="measure","§3.3: measure of qreg[*] requires measure.iN")
+                        produced="i"+str(width) if op=="measure" and width is not None else "i"+op[9:] if op!="measure" else None
+                    for name in row.lhs:
+                        if produced is None:types.pop(name,None)
+                        else:types[name]=produced
 
     def validate_register_views(self):
         """§3.3's lexical view rule on every CFG path, without executing it."""
@@ -2537,7 +2578,7 @@ class Source:
                 env[_SOURCE_TOKEN_IDENTITIES]=MappingProxyType(dict(zip(names,token_context[offset:])))
                 invocation["token_aliases"]=aliases
             self.invocations.append({"region":name,"invocation":invocation,"inherited_controls":len(set((b[0],b[1]) for b in controls)),"source_adjoint":adjoint,"raw_inverse":raw_inverse,"path":[{k:v for k,v in edge.items() if k!="entered_invocation"} for edge in self.catalog.call_edges]})
-            if self.catalog.ledger is not None and len(self.calls)==1:
+            if self.catalog.ledger is not None and len(self.calls)==1 and not self.catalog.prebound_interfaces:
                 for bit in controls:self.catalog.ledger.interface(f"control:{bit[1]}",Bundle(bit[0],1,bit[2],bit[1]))
                 names=["in","tgt","fault","mem"] if fn.kind=="oracle" else ["mut","in","mem"]
                 for group,role in zip(wire_groups,names):
@@ -2651,7 +2692,8 @@ class Source:
                 actuals=list_operand(a[6]);types=child.groups[4]
                 require(len(actuals)==len(types) and all(n in env for n in actuals),"oracle call classical argument arity/binding")
                 identities=self.token_context(env,[a[1]]+[n for (name,ty,role),n in zip(types,actuals) if ty=="token"])
-                binding=(callee,jcs([env[n] for n in actuals]),identities)
+                values=[env[n] if ty in ["token","f64"] else str(env[n]) for (name,ty,role),n in zip(types,actuals)]
+                binding=(callee,jcs(values),identities)
             else:
                 if op in ["qxor","qexch"]:
                     require(len(a)==2,"wire operation arity")
@@ -3101,16 +3143,16 @@ class Source:
         @dataclass(frozen=True)
         class RegisterId:
             identity:int
-        registers={};physical={};register_states=WireVersions();quantum_occurrences=[];next_register=0
+        registers={};physical={};placements={};register_states=WireVersions();quantum_occurrences=[];next_register=0
         def create(parts,parent=None):
             nonlocal next_register
             next_register+=1
             registers[next_register]={"parts":tuple(parts),"state":"live","parent":parent}
             return (RegisterRef(next_register),"qreg")
         def register_snapshot():
-            return ({identity:dict(record) for identity,record in registers.items()},dict(physical),dict(register_states.ranges))
+            return ({identity:dict(record) for identity,record in registers.items()},dict(physical),dict(register_states.ranges),dict(placements))
         def restore_registers(snapshot):
-            old_registers,old_physical,old_states=snapshot
+            old_registers,old_physical,old_states,old_placements=snapshot
             profile=Profile()
             for identity in physical.keys()-old_physical.keys():
                 b=physical[identity];profile=profile.then(space_profile(b.cls,"clean",-b.width))
@@ -3119,6 +3161,7 @@ class Source:
             registers.clear();registers.update({identity:dict(record) for identity,record in old_registers.items()})
             physical.clear();physical.update(old_physical)
             register_states.ranges.clear();register_states.ranges.update(old_states)
+            placements.clear();placements.update(old_placements)
             return profile
         def register_width(record):return sum(part.width for part in record["parts"])
         def overlaps(a,b):
@@ -3177,6 +3220,29 @@ class Source:
         atop=len(allocations);history=[];segments=[];version_serial=0;reversed_steps=0
         def valid_token(value):
             return not isinstance(value,MintedToken) or history[value.identity]["active"]
+        def quantum_region(name,values,budget,bindings,controls,adjoint=False,raw_inverse=False,identities=None):
+            if "topology" not in self.target.doc:
+                return self.region(name,values,budget,bindings,controls,adjoint,raw_inverse=raw_inverse,token_context=identities)
+            prior=self.catalog
+            catalog=Catalog(prior.text,self.target)
+            request={"closure_hash":self.obj.identities(closure=True)[name],"target_hash":self.target.hash,"region":name,"variant":"forward","inherited_controls":len(set((b[0],b[1]) for b in controls)),"budget":budget,"params_hash":digest(jcs(values)),"epsilon":0,"expansion":{"name":"ref","version":"0.9","hash":catalog.hash},"scheduler":{"name":"bennett-estimate-default","version":"0.1.0"}}
+            if identities is not None:request["token_aliases"]=canonical_token_aliases(identities)
+            ledger=Ledger(self.target,Schedule({"bindings":request,"entries":[]},self.obj,name))
+            catalog.ledger=ledger;catalog.prebound_interfaces=True
+            baseline={}
+            # Reserve every live physical register, including registers that
+            # are not callee operands. Views refer to these same allocations.
+            for b in physical.values():
+                ledger._register(b,0,b.cls,list(placements[b.identity]),slot="register:"+b.identity)
+                baseline[b.cls]=baseline.get(b.cls,0)+b.width
+            self.catalog=catalog
+            try:
+                profile=self.region(name,values,budget,bindings,controls,adjoint,raw_inverse=raw_inverse,token_context=identities)
+                require(ledger.finish()==profile.resources(self.target,baseline),"CC/R default topology ledger/profile resource mismatch")
+                return profile
+            finally:
+                prior.visits+=catalog.visits
+                self.catalog=prior
         def execute(function, values):
             nonlocal bump,clock,atop,version_serial,reversed_steps
             env = dict(values)
@@ -3284,7 +3350,7 @@ class Source:
                         if not pending:return p,steps,[],True
                         segment=max(pending,key=lambda s:s["end"])
                         arguments=[get(n) for n in list_operand(a[1])];results=[get(n) for n in list_operand(a[2])]
-                        if segment["name"]!=a[0].removeprefix("@") or any(f["active"] and not f["pure"] and not f["marker"] for f in history[segment["end"]:frame_index]) or not equal_values(segment["args"],arguments) or not equal_values(segment["results"],results):return p,steps,[],True
+                        if segment["name"]!=a[0].removeprefix("@") or any(f.get("measured",False) for f in history[segment["start"]:segment["end"]]) or any(f["active"] and not f["pure"] and not f["marker"] for f in history[segment["end"]:frame_index]) or not equal_values(segment["args"],arguments) or not equal_values(segment["results"],results):return p,steps,[],True
                         for frame in reversed(history[segment["start"]:segment["end"]]):
                             if not frame["active"] or frame["marker"]:continue
                             p=p.then(Profile(time=rational(self.target.doc["capabilities"]["classical_step_time"])));reversed_steps+=1
@@ -3338,12 +3404,14 @@ class Source:
                         result=(MintedToken(frame_index,tuple(token)),0)
                     elif op=="qreg.new":
                         cls,n=a;size=unsigned64(n,1)
-                        require(not size or "topology" not in self.target.doc,"CC/R register topology placement remains pending; no exact estimate emitted")
                         choices=sorted(self.target.doc["classes"],key=lambda name:name.encode("utf-16-be")) if cls=="any" else [cls]
                         require(all(c in self.target.doc["classes"] for c in choices),"unknown register class")
                         def available(c):
                             used=sum(b.width for b in physical.values() if b.cls==c)
                             capacity=self.target.doc["classes"][c]["capacity"]
+                            if "topology" in self.target.doc:
+                                vertices=sum(v["class"]==c for v in self.target.doc["topology"]["vertices"])
+                                capacity=vertices if capacity=="unbounded" else min(capacity,vertices)
                             return capacity=="unbounded" or used+size<=capacity
                         selected=next((c for c in choices if available(c)),None)
                         if selected is None:return p,steps,[],True
@@ -3351,6 +3419,10 @@ class Source:
                         if size:
                             b=self.fresh("register",size,selected);parts=[b]
                             physical[b.identity]=b
+                            if "topology" in self.target.doc:
+                                occupied={v for vertices in placements.values() for v in vertices}
+                                placements[b.identity]=tuple(i for i,v in enumerate(self.target.doc["topology"]["vertices"]) if v["class"]==selected and i not in occupied)[:size]
+                                require(len(placements[b.identity])==size,"register topology capacity/placement mismatch")
                             register_states.acquire(b)
                             p=p.then(space_profile(selected,"clean",size))
                         result=create(parts)
@@ -3366,6 +3438,7 @@ class Source:
                                 # allocations; a slice can never be freed.
                                 require(b.identity in physical,"register allocation identity is not live")
                                 del physical[b.identity]
+                                placements.pop(b.identity,None)
                                 del register_states.ranges[b.identity]
                                 p=p.then(space_profile(b.cls,"clean",-b.width))
                             record["state"]="consumed"
@@ -3437,10 +3510,10 @@ class Source:
                             matches=matches and [integer(n,0) for n in bound["budget"]]==[integer(n,0) for n in tuple_] and decimal_value(bound["epsilon"])==0
                             if matches:matches=bound["closure_hash"]==self.obj.identities(closure=True)[child.name]
                             require(not matches,"CC/R nested quantum schedule replay remains pending for these invocation bindings")
-                        cp=self.region(child.name,encoded,tuple_,interface,controls,source_adjoint,token_context=identities)
+                        cp=quantum_region(child.name,encoded,tuple_,interface,controls,source_adjoint,identities=identities)
                         p=p.then(cp)
                         def reverse_region(name=child.name,values=list(encoded),budget=list(tuple_),bindings=dict(interface),control_context=controls,adjoint=source_adjoint,identities=identities):
-                            return self.region(name,values,budget,bindings,control_context,adjoint,raw_inverse=True,token_context=identities)
+                            return quantum_region(name,values,budget,bindings,control_context,adjoint,raw_inverse=True,identities=identities)
                         history[frame_index]["inverse"]=reverse_region
                         identity=child.kind in ["action","perm_action"] and identity_body(child)
                         # Source-call occurrences retain joint entry versions.
@@ -3462,7 +3535,23 @@ class Source:
                             if record["parent"] is not None:
                                 record["state"]="consumed";registers[record["parent"]]["state"]="live"
                     elif op=="measure" or op.startswith("measure.i"):
-                        raise ContractError("measurement-dependent path/cleanliness evidence remains pending; no exact estimate emitted")
+                        record=register(a[0])
+                        if record is None:return p,steps,[],True
+                        width=register_width(record)
+                        measured=width if op=="measure" else integer(op[9:],1)
+                        require(1<=measured<=128,"§3.3: measurement width must be in 1..128")
+                        if measured!=width:return p,steps,[],True
+                        require(all(clean for identity,lo,hi,version,clean in register_states.capture(record["parts"])),"measurement-dependent path/cleanliness evidence remains pending; no exact estimate emitted")
+                        # The source history proves this register is |0...0>.
+                        # No amplitudes, basis simulation or measurement draw
+                        # are needed to determine its sole possible outcome.
+                        for b in record["parts"]:
+                            require(b.identity in physical,"measured allocation identity is not live")
+                            del physical[b.identity];del register_states.ranges[b.identity]
+                            placements.pop(b.identity,None)
+                            p=p.then(space_profile(b.cls,"clean",-b.width))
+                        record["state"]="consumed";history[frame_index]["measured"]=True
+                        result=(0,measured)
                     elif op=="effect":
                         dev=a[0]
                         if dev not in ["clock.read","entropy.read","console.write","block.read","block.write"]: return p,steps,[],True
@@ -4471,6 +4560,7 @@ def main(argv=None):
                      "invocation":{"args":params,"budget":budget},"params_hash":digest(jcs(params)),
                      "epsilon":exact_decimal(decimal_value(a.epsilon)),
                      "pending":[{"code":code,"reason":str(ex).split(":",1)[1].strip(),"bead":{"EST-CONTEXT-03":"bennett-estimate-bph.5","EST-SOURCE-03":"bennett-estimate-bph.6","EST-SOURCE-04":"bennett-estimate-bph.7"}.get(code,"bennett-estimate-bph.4")}]}
+            if aliases is not None:pending["invocation"]["token_aliases"]=aliases
             print(jcs(pending))
             return 3
         return 1

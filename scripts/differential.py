@@ -44,11 +44,14 @@ def run(root, estimator):
             "object_hash":predicted["object_hash"],"target_hash":predicted["target_hash"],"vm_native_gate_count":charged["gate_count"],"estimate_native_gate_count":predicted["resources"]["gate_count"],
             "vm_program_time":charged["time"],"vm_classical_steps":actual["steps"],"vm_nonclassical_time":str(quantum_time),"estimate_action_time":predicted["resources"]["time"],
             "vm_program_occupancy":charged["qubit_second"]["data"],"estimate_action_occupancy":predicted["resources"]["qubit_second[data]"],"space_relation":"action <= program"}
-    programs=[]
-    for name,status in [("native-pair-program","COMPLETED"),("register-views-program","COMPLETED"),("register-alias-fault","FAILED"),("block-image-program","COMPLETED"),("register-disjoint-pairs","COMPLETED"),("quantum-uncall-program","COMPLETED"),("nested-classical-uncall","COMPLETED")]:
+    cases=[("native-pair-program","COMPLETED"),("register-views-program","COMPLETED"),("register-alias-fault","FAILED"),("block-image-program","COMPLETED"),("register-disjoint-pairs","COMPLETED"),("quantum-uncall-program","COMPLETED"),("nested-classical-uncall","COMPLETED"),("clean-measure-program","COMPLETED"),("measure-uncall-fault","FAILED")]
+    def program(name,status,path,actual=None,compare=True):
         fixture=root/"examples"/(name+".bisa")
-        actual=json.loads(subprocess.run([str(vm),"run-program",str(fixture),"main","--target",str(target_path)],capture_output=True,text=True,timeout=30,check=True).stdout)
-        predicted=json.loads(subprocess.run([str(estimator),str(fixture),"--target",str(target_path),"--region","main"],capture_output=True,text=True,timeout=30,check=True).stdout)
+        predicted=json.loads(subprocess.run([str(estimator),str(fixture),"--target",str(path),"--region","main"],capture_output=True,text=True,timeout=30,check=True).stdout)
+        if predicted["classical_status"]!=status or predicted["label"]!="exact":raise AssertionError("complete CC/R forecast status mismatch: "+name)
+        report={"fixture":name,"status":status,"steps":int(predicted["classical_steps"]),"reversed_classical_steps":predicted["reversed_classical_steps"],"object_hash":predicted["object_hash"],"target_hash":predicted["target_hash"],"resources":predicted["resources"]}
+        if not compare:return report
+        if actual is None:actual=json.loads(subprocess.run([str(vm),"run-program",str(fixture),"main","--target",str(path)],capture_output=True,text=True,timeout=30,check=True).stdout)
         charged=actual["target_resources"];flat={}
         for row,value in charged.items():
             if isinstance(value,dict):
@@ -57,13 +60,24 @@ def run(root, estimator):
                     flat[row+"["+escaped+"]"]=Fraction(amount)
             else:flat[row]=Fraction(value)
         exact={row:Fraction(int(q["numerator"]),int(q["denominator"])) for row,q in predicted["exact_resources"].items()}
-        if actual["status"]!=status or predicted["classical_status"]!=status or predicted["label"]!="exact" or int(predicted["classical_steps"])!=actual["steps"] or flat!=exact or Fraction(predicted["error_bound"])!=Fraction(actual["target_error"]):
-            raise AssertionError("complete register-program differential mismatch: "+name)
-        programs.append({"fixture":name,"status":status,"steps":actual["steps"],"reversed_classical_steps":predicted["reversed_classical_steps"],"object_hash":predicted["object_hash"],"target_hash":predicted["target_hash"],"resources":predicted["resources"],"match":True})
+        if actual["status"]!=status or int(predicted["classical_steps"])!=actual["steps"] or flat!=exact or Fraction(predicted["error_bound"])!=Fraction(actual["target_error"]):
+            raise AssertionError("complete CC/R program differential mismatch: "+name)
+        return {**report,"match":True}
+    programs=[program(name,status,target_path) for name,status in cases]
+    topology_path=root/"data/ideal-four-clique.json"
+    probe=subprocess.run([str(vm),"run-program",str(native_fixture),"main","--target",str(topology_path)],capture_output=True,text=True,timeout=30)
+    if probe.returncode:
+        # A recognized consumer defect is evidence, never a successful match.
+        # Other errors remain fatal. Once the VM accepts topology, all cases
+        # automatically enter the same exact comparison as ordinary targets.
+        if probe.stderr.strip()!="§8: unknown field topology":raise RuntimeError("VM topology probe failed: "+probe.stderr)
+        topology={"status":"unavailable","reason":probe.stderr.strip(),"forecasts":[program(name,status,topology_path,compare=False) for name,status in cases]}
+    else:
+        topology={"status":"matched","forecasts":[program(name,status,topology_path,actual=json.loads(probe.stdout) if i==0 else None) for i,(name,status) in enumerate(cases)]}
     rung2=workspace/"bennett-conformance/ladder/rung-2"
     if not (rung2/"fixtures/hashtable.c").is_file(): raise RuntimeError("rung-2 data corpus missing")
     objects=sorted([*rung2.rglob("*.bisa"),*rung2.rglob("*.bennett")])
-    return {"native_action":native,"native_programs":programs,"rung3":{"status":"matched","scope":"VM forward source instruction counts, including failed prefixes; nested time includes five source-derived reversed frames, not reported by run-cc steps; complete-program target ledger differentials are separate","rows":rows,"fault_rows":faults,"history_rows":history},
+    return {"native_action":native,"native_programs":programs,"topology":topology,"rung3":{"status":"matched","scope":"VM forward source instruction counts, including failed prefixes; nested time includes five source-derived reversed frames, not reported by run-cc steps; complete-program target ledger differentials are separate","rows":rows,"fault_rows":faults,"history_rows":history},
             "rung2":{"status":"objects_available" if objects else "unavailable","objects":[str(p.relative_to(workspace)) for p in objects],"reason":"rung-2 currently publishes C/LLVM and blocked pipeline reports; no ISA object or gate/step count is present" if not objects else "new ISA artifacts require differential admission"}}
 
 

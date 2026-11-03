@@ -1,0 +1,16 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"d24dfacde5c8c7b02b1452fa8c57dcdebf774086316d5590fc4fd83ebefd02b6","kind":"cc","name":"main","signature":{"abi":"0.9","kind":"cc","params":[],"results":[],"tier":"cc"}},"1":{"interface_hash":"b55eda02a5faadd87e72db47518adae214faebd1476c6607b5b74b8a4a34d5e8","kind":"cc","name":"take","signature":{"abi":"0.9","kind":"cc","params":["qreg[2]"],"results":["i2"],"tier":"cc"}}}
+
+section functions
+fn cc @main () () () () ()
+^entry():
+q = qreg.new data 2
+r = call @take q
+uncall @take (q) (r)
+ret
+fn cc @take (q:qreg[2]) (r:i2) () () ()
+^entry():
+r = measure q
+ret r

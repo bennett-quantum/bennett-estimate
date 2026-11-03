@@ -1,0 +1,17 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"b33db14335f516c703528a0b14b42eb4e18cdb18583706cc0cea5a1b451e0c77","kind":"cc","name":"main","signature":{"abi":"0.9","kind":"cc","params":[],"results":[],"tier":"cc"}}}
+
+section functions
+fn cc @main () () () () ()
+^entry():
+q = qreg.new data 2
+r = measure q
+z = const.i2 0
+c = icmp.eq r z
+br c ^ok() ^bad()
+^ok():
+ret
+^bad():
+trap

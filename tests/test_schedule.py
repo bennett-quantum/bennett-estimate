@@ -328,6 +328,16 @@ class Accounting(unittest.TestCase):
                 result=e.estimate(obj,target(),"root",[["1","0","0","0"]],["0"]*4,token_aliases=[0],include_frame=True)
                 self.assertEqual([d["chain"][-1]["point"] for d in result["cleanup_decisions"]],expected)
 
+    def test_oracle_pair_matching_keeps_large_integer_and_f64_bit_values_exact(self):
+        oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        for ty,left,right,expected in [("i128",str(2**100),str(2**100+1),[]),("i128",str(2**100+1),str(2**100+1),["entry:1"]),("f64","0x0000000000000000","0x8000000000000000",[]),("f64","0x7ff8000000000001","0x7ff8000000000002",[])]:
+            with self.subTest(ty=ty,left=left,right=right):
+                root={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1,4],"in":[1],"mem":[],"args":["token",ty,ty],"bounds":[]}
+                code=f"perm_action @root (t:wire, f:wire[4]) (x:wire in) () (tk:token, a:{ty}, b:{ty}) ()\n^entry():\noracle_call @identity tk (x) t f () (a)\noracle_call @identity tk (x) t f () (b)\noracle @identity (x:wire in) (t:wire) (f:wire[4]) () (v:{ty})\nregs {{  }}\n^entry():\nlift.retval x"
+                obj=make_program(code,{"root":root,"identity":{**oracle,"args":[ty]}})
+                result=e.estimate(obj,target(),"root",[["1","0","0","0"],left,right],["0"]*4,token_aliases=[0],include_frame=True)
+                self.assertEqual([d["chain"][-1]["point"] for d in result["cleanup_decisions"]],expected)
+
     def test_cc_register_ids_are_opaque_except_equality_and_zero(self):
         sig={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
         body="fn cc @root () () () () ()\n^entry():\nq = qreg.new data 1\nid = qreg.id q\nc = const.i64 {literal}\np = icmp.eq id c\nbr p ^yes() ^no()\n^yes():\ntrap\n^no():\nqreg.free q\nret"
@@ -550,11 +560,18 @@ class Accounting(unittest.TestCase):
             # §5.4 explicitly permits a token minted for another oracle.
             self.assertEqual(e.estimate(live,target(),"root",[],["0"]*4)["classical_status"],"COMPLETED")
 
-    def test_cc_quantum_replay_does_not_silently_ignore_topology_or_callee_schedule(self):
+    def test_cc_default_topology_replay_and_selected_callee_schedule(self):
         obj=e.Object.read((ROOT/"examples/native-pair-program.bisa").read_text())
         doc=e.loads(e.jcs(target().doc));doc["topology"]={"vertices":[{"class":"data"} for _ in range(4)],"edges":[]}
-        with self.assertRaisesRegex(e.ContractError,"CC/R.*topology.*pending"):
+        with self.assertRaisesRegex(e.ContractError,"native leaf is not adjacent"):
             e.estimate(obj,e.Target.read(e.jcs(doc)),"main",[],["0"]*4)
+        doc["topology"]["edges"]=[[i,j] for i in range(4) for j in range(i+1,4)]
+        realised=e.estimate(obj,e.Target.read(e.jcs(doc)),"main",[],["0"]*4)
+        self.assertEqual(realised["resources"],{"gate_count":"8","peak_qubits[data]":"4","qubit_second[data]":"84","time":"25"})
+        doc["topology"]={"vertices":[{"class":"data"} for _ in range(2)],"edges":[[0,1]]}
+        failed=e.estimate(obj,e.Target.read(e.jcs(doc)),"main",[],["0"]*4)
+        self.assertEqual((failed["classical_status"],failed["classical_steps"]),("FAILED","3"))
+        self.assertEqual(failed["resources"],{"gate_count":"0","peak_qubits[data]":"2","qubit_second[data]":"2","time":"3"})
         action=e.estimate(obj,target(),"pair",[],["0"]*4)
         root=obj.symbol("pair")["interface_hash"]
         obj.sections["schedule"]={"bindings":action["effective_schedule"]["bindings"],"entries":[entry("gate",path=[point(root,"entry:0")],realisation="missing-scheme")]}
@@ -563,6 +580,21 @@ class Accounting(unittest.TestCase):
         obj.sections["schedule"]["bindings"]={**obj.sections["schedule"]["bindings"],"budget":["1","0","0","0"]}
         # An unmatched tuple does not select that schedule.
         self.assertEqual(e.estimate(obj,target(),"main",[],["0"]*4)["resources"]["time"],"25")
+
+    def test_cc_topology_reserves_uncalled_registers_and_restores_vertex_lifetimes(self):
+        cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        work={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        code="fn cc @root () () () () ()\n^entry():\nunused = qreg.new data 1\nq = qreg.new data 1\naction_call @work (q) () () ()\nret\nperm_action @work (q:wire) () () () ()\n^entry():\ns = qalloc any 1\ncx q s\ncx q s\nqfree s"
+        obj=make_program(code,{"root":cc,"work":work})
+        doc=e.loads(e.jcs(target().doc));doc["topology"]={"vertices":[{"class":"data"} for _ in range(3)],"edges":[[0,1]]}
+        with self.assertRaisesRegex(e.ContractError,"native leaf is not adjacent"):
+            e.estimate(obj,e.Target.read(e.jcs(doc)),"root",[],["0"]*4)
+        doc["topology"]["edges"]=[[0,1],[0,2],[1,2]];t=e.Target.read(e.jcs(doc))
+        result=e.estimate(obj,t,"root",[],["0"]*4)
+        self.assertEqual(result["resources"],{"gate_count":"2","peak_qubits[data]":"3","qubit_second[data]":"11","time":"6"})
+        for fixture in ["quantum-uncall-program","register-views-program","register-disjoint-pairs"]:
+            obj=e.Object.read((ROOT/"examples"/(fixture+".bisa")).read_text())
+            self.assertEqual(e.estimate(obj,t,"main",[],["0"]*4)["resources"],e.estimate(obj,target(),"main",[],["0"]*4)["resources"])
 
     def test_classical_explicit_alias_partitions_distinguish_equal_token_tuples(self):
         obj=e.Object.read((ROOT/"tests/fixtures/token-alias-source-gap.bisa").read_text())
@@ -712,6 +744,46 @@ class Accounting(unittest.TestCase):
         self.assertEqual(result["label"],"exact")
         self.assertEqual(result["classical_steps"],"7")
         self.assertEqual(result["resources"],{"gate_count":"8","peak_qubits[data]":"4","qubit_second[data]":"84","time":"25"})
+
+    def test_cc_measurement_of_proved_clean_register_consumes_all_aliases(self):
+        sig={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        for width in [1,2,128]:
+            obj=make_object(f"fn cc @root () () () () ()\n^entry():\nq = qreg.new data {width}\nr = measure q\nz = const.i{width} 0\nc = icmp.eq r z\nbr c ^ok() ^bad()\n^ok():\nret\n^bad():\ntrap",sig)
+            result=e.estimate(obj,target(),"root",[],["0"]*4)
+            self.assertEqual((result["classical_status"],result["classical_steps"]),("COMPLETED","6"))
+            self.assertEqual(result["resources"],{"gate_count":"0","peak_qubits[data]":str(width),"qubit_second[data]":str(width),"time":"6"})
+        obj=make_object("fn cc @root () () () () ()\n^entry():\nq = qreg.new data 2\nid = qreg.id q\nr = measure q\nstale = qreg.from_id id\nret",sig)
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual((result["classical_status"],result["classical_steps"]),("FAILED","4"))
+        self.assertEqual(result["resources"]["qubit_second[data]"],"4")
+
+    def test_cc_measurement_width_fault_and_segment_uncall_preflight(self):
+        sig={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        for measured,status,steps,area in [(1,"FAILED","3","2"),(2,"COMPLETED","5","2")]:
+            code=f"fn cc @root () () () () ()\n^entry():\nn = const.i64 2\nq = qreg.new data n\nr = measure.i{measured} q\nz = const.i{measured} 0\nret"
+            result=e.estimate(make_object(code,sig),target(),"root",[],["0"]*4)
+            self.assertEqual((result["classical_status"],result["classical_steps"]),(status,steps))
+            self.assertEqual((result["resources"]["time"],result["resources"]["qubit_second[data]"]),(steps,area))
+        take={**sig,"params":["qreg[2]"],"results":["i2"]}
+        obj=make_program("fn cc @root () () () () ()\n^entry():\nq = qreg.new data 2\nr = call @take q\nuncall @take (q) (r)\nret\nfn cc @take (q:qreg[2]) (r:i2) () () ()\n^entry():\nr = measure q\nret r",{"root":sig,"take":take})
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual((result["classical_status"],result["classical_steps"],result["reversed_classical_steps"]),("FAILED","5","0"))
+        self.assertEqual(result["resources"],{"gate_count":"0","peak_qubits[data]":"2","qubit_second[data]":"4","time":"5"})
+
+    def test_reader_checks_measurement_static_width_and_dynamic_spelling(self):
+        sig={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        cases=[("q = qreg.new data 2\nr = measure.i1 q",sig),("n = const.i64 2\nq = qreg.new data n\nr = measure q",sig),("q = qreg.new data 129\nr = measure q",sig),("r = measure.i2 q",{**sig,"params":["qreg[3]"]}),("r = measure q",{**sig,"params":["qreg[*]"]})]
+        for body,signature in cases:
+            params="q:"+signature["params"][0] if signature["params"] else ""
+            with self.subTest(body=body),self.assertRaisesRegex(e.ContractError,"§3.3.*measure"):
+                make_object(f"fn cc @root ({params}) () () () ()\n^entry():\n{body}\nret",signature)
+
+    def test_measurement_width_analysis_defers_unknown_dominating_definitions(self):
+        sig={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        obj=make_object("fn cc @root () () () () ()\n^entry():\na = qreg.new data 2\nbr ^join()\n^join():\nb = qreg.new data 1\nq = qreg.concat a b\nr = measure q\nret",sig)
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual((result["classical_status"],result["classical_steps"]),("COMPLETED","6"))
+        self.assertEqual(result["resources"],{"gate_count":"0","peak_qubits[data]":"3","qubit_second[data]":"10","time":"6"})
 
     def test_cc_dynamic_register_width_zero_capacity_and_alias_lifetimes(self):
         sig={"abi":"0.9","tier":"cc","kind":"cc","params":["i64"],"results":[]}
