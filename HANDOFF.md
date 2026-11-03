@@ -73,8 +73,8 @@ correctness/error claims or nested composition.
 
 Last full gate before the shift4 instruction: headless scripts/pre-push
 --working-tree exited0,168 tests in26.04s plus fmt/strict Clippy/shell. Current
-reversal changes pass cargo build --offline --locked -j4 and27 focused
-source/history/differential cases in6.675s; test_gate's2 cases also pass.
+reversal changes pass cargo build --offline --locked -j4 and29 focused
+source/history/differential cases in8.041s; test_gate's2 cases also pass.
 The shift4 binding reserves all further full gates, pushed-SHA and hook checks
 for the orchestrator. No git process ran. The current batch requires review
 before main is pushed.
@@ -113,6 +113,12 @@ and VM-admitted witnesses are in docs/CONTRACT_GAPS.md and the orchestrator queu
 .tmp/sol-estimate/cross-repo-beads.md. Proposals remain unadopted. Positive-B
 03/04 cases are pending; B=0 construction remains exact. Independent work must
 continue while these decisions are pending.
+
+Minted-token validity follows active history, including aliases surviving
+uncall. The §5.4 permission to use a token minted for another oracle is
+preserved. CC/R topology allocation and potentially applicable nested quantum
+schedules report pending implementation instead of claiming unchecked exact
+resources. Schedule replay remains required under bph.2.
 
 Open work: bph/.1/.2/.3; bph.4/.5/.6/.7 track contract decisions. Complete
 source admission/type and remaining register/effect paths, remaining loop/record scaling, CC/R K55 propagation, K81 release-ended/independent-call cleanup

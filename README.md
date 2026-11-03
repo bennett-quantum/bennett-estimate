@@ -84,6 +84,11 @@ bindings. Remaining lifted memory rows and published source-binding gaps, comple
 partitioning, remaining register/effect histories and certificate proof checking still require work.
 Unsupported paths fail explicitly; they remain requirements.
 
+CC/R register placement on topology targets and potentially applicable nested
+quantum schedules still require replay integration. Those paths report pending
+implementation before an exact result can be emitted. Minted tokens become
+invalid when their mint frame is reversed, including surviving aliases.
+
 Full exact source coverage needs the published decisions described in
 [CONTRACT_GAPS.md](docs/CONTRACT_GAPS.md): physical wire binding of classical
 pseudo-locations and canonical widths for implicit/literal memory lengths.

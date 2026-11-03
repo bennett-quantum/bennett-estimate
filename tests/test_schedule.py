@@ -460,6 +460,27 @@ class Accounting(unittest.TestCase):
         # An unmatched tuple does not select that schedule.
         self.assertEqual(e.estimate(obj,target(),"main",[],["0"]*4)["resources"]["time"],"25")
 
+    def test_classical_explicit_alias_partitions_distinguish_equal_token_tuples(self):
+        obj=e.Object.read((ROOT/"tests/fixtures/token-alias-source-gap.bisa").read_text())
+        params=[["1","0","0","0"]]*2
+        shared=e.estimate(obj,target(),"root",params,["0"]*4,token_aliases=[0,0])
+        distinct=e.estimate(obj,target(),"root",params,["0"]*4,token_aliases=[0,1])
+        self.assertEqual((shared["classical_status"],shared["classical_steps"],shared["reversed_classical_steps"],shared["resources"]["time"]),("COMPLETED","4","2","6"))
+        self.assertEqual((distinct["classical_status"],distinct["classical_steps"],distinct["resources"]["time"]),("FAILED","3","3"))
+        self.assertEqual(shared["params_hash"],distinct["params_hash"])
+        self.assertNotEqual(shared["schedule_hash"],distinct["schedule_hash"])
+        self.assertEqual(shared["invocation"]["token_aliases"],[0,0])
+        self.assertEqual(distinct["effective_schedule"]["bindings"]["token_aliases"],[0,1])
+
+    def test_classical_alias_partitions_reject_noncanonical_or_inconsistent_bindings(self):
+        obj=e.Object.read((ROOT/"tests/fixtures/token-alias-source-gap.bisa").read_text())
+        params=[["1","0","0","0"]]*2
+        for partition in [[1,1],[0,2],[0],[],[False,False],["0","0"],[0,-1]]:
+            with self.subTest(partition=partition),self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
+                e.estimate(obj,target(),"root",params,["0"]*4,token_aliases=partition)
+        with self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
+            e.estimate(obj,target(),"root",[["1","0","0","0"],["2","0","0","0"]],["0"]*4,token_aliases=[0,0])
+
     def test_cc_register_program_matches_complete_native_vm_ledger(self):
         obj=e.Object.read((ROOT/"examples/native-pair-program.bisa").read_text())
         result=e.estimate(obj,target(),"main",[],["0"]*4)
