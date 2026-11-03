@@ -2667,8 +2667,126 @@ class Source:
                 for node in before+after:self.catalog.source_metadata[id(node)]=(node,meta)
             prefix+=before;suffix=after+suffix
         pairs=self.oracle_pairs(fn,env,controls,adjoint)
-        body=self.action_nodes([i for _,code in fn.blocks.values() for i in code],env,regions,controls,adjoint=adjoint,oracle_pairs=pairs,empty_cleanups=self.empty_cleanups(fn))
+        partition=self.primitive_cleanup_partition(fn,env,controls) if not adjoint else None
+        body=self.action_nodes([i for _,code in fn.blocks.values() for i in code],env,regions,controls,adjoint=adjoint,oracle_pairs=pairs,empty_cleanups=self.empty_cleanups(fn),cleanup_partition=partition)
         return prefix+body+suffix
+
+    def primitive_cleanup_partition(self,fn,env,controls):
+        """Flat permutation lifetimes; retain source occurrences, never gates.
+
+        The complete source partition still needs calls, cells, structured
+        visits, borrowed lifetimes and their window/proof obligations.
+        """
+        allowed={"qalloc","qfree","x","cx","ccx","mcx","swap","qxor","qexch"}
+        if fn.groups[2] or not any(i.op=="qfree" for i in fn.code) or not any(i.op not in ["qalloc","qfree"] for i in fn.code):return None
+        if any(i.op not in allowed or i.body or i.otherwise for i in fn.code):return None
+        scope=dict(env);versions=WireVersions();spans={}
+        initial=[b for group in fn.groups[:2] for n,ty,r in group for b in wire(n,scope)]
+        initial += [Bundle(identity,1,cls,index) for identity,index,cls in controls]
+        for b in initial:spans.setdefault(b.identity,[]).append((b.offset,b.offset+b.width))
+        for identity,parts in spans.items():
+            merged=[]
+            for lo,hi in sorted(parts):
+                if merged and lo<=merged[-1][1]:merged[-1]=(merged[-1][0],max(hi,merged[-1][1]))
+                else:merged.append((lo,hi))
+            versions.ranges[identity]=tuple((lo,hi,0,False) for lo,hi in merged)
+        def overlap(parts,b):return any(a.identity==b.identity and a.offset<b.offset+b.width and b.offset<a.offset+a.width for a in parts)
+        def geometry(parts):return tuple((b.identity,b.offset,b.width) for b in parts)
+        events={};history={};allocations={};owned=set();plans={};owners={};serial=0
+        for index,inst in enumerate(fn.code):
+            op,a=inst.op,inst.args
+            if op=="qalloc":
+                require(len(inst.lhs)==1 and len(a)==2,"qalloc result/operand arity")
+                name=inst.lhs[0];n=scope.get(a[1],int(a[1]) if a[1].isdigit() else None)
+                require(isinstance(n,int) and n>0,"invalid allocation width")
+                identity=f"partition:{fn.name}:{index}"
+                while identity in versions.ranges:identity+="!"
+                b=Bundle(identity,n,a[0]);scope[name]=b;versions.acquire(b)
+                allocations[identity]={"name":name,"width":n,"index":index}
+                continue
+            if op=="qfree":
+                require(len(a)==1,"qfree operand arity")
+                name=a[0];parts=wire(name,scope)
+                if len(parts)!=1 or parts[0].identity not in allocations:return None
+                b=parts[0];inverse=[]
+                for prior in range(index-1,allocations[b.identity]["index"],-1):
+                    row=events.get(prior)
+                    if row is None or not overlap(row["outputs"],b):continue
+                    if row["match"] is None:break
+                    if prior not in owned:inverse.append(prior)
+                inverse.sort();computation=sorted({events[i]["match"] for i in inverse})
+                targets={part.identity for i in computation for part in events[i]["outputs"]}|{b.identity}
+                local=all(identity in allocations and identity in versions.ranges for identity in targets)
+                clean=all(value for identity,lo,hi,version,value in versions.capture([b]))
+                contiguous=inverse==list(range(index-len(inverse),index))
+                early=not computation or local and all(allocations[identity]["index"]<computation[0] for identity in targets)
+                produced=set();entry_clean=True
+                for i in computation:
+                    row=events[i]
+                    for identity,lo,hi,version,value in row["before"]+row["inputs"]:
+                        if identity in targets and not value and version not in produced:entry_clean=False
+                    produced.add(row["version"])
+                target_specs=sorted((allocations[identity] for identity in targets),key=lambda t:t["index"]) if local else []
+                point=(inst.block,inst.ordinal)
+                plan={"point":point,"symbol":self.obj.symbol(fn.name)["interface_hash"],"function":fn.name,"release":name,"compute":[fn.code[i] for i in computation],"targets":target_specs,"available":local and clean and contiguous and early and entry_clean,"owned_points":[f"{fn.code[i].block}:{fn.code[i].ordinal}" for i in inverse]+[f"{inst.block}:{inst.ordinal}"],"choices":{},"recomputations":{}}
+                plans[point]=plan
+                for i in inverse:owners[(fn.code[i].block,fn.code[i].ordinal)]=plan;owned.add(i)
+                del versions.ranges[b.identity];del scope[name]
+                continue
+            if op in ["qxor","qexch"]:
+                require(len(a)==2,"wire operation arity")
+                left,right=wire(a[0],scope),wire(a[1],scope)
+                require(sum(b.width for b in left)==sum(b.width for b in right),"wire operation width mismatch")
+                outputs=left+right if op=="qexch" else right;reads=[] if op=="qexch" else left
+            else:
+                ws=wire([list_operand(n) if n.startswith("(") else n for n in a],scope)
+                count=sum(b.width for b in ws)
+                require(count>=1 if op=="mcx" else count==GATES[op],"gate arity/opcode")
+                if op=="swap":outputs=ws;reads=[]
+                else:
+                    outputs=[ws[-1].bit(ws[-1].width-1)]
+                    reads=ws[:-1]+([ws[-1].slice(0,ws[-1].width-1)] if ws[-1].width>1 else [])
+            if any(overlap(reads,b) for b in outputs):return None
+            reads=reads+[Bundle(identity,1,cls,offset) for identity,offset,cls in controls]
+            before=versions.capture(outputs);inputs=versions.capture(reads)
+            key=(op,geometry(outputs),geometry(reads));match=history.get((key,inputs,before))
+            if match is not None:versions.restore(events[match]["before"])
+            else:
+                serial+=1;versions.assign(outputs,serial,False)
+                history[(key,inputs,versions.capture(outputs))]=index
+            events[index]={"outputs":outputs,"before":before,"inputs":inputs,"match":match,"version":serial}
+        return plans,owners
+
+    def cleanup_choice(self,plan):
+        ledger=self.catalog.ledger
+        if ledger not in plan["choices"]:
+            point={"symbol":plan["symbol"],"point":f"{plan['point'][0]}:{plan['point'][1]}","iteration":[],"instance":[]}
+            address={"chain":metadata_counts([*self.catalog.call_edges,point]),"ordinal":0,"step":self.catalog.root_step,"phase":self.catalog.root_phase}
+            choice=(ledger.schedule.pick("cleanup",**address) if ledger is not None else None) or {"realisation":"reverse"}
+            if ledger is not None:ledger.cleanup_decisions.append({**address,**choice,"owned_points":plan["owned_points"]})
+            require(choice["realisation"]!="recompute" or plan["available"],"source cleanup-pair recompute binding remains pending for this carrier")
+            plan["choices"][ledger]=choice["realisation"]
+        return plan["choices"][ledger]
+
+    def primitive_recompute(self,plan,env,regions,controls,meta):
+        ledger=self.catalog.ledger
+        if ledger in plan["recomputations"]:return plan["recomputations"][ledger]
+        local=dict(env);names=[];destinations=[]
+        for target in plan["targets"]:
+            fresh=self.fresh("terminal_recompute",target["width"])
+            name=f"$terminal_fresh:{self.serial}";local[name]=fresh
+            local[target["name"]]=fresh;names.append(name);destinations.append((target,env[target["name"]]))
+        compute=self.action_nodes(plan["compute"],local,regions,controls,function_name=plan["function"])
+        uncompute=self.action_nodes(plan["compute"],local,regions,controls,function_name=plan["function"])
+        for node in compute+uncompute:self.catalog.source_metadata[id(node)]=(node,meta)
+        xor=[]
+        for (target,destination),name in zip(destinations,names):
+            actual=f"$terminal_original:{name}";local[actual]=destination
+            xor.append({"invoke":"bind.qxor","args":[target["width"],name,actual]})
+        release=f"$terminal_release:{self.serial}";local[release]=env[plan["release"]]
+        body=[*({"acquire":name} for name in names),*compute,*xor,{"inverse":True,"body":uncompute},*({"relinquish":name} for name in reversed(names)),{"relinquish":release}]
+        result=Captured(body,local,controls);plan["recomputations"][ledger]=result
+        return result
 
     @staticmethod
     def empty_cleanups(fn):
@@ -3743,7 +3861,7 @@ class Source:
             return self.catalog.body(nodes,local,joined,inverse)
         return Captured([],{},controls,builder=expand)
 
-    def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False,function_name=None,oracle_pairs=None,empty_cleanups=()):
+    def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False,function_name=None,oracle_pairs=None,empty_cleanups=(),cleanup_partition=None):
         out,fragments = [],[]
         inactive=env.setdefault(_SOURCE_INACTIVE,set())
         lifetimes=env.setdefault(_SOURCE_LIFETIMES,{})
@@ -3992,6 +4110,21 @@ class Source:
             else:
                 raise ContractError(f"source binding not implemented: {op}; no estimate or exactness claim emitted")
             fragment=out[beginning:]
+            point=(inst.block,inst.ordinal)
+            release_plan=cleanup_partition[0].get(point) if cleanup_partition else None
+            inverse_plan=cleanup_partition[1].get(point) if cleanup_partition else None
+            if release_plan is not None or inverse_plan is not None:
+                def cleanup_part(joined,inverse,call_env,plan=release_plan or inverse_plan,is_release=release_plan is not None,nodes=fragment,values=dict(env),meta=meta):
+                    choice=self.cleanup_choice(plan)
+                    if choice=="reverse":return self.catalog.body(nodes,values,joined,inverse)
+                    if not is_release:return Profile()
+                    replacement=self.primitive_recompute(plan,values,regions,joined,meta)
+                    return self.catalog.body(replacement.body,replacement.env,joined,inverse)
+                capture=f"$terminal_cleanup:{self.serial}";self.serial+=1
+                env[capture]=Captured([],{},controls,builder=cleanup_part)
+                wrapper={"splice":capture}
+                if self.catalog.ledger is not None:self.catalog.source_metadata[id(wrapper)]=(wrapper,meta)
+                fragment=[wrapper];out[beginning:]=fragment
             if op=="oracle_call" and oracle_pairs and (inst.block,inst.ordinal) in oracle_pairs:
                 recompute=self.oracle_recompute(inst,env,regions,controls,meta,function)
                 capture=f"$oracle_cleanup:{self.serial}";self.serial+=1
@@ -4004,7 +4137,7 @@ class Source:
                 if self.catalog.ledger is not None:self.catalog.source_metadata[id(replacement)]=(replacement,meta)
                 fragment=[replacement]
             empty=(inst.block,inst.ordinal) in empty_cleanups
-            if not adjoint and op in ["quncopy","qunload","qfree","qreturn"] or adjoint and op=="qalloc" and empty:
+            if release_plan is None and (not adjoint and op in ["quncopy","qunload","qfree","qreturn"] or adjoint and op in ["qalloc","qborrow","qcopy","qload"]):
                 recompute=None
                 if op in ["quncopy","qunload"]:
                     fresh=self.fresh("recompute",b.width)
