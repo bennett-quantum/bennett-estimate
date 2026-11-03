@@ -26,8 +26,9 @@ status = "partial"
 source_commit = "fd626d37aba1f719c3b7b2059be46cbfaf462886"
 source_path = "spec/Bennett-ISA-Spec-0.9.md"
 source_sha256 = "bbd887c7841f4eed40f7b3518270a8f2cf781204c14ac4cc3eabca5c5b4b8c3b"
-# Explicit partitions are implemented. Strict legacy cutover, certificate
-# contexts and all identity-dependent cleanup carriers remain required.
+# Explicit partitions, forwarding and inverse-pair token metadata are present.
+# Strict legacy cutover, linked certificate contexts and general cleanup
+# partitioning remain required.
 
 [compatibility]
 object_reader = ["0.8", "0.9"]

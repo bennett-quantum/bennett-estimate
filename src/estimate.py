@@ -179,6 +179,14 @@ def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def metadata_counts(value):
+    """Generated metadata uses decimal strings before JCS loses integer bits."""
+    if type(value) is int and abs(value)>=2**53:return str(value)
+    if isinstance(value,(tuple,list)):return [metadata_counts(v) for v in value]
+    if isinstance(value,dict):return {k:metadata_counts(v) for k,v in value.items()}
+    return value
+
+
 _BYTE_POPCOUNTS=bytes(value.bit_count() for value in range(256))
 
 
@@ -1121,9 +1129,9 @@ class Catalog:
         if cached is not None and cached[0] is meta and cached[1] is self.call_edges and cached[2]==coordinates:
             chain,canonical=cached[3:]
         else:
-            chain=list(self.call_edges)
+            chain=metadata_counts(list(self.call_edges))
             if meta is not None:
-                chain.append({"symbol":meta["symbol"],"point":meta["point"],"iteration":list(coordinates),"instance":meta.get("instance",[])})
+                chain.append(metadata_counts({"symbol":meta["symbol"],"point":meta["point"],"iteration":list(coordinates),"instance":meta.get("instance",[])}))
             canonical=jcs(chain)
             self.address_cache=(meta,self.call_edges,coordinates,chain,canonical)
         if carrier:return {"chain":chain,"ordinal":0,"step":self.root_step,"phase":self.root_phase}
@@ -1143,8 +1151,8 @@ class Catalog:
 
     def address_key(self,chain,step,phase):
         cached=self.address_cache
-        canonical=cached[4] if cached is not None and chain is cached[3] else jcs(list(chain))
-        return canonical,step,phase
+        canonical=cached[4] if cached is not None and chain is cached[3] else jcs(metadata_counts(list(chain)))
+        return canonical,integer(step,0) if step is not None else None,phase
 
     def ordinal_sign(self):
         phase=self.root_phase
@@ -1281,7 +1289,7 @@ class Catalog:
                     key=jcs(address["chain"])
                     count=marked[1].get("call_index",0)+1
                     self.call_domains[key]=(address["chain"],max(count,self.call_domains.get(key,(None,0))[1]))
-                    edge={"symbol":marked[1]["symbol"],"point":marked[1]["point"],"iteration":list(coordinates[:marked[1]["depth"]]),"instance":marked[1].get("instance",[]),"call_index":marked[1].get("call_index",0)}
+                    edge=metadata_counts({"symbol":marked[1]["symbol"],"point":marked[1]["point"],"iteration":list(coordinates[:marked[1]["depth"]]),"instance":marked[1].get("instance",[]),"call_index":marked[1].get("call_index",0)})
                     if marked[1].get("oracle_call"):edge["entered_invocation"]=[None,None]
                     self.call_edges=edges+(edge,);self.loop_coordinates=[]
                 p = captured.builder(joined,inverse,env) if captured.builder is not None else self.body(captured.body, captured.env, joined, inverse)
@@ -2111,7 +2119,7 @@ class Schedule:
                 require(iteration=="*" or len(iteration)==depth,"schedule iteration depth mismatch")
                 instance=element.get("instance","*")
                 if fn.kind!="lproc":require(instance in ["*",[]],"non-lproc point has a nonempty instance")
-                elif instance!="*":require(tuple(instance) in context[element["symbol"]],"schedule path names an unreachable fixed-binding instance")
+                elif instance!="*":require(tuple(integer(n,0) for n in instance) in context[element["symbol"]],"schedule path names an unreachable fixed-binding instance")
                 if i+1<len(path) or element.get("call_index","*")!="*":
                     require(inst is not None,"support point is not an invocation edge")
                     op,args=inst.op,inst.args
@@ -2150,7 +2158,7 @@ class Schedule:
                         for k in ["iteration","instance","call_index"]:
                             if k=="call_index" and i==index:continue
                             expected=selector.get(k,"*")
-                            if expected!="*" and expected!=actual.get(k,[] if k!="call_index" else None):matches=False;break
+                            if not self.coordinate_matches(k,expected,actual.get(k,[] if k!="call_index" else None)):matches=False;break
                         if not matches:break
                     if matches:counts.append(count)
                 if counts:require(integer(selected,0)<max(counts),"semantic call occurrence outside expansion")
@@ -2158,6 +2166,13 @@ class Schedule:
     @staticmethod
     def specificity(entry):
         return (len(entry["path"]),sum(p["iteration"]!="*" for p in entry["path"]),entry["step"]!="*",entry["phase"]!="*",entry["generated"]!="*")
+
+    @staticmethod
+    def coordinate_matches(name,expected,actual):
+        if expected=="*":return True
+        if actual is None:return False
+        if name=="call_index":return integer(expected,0)==integer(actual,0)
+        return len(expected)==len(actual) and all(integer(a,0)==integer(b,0) for a,b in zip(expected,actual))
 
     def pick(self,kind,chain,ordinal,step=None,phase=None):
         matches=[]
@@ -2171,12 +2186,12 @@ class Schedule:
                 for k in ["iteration","instance","call_index"]:
                     expected=selector.get(k,"*")
                     got=actual.get(k,[] if k in ["iteration","instance"] else None)
-                    if expected!="*" and expected!=got:ok=False;break
+                    if not self.coordinate_matches(k,expected,got):ok=False;break
                 if not ok:break
                 if i+1<len(chain) and "entered_invocation" in actual:
                     selected_step,selected_phase=actual["entered_invocation"]
             if not ok:continue
-            if entry["step"]!="*" and (selected_step is None or integer(entry["step"],0)!=selected_step):continue
+            if entry["step"]!="*" and (selected_step is None or integer(entry["step"],0)!=integer(selected_step,0)):continue
             if entry["phase"]!="*" and entry["phase"]!=selected_phase:continue
             matches.append(entry)
         if not matches:return None
@@ -2285,7 +2300,7 @@ class Ledger:
             s=r["bundle"]
             require(r["end"] is not None or s.identity!=b.identity or b.offset+b.width<=s.offset or s.offset+s.width<=b.offset,"K27: double acquisition of a live allocation")
         r=self._register(b,moment,cls,placement,category=category,scheme=scheme)
-        r["id"]="frame:"+digest(jcs({"path":list(chain),"step":step,"phase":phase,"ordinal":ordinal,"scratch":b.identity,"occurrence":self.sequence}))
+        r["id"]="frame:"+digest(jcs(metadata_counts({"path":list(chain),"step":step,"phase":phase,"ordinal":ordinal,"scratch":b.identity,"occurrence":self.sequence})))
         self.cursor=moment;self.makespan=max(self.makespan,moment)
         return space_profile(r["class"],r["state"],b.width)
 
@@ -3014,7 +3029,7 @@ class Source:
         saved_edges=catalog.call_edges
         nested=bool(saved_edges and "entered_invocation" in saved_edges[-1])
         def step_context(step=None,phase=None):
-            if nested:catalog.call_edges=saved_edges[:-1]+({**saved_edges[-1],"entered_invocation":[step,phase]},)
+            if nested:catalog.call_edges=saved_edges[:-1]+({**saved_edges[-1],"entered_invocation":metadata_counts([step,phase])},)
             else:catalog.root_step,catalog.root_phase=step,phase
         out=Profile();frames=[]
         try:
@@ -3506,7 +3521,7 @@ class Source:
                         if candidate.get("entries") or "interface_vertices" in candidate:
                             bound=candidate["bindings"]
                             known={"region":child.name,"target_hash":self.target.hash,"params_hash":digest(jcs(encoded)),"inherited_controls":len(set((bit[0],bit[1]) for bit in controls))}
-                            matches=all(bound.get(key)==value for key,value in known.items())
+                            matches=all(integer(bound[key],0)==value if key=="inherited_controls" else bound.get(key)==value for key,value in known.items())
                             matches=matches and [integer(n,0) for n in bound["budget"]]==[integer(n,0) for n in tuple_] and decimal_value(bound["epsilon"])==0
                             if matches:matches=bound["closure_hash"]==self.obj.identities(closure=True)[child.name]
                             require(not matches,"CC/R nested quantum schedule replay remains pending for these invocation bindings")
@@ -4036,6 +4051,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
             if key=="budget":
                 return isinstance(supplied,list) and len(supplied)==4 and [rational(n) for n in supplied]==[rational(n) for n in value]
             if key=="epsilon": return supplied is not None and rational(supplied)==rational(value)
+            if key=="inherited_controls":return integer(supplied,0)==value
             return supplied==value
         selected=all(binding_equal(k,v) for k,v in bindings.items() if k!="scheduler")
         if selected:
@@ -4153,7 +4169,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
     if ledger is not None:
         result["resolved_default_epsilon_share"]={"numerator":str(ledger.default_share.numerator),"denominator":str(ledger.default_share.denominator)}
         result["frame"]=ledger.frame()
-        result["cleanup_decisions"]=ledger.cleanup_decisions
+        result["cleanup_decisions"]=metadata_counts(ledger.cleanup_decisions)
         result["invocation_contexts"]=source.invocations
     elif accuracy:
         result["resolved_default_epsilon_share"]={"numerator":str(default_share.numerator),"denominator":str(default_share.denominator)}

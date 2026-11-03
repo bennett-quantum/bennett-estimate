@@ -73,13 +73,16 @@ Tests cover 2^20 physical cells with bounded summary work and compare small
 controlled cases against literal expansion. Scheme workspace remains included;
 wire aliases that defeat index renaming use literal traversal.
 
-Seven complete CC program differentials agree with the VM on all resource
+Nine complete CC program differentials agree with the VM on all resource
 rows, source steps and terminal status: a paired action, slice/concat register
 views, a stale-alias fault, block-image effects, disjoint register inverses,
-quantum segment uncall and nested classical uncall. CC/R register accounting includes dynamic widths,
+quantum segment uncall, nested classical uncall, clean measurement and a
+measurement-uncall fault. CC/R register accounting includes dynamic widths,
 aliases, opaque IDs, slices/concat and source-frame history reversal, including quantum calls. Reversed classical
-frames are charged separately from forward source steps. Measurement and generic
-cleanliness evidence remain required.
+frames are charged separately from forward source steps. Proved-clean registers
+measure deterministically and consume their aliases; uncall across a measurement
+fails before reversal. Unresolved outcomes and generic cleanliness evidence
+remain required.
 
 Current source coverage includes structured gates, allocation/borrowing,
 copy/XOR/exchange, predication, loops, local-region images and linear coherent
@@ -94,7 +97,7 @@ bindings. Remaining lifted memory rows and published source-binding gaps, comple
 partitioning, remaining register/effect histories and certificate proof checking still require work.
 Unsupported paths fail explicitly; they remain requirements.
 
-Flat actions made entirely of oracle calls now match joint source occurrences
+Flat actions containing oracle calls and permutation primitives match joint source occurrences
 using actual token identities, current target versions and read/control versions.
 Their independent cleanup carriers support reverse and fresh T/F recompute,
 including nonzero caller targets. Fresh calls have separate occurrence indices;
@@ -102,9 +105,12 @@ source adjoints form new pairs while raw inverse retains forward paths. General
 release-ended chains, action-call histories and cleanup window validation remain
 required; this family does not complete K81.
 
-CC/R register placement on topology targets and potentially applicable nested
-quantum schedules still require replay integration. Those paths report pending
-implementation before an exact result can be emitted. Minted tokens become
+Default CC/R topology replay reserves vertices for all live registers, checks
+native adjacency and scratch capacity, and restores placements during uncall.
+The current VM binary rejects the topology field; the differential report
+states that limitation and labels its topology rows as forecasts without a VM
+match. Potentially applicable nonempty nested quantum schedules still require
+integration and report pending implementation. Minted tokens become
 invalid when their mint frame is reversed, including surviving aliases.
 
 Full exact source coverage needs the published decisions described in
@@ -152,6 +158,9 @@ ranges, table tuple encodings, sampler words, error decimals and composition
 keys. Positional control/borrow labels remain annotations, and legal large
 widths or sample counts have no host-size cap. A requested claim label is
 preserved without assigning a verification verdict.
+Inverse-pair token metadata validates canonical equality partitions; linked
+tuple/budget coverage requires declaration order and preserves that partition.
+This metadata check discharges no proof or argument-domain obligation.
 
 `--certificate-template existing.json --write-certificate output.json` adds
 K12 exact resources, native gate counts and the reconstructed root frame to

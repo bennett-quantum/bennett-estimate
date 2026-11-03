@@ -45,6 +45,40 @@ def make_program(text,signatures,data=None,layout=None,ptr=32,devices=None):
 
 
 class Selectors(unittest.TestCase):
+    def test_large_source_coordinates_have_distinct_ordinals_and_lossless_keys(self):
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),target())
+        c.source_context={"symbol":"a"*64,"point":"entry:0","depth":1}
+        large=2**80
+        addresses=[]
+        for value in [large,large+1]:
+            c.loop_coordinates=[value]
+            addresses.append(c.leaf_address())
+        self.assertEqual([a["ordinal"] for a in addresses],[0,0])
+        self.assertEqual([a["chain"][0]["iteration"] for a in addresses],[[str(large)],[str(large+1)]])
+        self.assertNotEqual(c.address_key([point(iteration=[large])],None,None),c.address_key([point(iteration=[large+1])],None,None))
+        self.assertEqual(c.address_key([point()],large,"fwd"),c.address_key([point()],str(large),"fwd"))
+
+    def test_decimal_string_path_coordinates_match_exact_integer_values(self):
+        large=2**80+1
+        selected=entry(path=[{**point(iteration=[str(large)]),"instance":["3"],"call_index":"1"}],step="2",phase="fwd",generated="3",realisation="native")
+        s=e.Schedule(schedule([selected]))
+        actual=[{**point(iteration=[large]),"instance":[3],"call_index":1}]
+        self.assertEqual(s.pick("gate",actual,3,2,"fwd"),{"realisation":"native"})
+        actual[0]["iteration"]=[large-1]
+        self.assertIsNone(s.pick("gate",actual,3,2,"fwd"))
+        selected=entry(path=[point()],step=str(large),phase="rev",realisation="native")
+        s=e.Schedule(schedule([selected]))
+        actual=[{**point(),"call_index":0,"entered_invocation":[str(large),"rev"]},point("b"*64)]
+        self.assertEqual(s.pick("gate",actual,0,999,"fwd"),{"realisation":"native"})
+
+    def test_fixed_instance_path_accepts_decimal_string_entry_positions(self):
+        root={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":["i1"]}
+        worker={"abi":"0.9","tier":"q","kind":"lproc","params":[1],"result":1,"tokens":[],"args":["i1"],"mem":[]}
+        code="oracle @root (x:wire in) (t:wire) (f:wire[4]) () (a:i1)\nregs { r:reg[1] }\n^entry():\nr = lift.call @worker (x) () (a) ()\nlift.retval r\nlproc @worker (v:reg[1]) (r:reg[1]) () (a:i1 classical) ()\n^entry():\nlift.ret v"
+        obj=make_program(code,{"root":root,"worker":worker})
+        doc=schedule([entry(path=[{**point(obj.symbol("worker")["interface_hash"]),"instance":["0"]}],realisation="native")])
+        e.Schedule(doc,obj,"root")
+
     def test_captured_record_arrays_reuse_validation_without_rebinding_fields(self):
         class Counting(e.Catalog):
             field_bindings=0
@@ -224,6 +258,14 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_schedule_binding_matches_decimal_string_control_count(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        obj=make_object("perm_action @root (q:wire) () () () ()\n^entry():\nx q",sig)
+        doc=e.estimate(obj,target(),"root",[],["0"]*4)["effective_schedule"]
+        doc["bindings"]["inherited_controls"]="0";doc["entries"]=[entry("start",time="5")]
+        obj.sections["schedule"]=doc
+        self.assertEqual(e.estimate(obj,target(),"root",[],["0"]*4)["resources"]["time"],"6")
+
     def oracle_pair_object(self, tokens=("a","b"), wrapped=False):
         root={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1,4],"in":[1],"mem":[],"args":["token","token"],"bounds":[]}
         oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
@@ -575,6 +617,9 @@ class Accounting(unittest.TestCase):
         action=e.estimate(obj,target(),"pair",[],["0"]*4)
         root=obj.symbol("pair")["interface_hash"]
         obj.sections["schedule"]={"bindings":action["effective_schedule"]["bindings"],"entries":[entry("gate",path=[point(root,"entry:0")],realisation="missing-scheme")]}
+        with self.assertRaisesRegex(e.ContractError,"CC/R.*schedule.*pending"):
+            e.estimate(obj,target(),"main",[],["0"]*4)
+        obj.sections["schedule"]["bindings"]["inherited_controls"]="0"
         with self.assertRaisesRegex(e.ContractError,"CC/R.*schedule.*pending"):
             e.estimate(obj,target(),"main",[],["0"]*4)
         obj.sections["schedule"]["bindings"]={**obj.sections["schedule"]["bindings"],"budget":["1","0","0","0"]}

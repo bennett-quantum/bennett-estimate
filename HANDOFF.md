@@ -73,9 +73,9 @@ correctness/error claims or nested composition.
 
 Last full gate before the shift4 instruction: headless scripts/pre-push
 --working-tree exited0,168 tests in26.04s plus fmt/strict Clippy/shell. Current
-changes pass cargo build --offline --locked -j4 and70 focused
-source/history/certificate/selector/CLI/differential cases in8.802s;
-test_gate's2 cases also passed earlier in this shift. There are194 discovered
+changes pass cargo build --offline --locked -j4 and80 focused
+source/history/certificate/selector/CLI/differential cases in9.132s;
+test_gate's2 cases also passed earlier in this shift. There are204 discovered
 tests; this is not a current full-suite pass.
 The shift4 binding reserves all further full gates, pushed-SHA and hook checks
 for the orchestrator. No git process ran. The current batch requires review
@@ -114,11 +114,11 @@ fixed lproc bindings, captures, qinplace, source adjoints and raw inversion
 preserve global identity while serializing local canonical partitions.
 params_hash is unchanged; schedule hashes include supplied aliases. Schedule
 and invocation/structural certificate readers accept the new field. Strict
-legacy cutover, inverse-pair bindings and complete certificate contexts remain.
+legacy cutover and complete linked certificate contexts remain.
 The old EST-CONTEXT-03 proposal is historical; its decision is resolved and .5
 tracks adoption. Legacy tuple-only requests retain base-profile behavior.
 
-For flat oracle-only action bodies, joint occurrence versions now form K81
+For flat oracle/permutation-primitive action bodies, joint occurrence versions form K81
 independent call pairs using token identity and read/control versions. Recompute
 keeps original caller targets and uses fresh T/F, compute/XOR/uncompute/releases;
 fresh call indices are0/1. K63 validates indices against actual selected domains
@@ -126,6 +126,11 @@ before target costs when known, unioning covered invocations. Tests cover token
 partitions, intervening joint outputs, nested inverses, control-set order, ties,
 exact time/count/peak/area formulas and source-adjoint/raw-inverse paths. General
 release-ended chains and action-call prehistory/window checking remain required.
+Large integer arguments use typed decimal strings in pairing keys; adjacent
+i128 values above binary64 precision do not merge. f64 signs and NaN payloads
+remain distinct. Inverse-pair certificate token metadata validates alias arrays
+and known tuple order; its coverage helper checks budget inequalities, exact
+argument-token tuples and partition equality, without a proof verdict.
 
 Pending source/context cases report deterministic pending evidence JSON,
 complete request bindings, no resource rows and exit 3: classical
@@ -141,9 +146,23 @@ continue while these decisions are pending.
 
 Minted-token validity follows active history, including aliases surviving
 uncall. The §5.4 permission to use a token minted for another oracle is
-preserved. CC/R topology allocation and potentially applicable nested quantum
-schedules report pending implementation instead of claiming unchecked exact
-resources. Schedule replay remains required under bph.2.
+preserved. Default CC/R topology placement/replay reserves every live physical
+register, including non-operands, and checks callee scratch/adjacency with a
+private ledger. Its complete rows must equal the composable profile plus caller
+occupancy. Placement snapshots survive views and segment uncall. Potentially
+applicable nonempty nested quantum schedules remain pending under bph.2.
+
+Proved-clean measurements return zero without a state vector, consume aliases
+and release physical allocations. Dynamic width mismatch traps before measurement;
+measured segments cannot be uncalled. Static declared/block-local measurement
+widths and dynamic spelling are checked; unknown dominating types defer. Two
+new complete VM differentials agree: clean-measure-program6steps/time6/peak2/area2
+and measure-uncall-fault FAILED5steps/time5/peak2/area4, both zero gates and reversed
+frames. There are nine ordinary native-program matches. The VM rejects topology
+with exact stderr §8: unknown field topology. The consumer defect is queued;
+the report marks topology unavailable and omits match fields, then automatically
+compares all nine programs when the VM accepts topology. No topology VM match
+is claimed.
 
 Open work: bph/.1/.2/.3; bph.4/.6/.7 track contract decisions and .5 K91 adoption. Complete
 source admission/type and remaining register/effect paths, remaining loop/record scaling, CC/R K55 propagation, K81 release-ended/independent-call cleanup
