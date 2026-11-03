@@ -224,6 +224,68 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def oracle_pair_object(self, tokens=("a","b"), wrapped=False):
+        root={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1,4],"in":[1],"mem":[],"args":["token","token"],"bounds":[]}
+        oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        calls=[("adj " if wrapped and i%2 else "")+f"oracle_call @identity {tk} (x) t f () ()" for i,tk in enumerate(tokens)]
+        code="perm_action @root (t:wire, f:wire[4]) (x:wire in) () (a:token, b:token) ()\n^entry():\n"+"\n".join(calls)+"\noracle @identity (x:wire in) (t:wire) (f:wire[4]) () ()\nregs {  }\n^entry():\nlift.retval x"
+        return make_program(code,{"root":root,"identity":oracle})
+
+    def test_oracle_cleanup_pairs_use_token_identity_and_current_joint_versions(self):
+        args=[["1","0","0","0"]]*2
+        for tokens,partition,expected in [(("a","b"),[0,0],["entry:1"]),(("a","b"),[0,1],[]),(("a","b","b","a"),[0,1],["entry:2","entry:3"]),(("a","b","b","a"),[0,0],["entry:1","entry:3"])]:
+            with self.subTest(tokens=tokens,partition=partition):
+                obj=self.oracle_pair_object(tokens,wrapped=True)
+                result=e.estimate(obj,target(),"root",args,["0"]*4,token_aliases=partition,include_frame=True)
+                self.assertEqual([d["chain"][-1]["point"] for d in result["cleanup_decisions"]],expected)
+                self.assertTrue(all(d["ordinal"]==0 and d["realisation"]=="reverse" for d in result["cleanup_decisions"]))
+                single=e.estimate(obj,target(),"identity",[],["1","0","0","0"],token_aliases=[0])
+                self.assertEqual(result["resources"]["gate_count"],str(len(tokens)*int(single["resources"]["gate_count"])))
+
+    def test_oracle_pair_recompute_keeps_caller_targets_and_owns_fresh_calls(self):
+        obj=self.oracle_pair_object();args=[["1","0","0","0"]]*2
+        base=e.estimate(obj,target(),"root",args,["0"]*4,token_aliases=[0,0],include_frame=True)
+        doc=base["effective_schedule"]
+        doc["entries"]=[entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],"entry:1")],generated=0,realisation="recompute")]
+        obj.sections["schedule"]=doc
+        result=e.estimate(obj,target(),"root",args,["0"]*4,token_aliases=[0,0],include_frame=True)
+        one=e.estimate(obj,target(),"identity",[],["1","0","0","0"],token_aliases=[0])["resources"]
+        T,G,P,A=(int(one[k]) for k in ["time","gate_count","peak_qubits[data]","qubit_second[data]"])
+        self.assertEqual(result["resources"],{"time":str(3*T+5),"gate_count":str(3*G+5),"peak_qubits[data]":str(P+5),"qubit_second[data]":str(3*A+10*T+55)})
+        self.assertEqual([context["path"][-1]["call_index"] for context in result["invocation_contexts"][1:]],[0,0,1])
+        self.assertEqual([context["path"][-1]["point"] for context in result["invocation_contexts"][1:]],["entry:0","entry:1","entry:1"])
+        self.assertEqual([d["realisation"] for d in result["cleanup_decisions"]],["recompute"])
+
+    def test_oracle_pair_carrier_ties_check_before_target_realisation(self):
+        args=[["1","0","0","0"]]*2
+        for partition,has_pair in [([0,0],True),([0,1],False)]:
+            obj=self.oracle_pair_object()
+            doc=e.estimate(obj,target(),"root",args,["0"]*4,token_aliases=partition)["effective_schedule"]
+            chosen=entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],"entry:1")],generated=0,realisation="reverse")
+            doc["entries"]=[chosen,chosen];obj.sections["schedule"]=doc
+            if has_pair:
+                with patch.object(e.Target,"native_gate",side_effect=AssertionError("realized before carrier admission")),self.assertRaisesRegex(e.ContractError,"multiple maximal"):
+                    e.estimate(obj,target(),"root",args,["0"]*4,token_aliases=partition)
+            else:
+                result=e.estimate(obj,target(),"root",args,["0"]*4,token_aliases=partition,include_frame=True)
+                self.assertEqual(result["cleanup_decisions"],[])
+
+    def test_oracle_cleanup_call_indices_follow_selected_expansion(self):
+        args=[["1","0","0","0"]]*2
+        for realisation in ["reverse","recompute"]:
+            obj=self.oracle_pair_object()
+            doc=e.estimate(obj,target(),"root",args,["0"]*4,token_aliases=[0,0])["effective_schedule"]
+            carrier=point(obj.symbol("root")["interface_hash"],"entry:1")
+            child=point(obj.symbol("identity")["interface_hash"],"$commit")
+            doc["entries"]=[entry("cleanup",path=[carrier],realisation=realisation),entry("gate",path=[{**carrier,"call_index":1},child],realisation="native")]
+            obj.sections["schedule"]=doc
+            if realisation=="reverse":
+                with patch.object(e.Target,"native_gate",side_effect=AssertionError("realized before occurrence validation")),self.assertRaisesRegex(e.ContractError,"semantic call occurrence outside expansion"):
+                    e.estimate(obj,target(),"root",args,["0"]*4,token_aliases=[0,0])
+            else:
+                result=e.estimate(obj,target(),"root",args,["0"]*4,token_aliases=[0,0],include_frame=True)
+                self.assertEqual([c["path"][-1]["call_index"] for c in result["invocation_contexts"][1:]],[0,0,1])
+
     def test_cc_register_ids_are_opaque_except_equality_and_zero(self):
         sig={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
         body="fn cc @root () () () () ()\n^entry():\nq = qreg.new data 1\nid = qreg.id q\nc = const.i64 {literal}\np = icmp.eq id c\nbr p ^yes() ^no()\n^yes():\ntrap\n^no():\nqreg.free q\nret"
@@ -592,6 +654,15 @@ class Accounting(unittest.TestCase):
         for body in ["^entry():", "^entry():\nx q\n^empty():"]:
             with self.subTest(body=body),self.assertRaisesRegex(e.ContractError,"§16.2.*instruction"):
                 make_object("perm_action @root (q:wire) () () () ()\n"+body,signature)
+
+    def test_reader_rejects_empty_present_structured_scopes_even_at_zero_trips(self):
+        loop={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[0]}
+        with self.assertRaisesRegex(e.ContractError,"§16.2.*instruction"):
+            make_object("perm_action @root (t:wire) () () () ()\nregs {  } bounds { 0 }\n^entry():\nqloop 0 {\n}",loop)
+        branch={**loop,"in":[1],"bounds":[]}
+        for body in ["qif c {\n} {\nx t\n}","qif c {\nx t\n} {\n}"]:
+            with self.subTest(body=body),self.assertRaisesRegex(e.ContractError,"§16.2.*instruction"):
+                make_object("perm_action @root (t:wire) (c:wire in) () () ()\n^entry():\n"+body,branch)
 
     def test_cc_register_program_matches_complete_native_vm_ledger(self):
         obj=e.Object.read((ROOT/"examples/native-pair-program.bisa").read_text())

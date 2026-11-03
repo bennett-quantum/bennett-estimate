@@ -1445,9 +1445,11 @@ def parse_function(lines):
             current = blocks[block][1]
         elif line == "} {":
             require(stack, "unmatched else")
+            require(current,"§16.2: a structured scope requires at least one instruction")
             current = stack[-1][1].otherwise
         elif line == "}":
             require(stack, "unmatched scope end")
+            require(current,"§16.2: a structured scope requires at least one instruction")
             current, _ = stack.pop()
         else:
             require(block is not None, "instruction outside block")
@@ -2578,8 +2580,70 @@ class Source:
             if self.catalog.ledger is not None:
                 for node in before+after:self.catalog.source_metadata[id(node)]=(node,meta)
             prefix+=before;suffix=after+suffix
-        body=self.action_nodes([i for _,code in fn.blocks.values() for i in code],env,regions,controls,adjoint=adjoint)
+        pairs=self.oracle_pairs(fn,env,controls,adjoint)
+        body=self.action_nodes([i for _,code in fn.blocks.values() for i in code],env,regions,controls,adjoint=adjoint,oracle_pairs=pairs)
         return prefix+body+suffix
+
+    def oracle_pairs(self,fn,env,controls,adjoint=False):
+        """K81 joint versions for flat oracle-call bodies, before expansion.
+
+        These bodies have no release or intrinsic boundaries. Other source
+        families still need the complete release-ended partition pass.
+        """
+        rows=[]
+        if _SOURCE_TOKEN_IDENTITIES not in env:return set()
+        for inst in fn.code:
+            op,args=inst.op,inst.args;own=[]
+            while op in ["adj","ctl"]:
+                if op=="ctl":own+=bits(wire(args[0],env));op,args=args[1],args[2:]
+                else:op,args=args[0],args[1:]
+            if op!="oracle_call":return set()
+            rows.append((inst,args,tuple(dict.fromkeys(controls+tuple(own)))))
+        versions=WireVersions();intervals={}
+        parts=[b for group in fn.groups[:3] for n,ty,role in group for b in wire(n,env)]
+        parts += [Bundle(identity,1,cls,index) for identity,index,cls in controls]
+        for b in parts:intervals.setdefault(b.identity,[]).append((b.offset,b.offset+b.width))
+        for identity,spans in intervals.items():
+            merged=[]
+            for lo,hi in sorted(spans):
+                if merged and lo<=merged[-1][1]:merged[-1]=(merged[-1][0],max(hi,merged[-1][1]))
+                else:merged.append((lo,hi))
+            versions.ranges[identity]=tuple((lo,hi,0,False) for lo,hi in merged)
+        history={};pairs=set();serial=0
+        for inst,a,joined in reversed(rows) if adjoint else rows:
+            callee=a[0].removeprefix("@");child=self.obj.functions[callee]
+            outputs=wire([a[3],a[4]],env)
+            reads=wire(list_operand(a[2])+list_operand(a[5]),env)+[Bundle(identity,1,cls,index) for identity,index,cls in joined]
+            actuals=list_operand(a[6]);types=child.groups[4]
+            identities=self.token_context(env,[a[1]]+[n for (name,ty,role),n in zip(types,actuals) if ty=="token"])
+            geometry=lambda ws:tuple((b.identity,b.offset,b.width) for b in ws)
+            key=(callee,geometry(outputs),geometry(reads),jcs([env[n] for n in actuals]),identities)
+            before=versions.capture(outputs);inputs=versions.capture(reads)
+            entry=history.get((key,inputs,before))
+            if entry is not None:
+                versions.restore(entry);pairs.add((inst.block,inst.ordinal))
+            else:
+                serial+=1;versions.assign(outputs,serial,False)
+                history[(key,inputs,versions.capture(outputs))]=before
+        return pairs
+
+    def oracle_recompute(self,inst,env,regions,controls,meta,function):
+        """Restore XOR-oracle targets with fresh T/F and fresh call spaces."""
+        a=inst.args;local=dict(env);names=[];widths=[]
+        for label,actual in zip(["target","fault"],a[3:5]):
+            width=sum(b.width for b in wire(actual,env));fresh=self.fresh("cleanup_"+label,width)
+            name=f"$cleanup_{label}:{self.serial}";local[name]=fresh;names.append(name);widths.append(width)
+        actuals=list(a);actuals[3:5]=names;calls=[]
+        for occurrence in [0,1]:
+            replacement=Instruction("oracle_call",actuals,[],block=inst.block,ordinal=inst.ordinal)
+            call=self.action_nodes([replacement],local,regions,controls,function_name=function)
+            if self.catalog.ledger is not None:
+                for node in call:self.catalog.source_metadata[id(node)]=(node,{**meta,"call":True,"oracle_call":True,"call_index":occurrence})
+            calls.append(call)
+        helpers=[*({"acquire":n} for n in names),*({"invoke":"bind.qxor","args":[w,n,actual]} for w,n,actual in zip(widths,names,a[3:5])),*({"relinquish":n} for n in reversed(names))]
+        if self.catalog.ledger is not None:
+            for node in helpers:self.catalog.source_metadata[id(node)]=(node,{**meta,"call":False})
+        return Captured([*helpers[:2],*calls[0],*helpers[2:4],*calls[1],*helpers[4:]],local,controls)
 
     def action(self, nodes, env, regions, controls=(), inverse=False):
         out = Profile()
@@ -3509,7 +3573,7 @@ class Source:
             return self.catalog.body(nodes,local,joined,inverse)
         return Captured([],{},controls,builder=expand)
 
-    def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False,function_name=None):
+    def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False,function_name=None,oracle_pairs=None):
         out,fragments = [],[]
         inactive=env.setdefault(_SOURCE_INACTIVE,set())
         lifetimes=env.setdefault(_SOURCE_LIFETIMES,{})
@@ -3643,12 +3707,12 @@ class Source:
             elif op=="ctl":
                 require(len(a)>=3,"ctl requires control and region call")
                 nested=Instruction(a[1],a[2:],[],block=inst.block,ordinal=inst.ordinal)
-                emit({"under":a[0],"body":self.action_nodes([nested],env,regions,controls,depth,adjoint)})
+                emit({"under":a[0],"body":self.action_nodes([nested],env,regions,controls,depth,adjoint,function_name,oracle_pairs)})
             elif op=="adj":
                 require(len(a)>=2,"adj requires region call")
                 nested=Instruction(a[0],a[1:],[],block=inst.block,ordinal=inst.ordinal)
                 capture=f"$adjcall:{self.serial}";self.serial+=1
-                body=self.action_nodes([nested],env,regions,controls,depth,not adjoint)
+                body=self.action_nodes([nested],env,regions,controls,depth,not adjoint,function_name,oracle_pairs)
                 env[capture]=Captured(body,dict(env),controls)
                 emit({"splice":capture})
             elif op=="action_call":
@@ -3758,6 +3822,13 @@ class Source:
             else:
                 raise ContractError(f"source binding not implemented: {op}; no estimate or exactness claim emitted")
             fragment=out[beginning:]
+            if op=="oracle_call" and oracle_pairs and (inst.block,inst.ordinal) in oracle_pairs:
+                recompute=self.oracle_recompute(inst,env,regions,controls,meta,function)
+                capture=f"$oracle_cleanup:{self.serial}";self.serial+=1
+                env[capture]=Captured(fragment,dict(env),controls,cleanup=True,recompute=recompute)
+                wrapper={"splice":capture}
+                if self.catalog.ledger is not None:self.catalog.source_metadata[id(wrapper)]=(wrapper,{**meta,"call":False})
+                fragment=[wrapper];out[beginning:]=fragment
             if adjoint and op=="qif":
                 replacement={"inverse":True,"body":fragment}
                 if self.catalog.ledger is not None:self.catalog.source_metadata[id(replacement)]=(replacement,meta)
