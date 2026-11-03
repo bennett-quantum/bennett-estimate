@@ -115,6 +115,20 @@ coverage cannot honestly be marked complete.
 
 ## EST-CONTEXT-03: token identity aliasing is not encoded by K13 tuples
 
+**Decision resolved by published K91; adoption in progress.** Commit
+fd626d37aba1f719c3b7b2059be46cbfaf462886 (document SHA-256
+bbd887c7841f4eed40f7b3518270a8f2cf781204c14ac4cc3eabca5c5b4b8c3b)
+publishes the additive `token_aliases/1` feature. Only oracle subjects prepend
+the primary token; action and CC/R subjects list token arguments alone.
+Canonical first-occurrence labels record equality, with equal tuples required
+for shared identities. The feature uses new ABI symbols rather than changing
+the old argument layout. The base pin predates K91; SPEC_VERSIONS.toml pins
+this feature separately while implementation remains partial. Explicit
+partitions now resolve the CC witness below and source identity contexts flow
+through Q action/oracle captures; complete cutover and certificate/cleanup
+integration remain `bennett-estimate-bph.5`. The proposal below is historical,
+not the adopted ABI.
+
 K12/K13 correctly fix decimal handling and tuple-only parameter encoding. This
 is a separate context question: §5.3 matched pairs retain token identities as
 well as tuples, §5.4 produces a fresh token for each successful budget.mint,

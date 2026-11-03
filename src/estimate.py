@@ -1357,6 +1357,7 @@ class Catalog:
 NAME = r"[A-Za-z_][A-Za-z0-9_.]*"
 _SOURCE_INACTIVE=object()
 _SOURCE_LIFETIMES=object()
+_SOURCE_TOKEN_IDENTITIES=object()
 SECTIONS = ["symbols", "imports", "functions", "data", "devices", "layout", "schedule", "certificate", "coverage"]
 
 
@@ -1940,13 +1941,43 @@ def resolved_arguments(types, values, obj):
     return out
 
 
+def validate_token_aliases(aliases,tuples):
+    """K91 restricted-growth labels, in the invocation's token order."""
+    require(isinstance(aliases,list) and len(aliases)==len(tuples),"E_ARG: token_aliases arity mismatch")
+    seen={}
+    for label,budget in zip(aliases,tuples):
+        require(type(label) is int and label>=0,"E_ARG: token_aliases labels must be nonnegative JSON integers")
+        value=tuple(integer(n,0) for n in budget) if budget is not None else None
+        if label not in seen:
+            require(label==len(seen),"E_ARG: token_aliases labels must follow first occurrence without gaps")
+            seen[label]=value
+        else:require(value is None or seen[label] is None or value==seen[label],"E_ARG: token_aliases equality conflicts with token tuples")
+    return list(aliases)
+
+
+def canonical_token_aliases(identities):
+    labels={};result=[]
+    for identity in identities:
+        if identity not in labels:labels[identity]=len(labels)
+        result.append(labels[identity])
+    return result
+
+
 class Schedule:
     """ISA-11 selectors; matching is independent for each decision kind."""
     def __init__(self,doc,obj=None,region=None):
         keys(doc,["bindings","entries"],["interface_vertices"],"schedule")
         self.doc=doc
         b=doc["bindings"]
-        keys(b,["closure_hash","target_hash","region","variant","inherited_controls","budget","params_hash","epsilon","scheduler"],["expansion"],"schedule bindings")
+        keys(b,["closure_hash","target_hash","region","variant","inherited_controls","budget","params_hash","epsilon","scheduler"],["expansion","token_aliases"],"schedule bindings")
+        if "token_aliases" in b:
+            require(isinstance(b["token_aliases"],list),"E_ARG: token_aliases must be an array")
+            arity=len(b["token_aliases"])
+            if obj is not None and b["region"] in obj.functions:
+                fn=obj.functions[b["region"]]
+                group=fn.groups[0] if fn.kind in ["cc","r"] else fn.groups[4] if fn.kind=="oracle" else fn.groups[3]
+                arity=(fn.kind=="oracle")+sum(ty=="token" for n,ty,role in group)
+            validate_token_aliases(b["token_aliases"],[None]*arity)
         for name in ["closure_hash","target_hash","params_hash"]:
             require(isinstance(b[name],str) and re.fullmatch(r"[0-9a-f]{64}",b[name]),f"invalid schedule {name}")
         require(isinstance(b["variant"],str) and b["variant"],"empty schedule variant")
@@ -2428,7 +2459,14 @@ class Source:
         self.serial += 1
         return Bundle(f"source:{self.serial}:{name}", width, cls or ("any" if self.catalog.ledger is not None else self.cls), state=state)
 
-    def region(self, name, args, budget, interface=None, controls=(), adjoint=False,raw_inverse=False):
+    @staticmethod
+    def token_context(env,names):
+        identities=env.get(_SOURCE_TOKEN_IDENTITIES)
+        if identities is None:return None
+        require(all(name in identities for name in names),"K91: source token identity missing from lexical context")
+        return tuple(identities[name] for name in names)
+
+    def region(self, name, args, budget, interface=None, controls=(), adjoint=False,raw_inverse=False,token_context=None):
         require(name not in self.calls, "§5.1: recursive region call graph")
         if getattr(self.catalog.ledger,"admission",False) and self.calls and self.obj.functions[name].kind=="oracle":
             # In Q source, every nested oracle token is forwarded from root
@@ -2451,7 +2489,14 @@ class Source:
                     if n not in env: env[n] = self.fresh(n,type_width(ty,self.obj.ptr))
             arg_group = fn.groups[4] if fn.kind == "oracle" else fn.groups[3]
             env.update({n:(raw if ty=="f64" else v) for (n,ty,r),v,raw in zip(arg_group,parsed,args)})
-            self.invocations.append({"region":name,"invocation":{"args":args,"budget":budget},"inherited_controls":len(set((b[0],b[1]) for b in controls)),"source_adjoint":adjoint,"raw_inverse":raw_inverse,"path":[{k:v for k,v in edge.items() if k!="entered_invocation"} for edge in self.catalog.call_edges]})
+            invocation={"args":args,"budget":budget}
+            if token_context is not None:
+                names=[n for n,ty,r in arg_group if ty=="token"]
+                offset=int(fn.kind=="oracle")
+                require(len(token_context)==len(names)+offset,"K91: source token context arity mismatch")
+                env[_SOURCE_TOKEN_IDENTITIES]=MappingProxyType(dict(zip(names,token_context[offset:])))
+                invocation["token_aliases"]=canonical_token_aliases(token_context)
+            self.invocations.append({"region":name,"invocation":invocation,"inherited_controls":len(set((b[0],b[1]) for b in controls)),"source_adjoint":adjoint,"raw_inverse":raw_inverse,"path":[{k:v for k,v in edge.items() if k!="entered_invocation"} for edge in self.catalog.call_edges]})
             if self.catalog.ledger is not None and len(self.calls)==1:
                 for bit in controls:self.catalog.ledger.interface(f"control:{bit[1]}",Bundle(bit[0],1,bit[2],bit[1]))
                 names=["in","tgt","fault","mem"] if fn.kind=="oracle" else ["mut","in","mem"]
@@ -2564,6 +2609,9 @@ class Source:
         for record in instances:
             owner=record["function"]
             local=env if owner.kind=="oracle" else {**{n:root_env[root_args[i]] for n,i in record["arguments"].items()},**{n:root_env[root_mem[i]] for n,i in record["regions"].items()}}
+            if owner.kind!="oracle" and _SOURCE_TOKEN_IDENTITIES in root_env:
+                tokens=root_env[_SOURCE_TOKEN_IDENTITIES]
+                local[_SOURCE_TOKEN_IDENTITIES]=MappingProxyType({n:tokens[root_args[i]] for n,i in record["arguments"].items() if root_args[i] in tokens})
             declared=owner.regs if owner.kind=="oracle" else owner.groups[0]+owner.groups[1]+owner.regs
             record["env"]=local;record["locations"]=[];record["location_ids"]={}
             for position,(n,ty,role) in enumerate(declared):
@@ -2909,7 +2957,7 @@ class Source:
         elif B:add("frames",self.fresh("frames",B*Q))
         return records
 
-    def classical(self, fn, args):
+    def classical(self, fn, args, token_aliases=None):
         """Count a resolved classical control path; quantum inputs stay abstract.
 
         Values are used only for classical control. There is no choice of a
@@ -2920,6 +2968,11 @@ class Source:
         class MintedToken:
             identity:int
             budget:tuple
+        @dataclass(frozen=True)
+        class HostToken:
+            identity:int
+            budget:tuple
+        token_types=(MintedToken,HostToken)
         @dataclass(frozen=True)
         class RegisterRef:
             identity:int
@@ -2980,12 +3033,14 @@ class Source:
             for (x,wx),(y,wy) in zip(left,right):
                 if wx!=wy:return False
                 if wx==0 and isinstance(x,list) and isinstance(y,list) and x==y and x is not y:
-                    raise ContractError("EST-CONTEXT-03: token identity aliasing is absent from tuple-only root arguments; an explicit conditional step bound is available")
+                    raise ContractError("EST-CONTEXT-03: token identity aliasing is absent from tuple-only root arguments; supply token_aliases (K91) or an explicit conditional step bound")
                 if isinstance(x,RegisterId) != isinstance(y,RegisterId):
                     require(x==0 or y==0,"opaque register id boundary comparison needs explicit binding evidence")
                 if x!=y:return False
             return True
-        initial = {n:(v,type_width(ty,self.obj.ptr)) if ty!="token" else (list(v),0) for (n,ty,r),v in zip(fn.groups[0],parsed)}
+        initial={};labels=iter(token_aliases or [])
+        for (n,ty,r),value in zip(fn.groups[0],parsed):
+            initial[n]=(value,type_width(ty,self.obj.ptr)) if ty!="token" else (HostToken(next(labels),tuple(value)) if token_aliases is not None else list(value),0)
         memory, allocations = {}, {}
         clock=0
         layout = self.obj.sections.get("layout",{})
@@ -3229,7 +3284,7 @@ class Source:
                         else:
                             token,token_width=get(actual[1]);require(token_width==0,"oracle invocation requires token")
                             if not valid_token(token):return p,steps,[],True
-                            tuple_=list(token.budget) if isinstance(token,MintedToken) else list(token)
+                            tuple_=list(token.budget) if isinstance(token,token_types) else list(token)
                             actual_groups=[list_operand(actual[2]),[actual[3]],[actual[4]],list_operand(actual[5]),list_operand(actual[6])]
                         groups=child.groups[:5] if child.kind=="oracle" else child.groups[:4]
                         require(all(len(g)==len(v) for g,v in zip(groups,actual_groups)),"region call argument arity")
@@ -3246,9 +3301,11 @@ class Source:
                         for (name,ty,role),argument in zip(groups[-1],actual_groups[-1]):
                             value,w=get(argument)
                             if ty=="token" and (w!=0 or not valid_token(value)):return p,steps,[],True
-                            encoded.append(list(value.budget) if isinstance(value,MintedToken) else value if ty in ["f64","token"] else str(value))
+                            encoded.append(list(value.budget) if isinstance(value,token_types) else value if ty in ["f64","token"] else str(value))
                         call_arguments=[get(argument) for argument in actual_groups[-1]]
                         if call_op=="oracle_call":call_arguments.append((token,token_width))
+                        context_tokens=([token] if call_op=="oracle_call" else [])+[get(argument)[0] for (n,ty,r),argument in zip(groups[-1],actual_groups[-1]) if ty=="token"]
+                        identities=tuple(("host" if isinstance(value,HostToken) else "mint",value.identity) for value in context_tokens) if all(isinstance(value,token_types) for value in context_tokens) else None
                         controls=tuple(bit for b in controlled for bit in bits([b]))
                         candidate=self.obj.sections.get("schedule",{})
                         if candidate.get("entries") or "interface_vertices" in candidate:
@@ -3258,10 +3315,10 @@ class Source:
                             matches=matches and [integer(n,0) for n in bound["budget"]]==[integer(n,0) for n in tuple_] and decimal_value(bound["epsilon"])==0
                             if matches:matches=bound["closure_hash"]==self.obj.identities(closure=True)[child.name]
                             require(not matches,"CC/R nested quantum schedule replay remains pending for these invocation bindings")
-                        cp=self.region(child.name,encoded,tuple_,interface,controls,source_adjoint)
+                        cp=self.region(child.name,encoded,tuple_,interface,controls,source_adjoint,token_context=identities)
                         p=p.then(cp)
-                        def reverse_region(name=child.name,values=list(encoded),budget=list(tuple_),bindings=dict(interface),control_context=controls,adjoint=source_adjoint):
-                            return self.region(name,values,budget,bindings,control_context,adjoint,raw_inverse=True)
+                        def reverse_region(name=child.name,values=list(encoded),budget=list(tuple_),bindings=dict(interface),control_context=controls,adjoint=source_adjoint,identities=identities):
+                            return self.region(name,values,budget,bindings,control_context,adjoint,raw_inverse=True,token_context=identities)
                         history[frame_index]["inverse"]=reverse_region
                         identity=child.kind in ["action","perm_action"] and identity_body(child)
                         # Source-call occurrences retain joint entry versions.
@@ -3615,8 +3672,9 @@ class Source:
                     require(caller_types.get(actual)==ty,"action call classical argument type mismatch")
                     child[n]=env[actual]
                 arguments=[child[n] if ty in ["token","f64"] else str(child[n]) for n,ty,r in fn.groups[3]]
-                def invoke_action(joined,inverse,call_env,name=name,values=arguments,tuple_=list(self.budgets[-1]),interface=dict(child),source_adjoint=adjoint):
-                    return self.region(name,values,tuple_,interface,joined,source_adjoint,raw_inverse=inverse)
+                identities=self.token_context(env,[actual for (n,ty,r),actual in zip(fn.groups[3],actual_groups[3]) if ty=="token"])
+                def invoke_action(joined,inverse,call_env,name=name,values=arguments,tuple_=list(self.budgets[-1]),interface=dict(child),source_adjoint=adjoint,identities=identities):
+                    return self.region(name,values,tuple_,interface,joined,source_adjoint,raw_inverse=inverse,token_context=identities)
                 self.serial+=1
                 capture=f"$call:{self.serial}"
                 env[capture]=Captured([],{},controls,builder=invoke_action)
@@ -3645,8 +3703,9 @@ class Source:
                 for (n,ty,r),actual in zip(fn.groups[4],actual_groups[4]):
                     require(caller_types.get(actual)==ty,"oracle call classical argument type mismatch")
                     arguments.append(env[actual] if ty in ["token","f64"] else str(env[actual]))
-                def invoke_oracle(joined,inverse,call_env,name=callee,values=arguments,tuple_=list(token),interface=dict(child)):
-                    return self.region(name,values,tuple_,interface,joined,raw_inverse=inverse)
+                identities=self.token_context(env,[a[1]]+[actual for (n,ty,r),actual in zip(fn.groups[4],actual_groups[4]) if ty=="token"])
+                def invoke_oracle(joined,inverse,call_env,name=callee,values=arguments,tuple_=list(token),interface=dict(child),identities=identities):
+                    return self.region(name,values,tuple_,interface,joined,raw_inverse=inverse,token_context=identities)
                 self.serial+=1;capture=f"$oracle:{self.serial}"
                 env[capture]=Captured([],{},controls,builder=invoke_oracle)
                 emit({"splice":capture})
@@ -3674,13 +3733,14 @@ class Source:
                     require(value in regions and list(regions[value][:2])==[integer(desc["A"],0),integer(desc["W"],1)],"qinplace memory shape mismatch")
                     memory.append(regions[value][2])
                 templates=[]
+                identities=self.token_context(env,[a[2]]+[actual for ty,actual in zip(sig["args"],args) if ty=="token"])
                 for call_index,name_ in enumerate(names):
                     fn=self.obj.functions[name_]
-                    def invoke_pair(joined,inverse,call_env,name=name_,fn=fn,values=list(values),tuple_=list(token),inputs=extra,memories=memory):
+                    def invoke_pair(joined,inverse,call_env,name=name_,fn=fn,values=list(values),tuple_=list(token),inputs=extra,memories=memory,identities=identities):
                         child={fn.groups[0][0][0]:wire("x",call_env),fn.groups[1][0][0]:wire("t",call_env),fn.groups[2][0][0]:wire("f",call_env)}
                         child.update({n:ws for (n,ty,role),ws in zip(fn.groups[0][1:],inputs)})
                         child.update({n:b for (n,ty,role),b in zip(fn.groups[3],memories)})
-                        return self.region(name,values,tuple_,child,joined,raw_inverse=inverse)
+                        return self.region(name,values,tuple_,child,joined,raw_inverse=inverse,token_context=identities)
                     self.serial+=1;capture=f"$qinplace:{self.serial}";env[capture]=Captured([],{},controls,builder=invoke_pair)
                     node={"splice":capture}
                     if self.catalog.ledger is not None:self.catalog.source_metadata[id(node)]=(node,{**meta,"call":True,"oracle_call":True,"call_index":call_index})
@@ -3718,8 +3778,15 @@ class Source:
         return [node for fragment in reversed(fragments) for node in fragment] if adjoint else out
 
 
-def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=0,step_bound=None,epsilon="0",include_frame=False):
+def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=0,step_bound=None,epsilon="0",include_frame=False,token_aliases=None):
     require(region in obj.functions,"unknown entry region")
+    if token_aliases is not None:
+        fn=obj.functions[region]
+        types=[ty for n,ty,r in (fn.groups[0] if fn.kind in ["cc","r"] else fn.groups[4] if fn.kind=="oracle" else fn.groups[3])]
+        values=resolved_arguments(types,args,obj)
+        tuples=([budget] if fn.kind=="oracle" else [])+[value for ty,value in zip(types,values) if ty=="token"]
+        token_aliases=validate_token_aliases(token_aliases,tuples)
+    root_token_context=tuple(("request",label) for label in token_aliases) if token_aliases is not None else None
     require(obj.ptr in target.doc["ptr_widths_supported"],"E_PTR_WIDTH: target does not support object pointer width")
     require(isinstance(variant,str) and variant,"empty variant")
     inherited_controls=integer(inherited_controls,0)
@@ -3736,9 +3803,12 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
               "inherited_controls":inherited_controls,"budget":budget,"params_hash":digest(jcs(args)),"epsilon":accuracy_text if accuracy else 0,
               "expansion":{"name":"ref","version":"0.9","hash":catalog.hash},
               "scheduler":{"name":"bennett-estimate-default","version":"0.1.0"}}
+    if token_aliases is not None:bindings["token_aliases"]=token_aliases
     effective_schedule={"bindings":bindings,"entries":[]}
     if "schedule" in obj.sections:
         schedule=obj.sections["schedule"]
+        if token_aliases is not None and (schedule["entries"] or "interface_vertices" in schedule):
+            require("token_aliases" in schedule["bindings"],"E_ARG: alias-aware schedule requires token_aliases upgrade")
         Schedule(schedule,obj,schedule["bindings"].get("region"))
         def binding_equal(key,value):
             supplied=schedule["bindings"].get(key)
@@ -3756,7 +3826,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
         admission_catalog=Catalog(catalog.text,target)
         admission_catalog.ledger=Admission(Schedule(effective_schedule,obj,region))
         admission_controls=tuple(("inherited",i,admission_catalog.default_class) for i in range(inherited_controls))
-        Source(obj,target,admission_catalog).region(region,args,budget,controls=admission_controls)
+        Source(obj,target,admission_catalog).region(region,args,budget,controls=admission_controls,token_context=root_token_context)
     ledger=None
     default_share=F(0)
     finite_capacity=any(c["capacity"]!="unbounded" for c in target.doc["classes"].values())
@@ -3770,7 +3840,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
     if fn.kind in ["cc","r"]:
         require(not accuracy and inherited_controls==0,"classical cost request has no accuracy or inherited quantum controls")
         if step_bound is None:
-            p,steps = source.classical(fn,args)
+            p,steps = source.classical(fn,args,token_aliases)
         else:
             # A caller-supplied termination assumption is explicit evidence,
             # never a proof that an unbounded classical program terminates.
@@ -3804,11 +3874,11 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
                     # K58 counts source expansion operations before schemes.
                     # The population composes through the same loop algebra.
                     catalog.count_only=True
-                    population=source.region(region,args,budget,controls=controls).inexact_operations
+                    population=source.region(region,args,budget,controls=controls,token_context=root_token_context).inexact_operations
                     default_share=F(accuracy)/population if population else F(0)
                     catalog=Catalog(catalog.text,target);catalog.eps=default_share
                     source=Source(obj,target,catalog)
-                p=source.region(region,args,budget,controls=controls)
+                p=source.region(region,args,budget,controls=controls,token_context=root_token_context)
                 # This is also a proof of the default class decisions: if the
                 # sequential peak fits, an any allocation never needs fallback.
                 fits=all(desc["capacity"]=="unbounded" or interface.get(cls,0)+p.peak.get((cls,"total"),0)<=desc["capacity"] for cls,desc in target.doc["classes"].items())
@@ -3819,7 +3889,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
                 catalog=Catalog(catalog.text,target)
                 ledger=Ledger(target,Schedule(effective_schedule,obj,region),exact=fn.kind in ["perm_action","oracle"],count_only=bool(accuracy))
                 catalog.ledger=ledger;source=Source(obj,target,catalog)
-        if ledger is not None or not summarize:p=source.region(region,args,budget,controls=controls)
+        if ledger is not None or not summarize:p=source.region(region,args,budget,controls=controls,token_context=root_token_context)
         if ledger is not None and ledger.count_only:
             count=ledger.nonexact_native_operations
             seen=set()
@@ -3830,7 +3900,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
                 catalog=Catalog(globals().get("CATALOG_TEXT") or (Path(__file__).resolve().parents[1]/"data/ref-0.9.json").read_text(),target)
                 ledger=Ledger(target,Schedule(effective_schedule,obj,region),default_share=share,exact=fn.kind in ["perm_action","oracle"])
                 catalog.ledger=ledger;source=Source(obj,target,catalog)
-                p=source.region(region,args,budget,controls=controls)
+                p=source.region(region,args,budget,controls=controls,token_context=root_token_context)
                 if ledger.nonexact_native_operations==count:break
                 count=ledger.nonexact_native_operations
             require(ledger.error<=accuracy,"E_SCHEDULE_INFEASIBLE: achieved error exceeds request accuracy")
@@ -3849,6 +3919,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
             "exact_resources":{n:{"numerator":str(q.numerator),"denominator":str(q.denominator)} for n,q in rows.items()},
             "gates":{n:str(v) for n,v in sorted(ledger.gates.items() if ledger is not None else p.gates.items())},"classical_steps":str(steps) if steps is not None else None,
             "error_bound":str(ledger.error if ledger is not None else p.error),"summary_operations":catalog.visits}
+    if token_aliases is not None:result["invocation"]["token_aliases"]=token_aliases
     if step_bound is not None:
         result["bound_assumptions"]=[f"classical execution terminates within {steps} source instructions, including callees"]
         if reversals:result["bound_assumptions"].append("each source frame is reversed at most once; at most twice the forward instruction bound is charged")
@@ -4181,6 +4252,7 @@ def main(argv=None):
     parser.add_argument("--target",type=Path,required=True)
     parser.add_argument("--region",help="required for objects with multiple executable definitions")
     parser.add_argument("--params",default="[]",help="complete K13 JSON array, or @file")
+    parser.add_argument("--token-aliases",help="canonical K91 token equality partition as a JSON array, or @file")
     parser.add_argument("--budget",default="0,0,0,0",help="B,heap,stack,depth (default is the explicit zero tuple)")
     parser.add_argument("--variant",default="forward")
     parser.add_argument("--inherited-controls",type=int,default=0)
@@ -4199,8 +4271,12 @@ def main(argv=None):
         region=a.region or (candidates[0] if len(candidates)==1 else None)
         require(region is not None,"multiple entry regions: supply --region")
         params=loads(Path(a.params[1:]).read_text() if a.params.startswith("@") else a.params)
+        aliases=None
+        if a.token_aliases is not None:
+            aliases=loads(Path(a.token_aliases[1:]).read_text() if a.token_aliases.startswith("@") else a.token_aliases)
+            require(isinstance(aliases,list),"E_ARG: token_aliases must be a JSON array")
         budget=a.budget.split(",")
-        result=estimate(obj,target,region,params,budget,a.variant,a.inherited_controls,a.classical_step_bound,a.epsilon,a.include_frame or a.certificate is not None or a.certificate_template is not None)
+        result=estimate(obj,target,region,params,budget,a.variant,a.inherited_controls,a.classical_step_bound,a.epsilon,a.include_frame or a.certificate is not None or a.certificate_template is not None,aliases)
         if a.certificate:
             result["certificate_status"]=Certificate.read(a.certificate.read_text()).check_resource_rows(result)
         if a.certificate_template:

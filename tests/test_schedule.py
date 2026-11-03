@@ -481,6 +481,77 @@ class Accounting(unittest.TestCase):
         with self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
             e.estimate(obj,target(),"root",[["1","0","0","0"],["2","0","0","0"]],["0"]*4,token_aliases=[0,0])
 
+    def test_classical_alias_schedule_schema_checks_arity_and_missing_upgrade(self):
+        obj=e.Object.read((ROOT/"tests/fixtures/token-alias-source-gap.bisa").read_text())
+        params=[["1","0","0","0"]]*2
+        result=e.estimate(obj,target(),"root",params,["0"]*4,token_aliases=[0,0])
+        doc=e.loads(e.jcs(result["effective_schedule"]))
+        e.Schedule(doc,obj,"root")
+        doc["bindings"]["token_aliases"]=[0,1,2]
+        with self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
+            e.Schedule(doc,obj,"root")
+        doc=e.loads(e.jcs(result["effective_schedule"]))
+        del doc["bindings"]["token_aliases"]
+        doc["entries"]=[entry("start",path=[point(obj.symbol("root")["interface_hash"],"entry:0")],time=100)]
+        obj.sections["schedule"]=doc
+        with self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
+            e.estimate(obj,target(),"root",params,["0"]*4,token_aliases=[0,0])
+
+    def test_cc_and_q_alias_contexts_forward_without_an_action_primary(self):
+        action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1,4],"in":[1],"mem":[],"args":["token","token"],"bounds":[]}
+        leaf={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":["token"]}
+        text="perm_action @root (t:wire, f:wire[4]) (x:wire in) () (a:token, b:token) ()\n^entry():\naction_call @bridge (t, f) (x) () (b, a)\nperm_action @bridge (t:wire, f:wire[4]) (x:wire in) () (u:token, v:token) ()\n^entry():\noracle_call @leaf u (x) t f () (v)\noracle @leaf (x:wire in) (t:wire) (f:wire[4]) () (extra:token)\nregs {  }\n^entry():\nlift.retval x"
+        obj=make_program(text,{"root":action,"bridge":action,"leaf":leaf})
+        args=[["1","0","0","0"]]*2
+        for partition in [[0,0],[0,1]]:
+            result=e.estimate(obj,target(),"root",args,["0"]*4,token_aliases=partition,include_frame=True)
+            contexts=result["invocation_contexts"]
+            self.assertEqual([(r["region"],r["invocation"]["token_aliases"]) for r in contexts],[("root",partition),("bridge",partition),("leaf",partition)])
+            self.assertEqual(contexts[-1]["invocation"]["budget"],["1","0","0","0"])
+        # Private source context ids preserve global equality even when each
+        # callee renumbers its local partition by first occurrence.
+        seen=[]
+        class Trace(e.Source):
+            def region(self,*args,**kwargs):
+                seen.append((args[0],kwargs.get("token_context")))
+                return super().region(*args,**kwargs)
+        for adjoint,inverse in [(False,False),(True,False),(False,True)]:
+            seen.clear()
+            source=Trace(obj,target(),e.Catalog((ROOT/"data/ref-0.9.json").read_text(),target()))
+            source.region("root",args,["0"]*4,token_context=("A","B"),adjoint=adjoint,raw_inverse=inverse)
+            self.assertEqual(seen,[("root",("A","B")),("bridge",("B","A")),("leaf",("B","A"))])
+
+    def test_q_oracle_aliases_prepend_only_the_actual_primary_token(self):
+        root={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":["token","token"]}
+        leaf={**root,"args":["token"]}
+        code="oracle @root (x:wire in) (t:wire) (f:wire[4]) () (a:token, b:token)\nregs { r:reg[1], g:reg[4] }\n^entry():\nlift.oracle_call @leaf a (x) r g () (b)\nlift.retval x\noracle @leaf (x:wire in) (t:wire) (f:wire[4]) () (extra:token)\nregs {  }\n^entry():\nlift.retval x"
+        obj=make_program(code,{"root":root,"leaf":leaf})
+        result=e.estimate(obj,target(),"root",[["1","0","0","0"]]*2,["2","0","0","0"],token_aliases=[0,1,1],include_frame=True)
+        contexts=result["invocation_contexts"]
+        self.assertEqual(contexts[0]["invocation"]["token_aliases"],[0,1,1])
+        self.assertEqual(len(contexts),5)
+        for context in contexts[1:]:
+            self.assertEqual(context["invocation"]["token_aliases"],[0,0])
+            self.assertEqual(context["invocation"]["budget"],["1","0","0","0"])
+        with self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
+            e.estimate(obj,target(),"root",[["1","0","0","0"]]*2,["2","0","0","0"],token_aliases=[0,0,0])
+
+    def test_q_aliases_survive_fixed_lproc_bindings_and_lexical_captures(self):
+        root={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":4,"fault":4,"mem":[],"args":["token","token"]}
+        worker={"abi":"0.9","tier":"q","kind":"lproc","params":[1],"result":4,"tokens":["token","token"],"args":[],"mem":[]}
+        leaf={**root,"tgt":1,"args":["token"]}
+        layout={"ptr_width":32,"H":1,"A_tab":0,"S_cells":3,"globals":{},"interface_regions":{},"heap_base":1,"heap_limit_max":1,"null_size":1}
+        code="oracle @root (x:wire in) (t:wire[4]) (f:wire[4]) () (a:token, b:token)\nregs { r:reg[4] }\n^entry():\nr = lift.call @worker (x) (b, a) () ()\nlift.retval r\nlproc @worker (v:reg[1]) (w:reg[4]) (u:token token, z:token token) () ()\nregs { tmp:reg[1] }\n^entry():\nlift.oracle_call @leaf u (v) tmp w () (z)\nlift.ret w\noracle @leaf (x:wire in) (t:wire) (f:wire[4]) () (extra:token)\nregs {  }\n^entry():\nlift.retval x"
+        obj=make_program(code,{"root":root,"worker":worker,"leaf":leaf},layout=layout)
+        seen=[]
+        class Trace(e.Source):
+            def region(self,*args,**kwargs):
+                seen.append((args[0],kwargs.get("token_context")))
+                return super().region(*args,**kwargs)
+        source=Trace(obj,target(),e.Catalog((ROOT/"data/ref-0.9.json").read_text(),target()))
+        source.region("root",[["1","0","0","0"]]*2,["1","1","8","1"],token_context=("P","A","B"))
+        self.assertEqual(seen,[("root",("P","A","B")),("leaf",("B","A"))])
+
     def test_cc_register_program_matches_complete_native_vm_ledger(self):
         obj=e.Object.read((ROOT/"examples/native-pair-program.bisa").read_text())
         result=e.estimate(obj,target(),"main",[],["0"]*4)

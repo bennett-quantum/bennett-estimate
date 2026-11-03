@@ -694,6 +694,23 @@ class Certificates(unittest.TestCase):
 
 
 class CommandLine(unittest.TestCase):
+    def test_classical_alias_partition_cli_has_exact_distinct_requests(self):
+        binary=os.environ["BENNETT_ESTIMATE_BIN"]
+        base=[binary,str(ROOT/"tests/fixtures/token-alias-source-gap.bisa"),"--target",str(ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json"),"--region","root","--params",'[["1","0","0","0"],["1","0","0","0"]]']
+        rows=[]
+        for aliases,steps,time in [("[0,0]","4","6"),("[0,1]","3","3")]:
+            command=base+["--token-aliases",aliases]
+            actual=subprocess.run(command,capture_output=True,text=True,timeout=30)
+            self.assertEqual(actual.returncode,0,actual.stderr)
+            row=json.loads(actual.stdout);rows.append(row)
+            self.assertEqual((row["label"],row["classical_steps"],row["resources"]["time"]),("exact",steps,time))
+            self.assertEqual(json.loads(subprocess.run(command,capture_output=True,text=True,timeout=30,check=True).stdout),row)
+        self.assertEqual(rows[0]["params_hash"],rows[1]["params_hash"])
+        self.assertNotEqual(rows[0]["schedule_hash"],rows[1]["schedule_hash"])
+        invalid=subprocess.run(base+["--token-aliases","null"],capture_output=True,text=True,timeout=30)
+        self.assertEqual(invalid.returncode,1);self.assertEqual(invalid.stdout,"")
+        self.assertIn("E_ARG",invalid.stderr)
+
     def test_vm_and_reader_admit_published_dynamic_register_width_form(self):
         vm=Path(os.environ.get("BENNETT_VM_BIN",ROOT.parent/"bennett-vm/target/debug/bennett-vm"))
         path=ROOT/"tests/fixtures/dynamic-qreg-width.bisa"

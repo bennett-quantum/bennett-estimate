@@ -21,6 +21,14 @@ path = "data/ref-0.9.json"
 document_sha256 = "52dbc3f8f0c91d587fd933a43080385fd5284abcfec0ce84788229fcb15c53d8"
 envelope_sha256 = "5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197"
 
+[features."token_aliases/1"]
+status = "partial"
+source_commit = "fd626d37aba1f719c3b7b2059be46cbfaf462886"
+source_path = "spec/Bennett-ISA-Spec-0.9.md"
+source_sha256 = "bbd887c7841f4eed40f7b3518270a8f2cf781204c14ac4cc3eabca5c5b4b8c3b"
+# Explicit partitions are implemented. Strict legacy cutover, certificate
+# contexts and all identity-dependent cleanup carriers remain required.
+
 [compatibility]
 object_reader = ["0.8", "0.9"]
 classical_costs = ["0.8", "0.9"]
