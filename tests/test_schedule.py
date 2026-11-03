@@ -552,6 +552,36 @@ class Accounting(unittest.TestCase):
         source.region("root",[["1","0","0","0"]]*2,["1","1","8","1"],token_context=("P","A","B"))
         self.assertEqual(seen,[("root",("P","A","B")),("leaf",("B","A"))])
 
+    def test_classical_request_copies_alias_arguments_budget_and_selected_schedule(self):
+        obj=e.Object.read((ROOT/"tests/fixtures/token-alias-source-gap.bisa").read_text())
+        params=[["1","0","0","0"]]*2;budget=["0"]*4;aliases=[0,0]
+        result=e.estimate(obj,target(),"root",params,budget,token_aliases=aliases)
+        params[0][0]="2";params.append("3");budget[0]="4";aliases[0]=1
+        self.assertEqual(result["invocation"],{"args":[["1","0","0","0"]]*2,"budget":["0"]*4,"token_aliases":[0,0]})
+        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
+        obj=e.Object.read((fixture/"controlled.bisa").read_text());t=e.Target.read((fixture/"target.json").read_text())
+        result=e.estimate(obj,t,"controlled",[],["0"]*4)
+        saved=e.jcs(result["effective_schedule"])
+        obj.sections["schedule"]["entries"][0]["gate"]["realisation"]="missing-scheme"
+        self.assertEqual(e.jcs(result["effective_schedule"]),saved)
+
+    def test_q_aliases_survive_qinplace_templates_and_source_loop_captures(self):
+        action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":["token"],"bounds":[2]}
+        oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
+        code="perm_action @root (x:wire) () () (tk:token) ()\nregs {  } bounds { 2 }\n^entry():\nqloop 2 {\nqinplace @identity @identity tk x\n}\noracle @identity (x:wire in) (t:wire) (f:wire[4]) () ()\nregs {  }\n^entry():\nlift.retval x"
+        obj=make_program(code,{"root":action,"identity":oracle})
+        result=e.estimate(obj,target(),"root",[["1","0","0","0"]],["0"]*4,token_aliases=[0],include_frame=True)
+        contexts=result["invocation_contexts"]
+        self.assertEqual(len(contexts),5)
+        self.assertTrue(all(context["invocation"]["token_aliases"]==[0] for context in contexts))
+        self.assertEqual([c["path"][0]["iteration"] for c in contexts[1:]],[[0],[0],[1],[1]])
+        # The action's budget holder contributes no identity slot.
+        source=e.Source(obj,target(),e.Catalog((ROOT/"data/ref-0.9.json").read_text(),target()))
+        source.region("root",[["1","0","0","0"]],["0"]*4,token_context=("argument",))
+        source.region("root",[["1","0","0","0"]],["2","0","0","0"],token_context=("argument",))
+        with self.assertRaisesRegex(e.ContractError,"changed its tuple"):
+            source.region("root",[["2","0","0","0"]],["0"]*4,token_context=("argument",))
+
     def test_cc_register_program_matches_complete_native_vm_ledger(self):
         obj=e.Object.read((ROOT/"examples/native-pair-program.bisa").read_text())
         result=e.estimate(obj,target(),"main",[],["0"]*4)

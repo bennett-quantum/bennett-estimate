@@ -610,6 +610,33 @@ class Certificates(unittest.TestCase):
     def certificate_document(self):
         return e.loads((ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09/certificate.json").read_text())
 
+    def test_certificate_alias_invocations_validate_kind_and_tuple_consistency(self):
+        doc=self.certificate_document();doc["bindings"]["invocation"]["token_aliases"]=[]
+        e.Certificate.read(e.jcs(doc))
+        doc["bindings"]["invocation"]["token_aliases"]=[0]
+        with self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
+            e.Certificate.read(e.jcs(doc))
+        value={"args":[["1","0","0","0"]],"budget":["1","0","0","0"],"token_aliases":[0,0]}
+        e.Certificate.invocation(value,kind="oracle")
+        value["args"][0][0]="2"
+        with self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
+            e.Certificate.invocation(value,kind="oracle")
+        value["token_aliases"]=[0,1]
+        e.Certificate.invocation(value,kind="oracle")
+        value["token_aliases"]=[0]
+        e.Certificate.invocation(value,kind="action")
+        value["token_aliases"]=[0,1]
+        with self.assertRaisesRegex(e.ContractError,"E_ARG.*token_aliases"):
+            e.Certificate.invocation(value,kind="action")
+
+    def test_uniform_structural_alias_invocations_quantify_every_partition(self):
+        doc=self.certificate_document();region=doc["regions"][doc["bindings"]["closure_hash"]]
+        claim={"kind":"structural","rule":"adjoint_table","subclaims":[],"witness":{},"invocation":{"args":"all","budget":"all","token_aliases":"all"}}
+        region["claims"].append(claim)
+        e.Certificate.read(e.jcs(doc))
+        claim["invocation"]["token_aliases"]=[]
+        with self.assertRaises(e.ContractError):e.Certificate.read(e.jcs(doc))
+
     def test_nested_certificate_types_and_claim_bindings_reject(self):
         def bad_index(doc,region):region["verification"]["unitary"]=[True]
         def bad_subject(doc,region):region["claims"][0]["subject"]["closure_hash"]="wrong"

@@ -2454,6 +2454,7 @@ class Source:
         self.calls = []
         self.budgets=[]
         self.invocations=[]
+        self.token_budgets={}
 
     def fresh(self, name, width, cls=None, state="clean"):
         self.serial += 1
@@ -2494,8 +2495,14 @@ class Source:
                 names=[n for n,ty,r in arg_group if ty=="token"]
                 offset=int(fn.kind=="oracle")
                 require(len(token_context)==len(names)+offset,"K91: source token context arity mismatch")
+                tuples=([budget] if offset else [])+[env[n] for n in names]
+                aliases=validate_token_aliases(canonical_token_aliases(token_context),tuples)
+                for identity,value in zip(token_context,tuples):
+                    value=tuple(integer(n,0) for n in value)
+                    require(self.token_budgets.get(identity,value)==value,"K91: forwarded token identity changed its tuple")
+                    self.token_budgets[identity]=value
                 env[_SOURCE_TOKEN_IDENTITIES]=MappingProxyType(dict(zip(names,token_context[offset:])))
-                invocation["token_aliases"]=canonical_token_aliases(token_context)
+                invocation["token_aliases"]=aliases
             self.invocations.append({"region":name,"invocation":invocation,"inherited_controls":len(set((b[0],b[1]) for b in controls)),"source_adjoint":adjoint,"raw_inverse":raw_inverse,"path":[{k:v for k,v in edge.items() if k!="entered_invocation"} for edge in self.catalog.call_edges]})
             if self.catalog.ledger is not None and len(self.calls)==1:
                 for bit in controls:self.catalog.ledger.interface(f"control:{bit[1]}",Bundle(bit[0],1,bit[2],bit[1]))
@@ -3780,6 +3787,7 @@ class Source:
 
 def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=0,step_bound=None,epsilon="0",include_frame=False,token_aliases=None):
     require(region in obj.functions,"unknown entry region")
+    args=loads(jcs(args));budget=list(budget)
     if token_aliases is not None:
         fn=obj.functions[region]
         types=[ty for n,ty,r in (fn.groups[0] if fn.kind in ["cc","r"] else fn.groups[4] if fn.kind=="oracle" else fn.groups[3])]
@@ -3819,7 +3827,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
             return supplied==value
         selected=all(binding_equal(k,v) for k,v in bindings.items() if k!="scheduler")
         if selected:
-            effective_schedule=schedule
+            effective_schedule=loads(jcs(schedule))
     source = Source(obj,target,catalog)
     fn = obj.functions[region]
     if effective_schedule["entries"] and fn.kind in ["action","perm_action","oracle"]:
@@ -3966,16 +3974,23 @@ class Certificate:
         for part in value:unsigned(part)
 
     @classmethod
-    def invocation(cls,value,uniform=False):
-        keys(value,["args","budget"],context="invocation")
+    def invocation(cls,value,uniform=False,kind=None):
+        keys(value,["args","budget"],["token_aliases"],context="invocation")
         if value["args"]=="all" or value["budget"]=="all":
-            require(uniform and value=={"args":"all","budget":"all"},"K13: only structural invocations may quantify all arguments and budgets")
+            expected={"args":"all","budget":"all"}
+            if "token_aliases" in value:expected["token_aliases"]="all"
+            require(uniform and value==expected,"K13/K91: only structural invocations may quantify all arguments, budgets and partitions")
             return
         cls.budget(value["budget"])
         for argument in cls.array(value["args"]):
             if isinstance(argument,list):cls.budget(argument)
             elif isinstance(argument,str) and re.fullmatch(r"0x[0-9a-f]{16}",argument):pass
             else:unsigned(argument)
+        if "token_aliases" in value:
+            aliases=cls.array(value["token_aliases"])
+            tokens=[argument for argument in value["args"] if isinstance(argument,list)]
+            if kind=="oracle" or kind is None and len(aliases)==len(tokens)+1:tokens=[value["budget"],*tokens]
+            validate_token_aliases(aliases,tokens)
 
     @classmethod
     def domain(cls,domain,inherited_controls=0):
@@ -4132,13 +4147,15 @@ class Certificate:
         keys(doc["versions"],["isa","object","launch","sched","cert","coverage","target"],context="versions")
         require(set(doc["versions"].values())=={"0.9"},"unsupported certificate versions")
         b=doc["bindings"]
+        require(isinstance(doc["regions"],dict),"certificate regions must be an object")
         keys(b,["object_hash","interface_hash","closure_hash","reference_program_hash","dialect_mapping_version","target_hash"],["schedule_hash","invocation"],"certificate bindings")
         for key,value in b.items():
             if key.endswith("_hash"): require(isinstance(value,str) and re.fullmatch(r"[0-9a-f]{64}",value),f"invalid {key}")
         if "schedule_hash" in b:
             require("invocation" in b,"K13: scheduled certificate lacks invocation")
         if "invocation" in b:
-            cls.invocation(b["invocation"])
+            root=doc["regions"].get(b["closure_hash"],{})
+            cls.invocation(b["invocation"],kind=root.get("kind") if isinstance(root,dict) else None)
         keys(doc["producer"],["name","version","materialisation"],context="producer")
         keys(doc["producer"]["materialisation"],["llvm_version","pipeline","normaliser_version"],context="materialisation")
         for hash_,region in doc["regions"].items():
