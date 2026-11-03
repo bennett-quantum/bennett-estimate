@@ -906,8 +906,8 @@ class CommandLine(unittest.TestCase):
         self.assertEqual((native["vm_native_gate_count"],native["estimate_native_gate_count"]),("8","8"))
         self.assertEqual((native["vm_program_time"],native["vm_classical_steps"],native["vm_nonclassical_time"],native["estimate_action_time"]),("25",7,"18","18"))
         self.assertEqual((native["estimate_action_occupancy"],native["vm_program_occupancy"],native["space_relation"]),("72","84","action <= program"))
-        self.assertEqual([(r["status"],r["steps"],r["resources"]["time"],r["resources"]["qubit_second[data]"]) for r in report["native_programs"]],[("COMPLETED",7,"25","84"),("COMPLETED",7,"9","20"),("FAILED",5,"5","6"),("COMPLETED",12,"12","0"),("COMPLETED",11,"15","26"),("COMPLETED",6,"12","8"),("COMPLETED",11,"16","0"),("COMPLETED",6,"6","2"),("FAILED",5,"5","4")])
-        self.assertEqual([r["reversed_classical_steps"] for r in report["native_programs"]],["0","0","0","0","0","4","5","0","0"])
+        self.assertEqual([(r["status"],r["steps"],r["resources"]["time"],r["resources"]["qubit_second[data]"]) for r in report["native_programs"]],[("COMPLETED",7,"25","84"),("COMPLETED",7,"9","20"),("FAILED",5,"5","6"),("COMPLETED",12,"12","0"),("COMPLETED",11,"15","26"),("COMPLETED",6,"12","8"),("COMPLETED",11,"16","0"),("COMPLETED",6,"6","2"),("FAILED",5,"5","4"),("COMPLETED",4,"4","2")])
+        self.assertEqual([r["reversed_classical_steps"] for r in report["native_programs"]],["0","0","0","0","0","4","5","0","0","0"])
         topology=report["topology"]
         self.assertEqual([(r["fixture"],r["resources"]) for r in topology["forecasts"]],[(r["fixture"],r["resources"]) for r in report["native_programs"]])
         self.assertNotEqual(topology["forecasts"][0]["target_hash"],report["native_programs"][0]["target_hash"])

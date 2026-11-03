@@ -1,0 +1,16 @@
+bennett-object isa=0.9 object=0.9 launch=0.9 sched=0.9 cert=0.9 coverage=0.9 target=0.9 ptr_width=32
+
+section symbols
+{"0":{"interface_hash":"bb50240d434483abdad93965f0c129c54bc81fad8061da8a2aa05f9ab9292a4a","kind":"cc","name":"main","signature":{"abi":"0.9","kind":"cc","params":[],"results":[],"tier":"cc"}},"1":{"interface_hash":"58dbec023df7d967c8c56c5789e8b6def5b5b834ce53060020582d73327843cc","kind":"perm_action","name":"work","signature":{"abi":"0.9","args":[],"bounds":[],"in":[],"kind":"perm_action","mem":[],"mut":[1],"tier":"q"}}}
+
+section functions
+fn cc @main () () () () ()
+^entry():
+q = qreg.new data 1
+action_call @work (q) () () ()
+r = measure q
+ret
+perm_action @work (q:wire) () () () ()
+^entry():
+s = qalloc data 1
+qfree s

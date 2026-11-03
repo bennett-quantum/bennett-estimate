@@ -258,6 +258,54 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
+    def test_empty_clean_allocation_cleanup_supports_whole_recompute(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":["i64"],"bounds":[]}
+        obj=make_object("perm_action @root () () () (n:i64) ()\n^entry():\ng = qalloc data n\nqfree g",sig)
+        for n in [1,3]:
+            doc=e.estimate(obj,target(),"root",[str(n)],["0"]*4)["effective_schedule"]
+            doc["entries"]=[entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],"entry:1")],generated=0,realisation="recompute")]
+            obj.sections["schedule"]=doc
+            result=e.estimate(obj,target(),"root",[str(n)],["0"]*4,include_frame=True)
+            self.assertEqual(result["resources"],{"gate_count":str(n),"time":str(n),"peak_qubits[data]":str(2*n),"qubit_second[data]":str(2*n*n)})
+            self.assertEqual([(d["chain"][-1]["point"],d["ordinal"],d["realisation"]) for d in result["cleanup_decisions"]],[("entry:1",0,"recompute")])
+        del obj.sections["schedule"]
+        result=e.estimate(obj,target(),"root",[str(2**40)],["0"]*4)
+        self.assertEqual(result["resources"],{"gate_count":"0","time":"0","peak_qubits[data]":str(2**40),"qubit_second[data]":"0"})
+        self.assertLess(result["summary_operations"],20)
+
+    def test_empty_cleanup_adjoint_and_raw_inverse_keep_correct_carriers(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":[],"bounds":[]}
+        obj=make_object("perm_action @root () () () () ()\n^entry():\ng = qalloc data 2\nqfree g",sig);t=target()
+        doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
+        doc["entries"]=[entry("cleanup",realisation="recompute")]
+        for adjoint,raw,where in [(False,False,"entry:1"),(False,True,"entry:1"),(True,False,"entry:0")]:
+            with self.subTest(adjoint=adjoint,raw=raw):
+                c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);c.ledger=e.Ledger(t,e.Schedule(doc,obj,"root"))
+                e.Source(obj,t,c).region("root",[],["0"]*4,adjoint=adjoint,raw_inverse=raw)
+                self.assertEqual(c.ledger.finish(),{"gate_count":2,"time":2,"peak_qubits[data]":4,"qubit_second[data]":8})
+                self.assertEqual([d["chain"][-1]["point"] for d in c.ledger.cleanup_decisions],[where])
+
+    def test_empty_recompute_carrier_zero_is_separate_from_fresh_leaf_zero(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":[],"bounds":[]}
+        obj=make_object("perm_action @root () () () () ()\n^entry():\ng = qalloc data 2\nqfree g",sig)
+        model=e.loads(e.jcs(target().doc));model["classes"]["buffer"]={**model["classes"]["data"],"capacity":3};t=e.Target.read(e.jcs(model))
+        doc=e.estimate(obj,t,"root",[],["0"]*4,inherited_controls=1)["effective_schedule"]
+        path=[point(obj.symbol("root")["interface_hash"],"entry:1")]
+        doc["entries"]=[entry("cleanup",path=path,generated=0,realisation="recompute"),entry("alloc",path=path,generated=0,**{"class":"buffer"}),entry("gate",path=path,generated=0,realisation="missing-scheme")]
+        obj.sections["schedule"]=doc
+        result=e.estimate(obj,t,"root",[],["0"]*4,inherited_controls=1,include_frame=True)
+        self.assertEqual(result["resources"],{"gate_count":"2","time":"2","peak_qubits[data]":"2","peak_qubits[buffer]":"3","qubit_second[data]":"4","qubit_second[buffer]":"6"})
+        self.assertEqual([r["class"] for r in result["frame"]["scratch"]],["data","buffer"])
+        self.assertEqual(len(result["cleanup_decisions"]),1)
+
+    def test_proved_clean_measurement_survives_private_workspace_identity_call(self):
+        cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
+        action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
+        obj=make_program("fn cc @root () () () () ()\n^entry():\nq = qreg.new data 1\naction_call @work (q) () () ()\nr = measure q\nret\nperm_action @work (q:wire) () () () ()\n^entry():\ns = qalloc data 1\nqfree s",{"root":cc,"work":action})
+        result=e.estimate(obj,target(),"root",[],["0"]*4)
+        self.assertEqual(result["classical_status"],"COMPLETED")
+        self.assertEqual(result["resources"],{"gate_count":"0","time":"4","peak_qubits[data]":"2","qubit_second[data]":"2"})
+
     def test_schedule_binding_matches_decimal_string_control_count(self):
         sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
         obj=make_object("perm_action @root (q:wire) () () () ()\n^entry():\nx q",sig)

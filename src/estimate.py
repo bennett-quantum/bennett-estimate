@@ -2667,8 +2667,23 @@ class Source:
                 for node in before+after:self.catalog.source_metadata[id(node)]=(node,meta)
             prefix+=before;suffix=after+suffix
         pairs=self.oracle_pairs(fn,env,controls,adjoint)
-        body=self.action_nodes([i for _,code in fn.blocks.values() for i in code],env,regions,controls,adjoint=adjoint,oracle_pairs=pairs)
+        body=self.action_nodes([i for _,code in fn.blocks.values() for i in code],env,regions,controls,adjoint=adjoint,oracle_pairs=pairs,empty_cleanups=self.empty_cleanups(fn))
         return prefix+body+suffix
+
+    @staticmethod
+    def empty_cleanups(fn):
+        """K65 empty inverse family; general terminal chains remain separate."""
+        if any(i.op not in ["qalloc","qfree"] for i in fn.code):return set()
+        live={};points=set()
+        for inst in fn.code:
+            if inst.op=="qalloc":
+                require(len(inst.lhs)==1,"missing allocation result")
+                live[inst.lhs[0]]=(inst.block,inst.ordinal)
+            else:
+                require(len(inst.args)==1,"qfree operand arity")
+                previous=live.pop(inst.args[0],None)
+                if previous is not None:points.update([previous,(inst.block,inst.ordinal)])
+        return points
 
     def oracle_pairs(self,fn,env,controls,adjoint=False):
         """K81 joint versions for flat permutation/call bodies, before expansion.
@@ -3192,6 +3207,7 @@ class Source:
         def identity_body(function):
             # A sufficient source-level identity proof, never a basis run or
             # expanded gate list. Unrecognised constructions stay unknown.
+            if self.empty_cleanups(function)=={(i.block,i.ordinal) for i in function.code}:return True
             stack=[]
             for row in function.code:
                 op,actual=row.op,tuple(row.args)
@@ -3727,7 +3743,7 @@ class Source:
             return self.catalog.body(nodes,local,joined,inverse)
         return Captured([],{},controls,builder=expand)
 
-    def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False,function_name=None,oracle_pairs=None):
+    def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False,function_name=None,oracle_pairs=None,empty_cleanups=()):
         out,fragments = [],[]
         inactive=env.setdefault(_SOURCE_INACTIVE,set())
         lifetimes=env.setdefault(_SOURCE_LIFETIMES,{})
@@ -3987,7 +4003,8 @@ class Source:
                 replacement={"inverse":True,"body":fragment}
                 if self.catalog.ledger is not None:self.catalog.source_metadata[id(replacement)]=(replacement,meta)
                 fragment=[replacement]
-            if not adjoint and op in ["quncopy","qunload","qfree","qreturn"]:
+            empty=(inst.block,inst.ordinal) in empty_cleanups
+            if not adjoint and op in ["quncopy","qunload","qfree","qreturn"] or adjoint and op=="qalloc" and empty:
                 recompute=None
                 if op in ["quncopy","qunload"]:
                     fresh=self.fresh("recompute",b.width)
@@ -4000,6 +4017,12 @@ class Source:
                     quantum=[compute,{"invoke":"bind.qxor","args":[b.width,fresh_name,name]},{"inverse":True,"body":[compute]}]
                     if predicates:quantum=[{"under":list(predicates),"body":quantum}]
                     replacement=[{"acquire":fresh_name},*quantum,{"relinquish":fresh_name},{"relinquish":name}]
+                    recompute=Captured(replacement,local,controls)
+                elif empty and op in ["qalloc","qfree"]:
+                    fresh=self.fresh("empty_recompute",b.width)
+                    fresh_name=f"$empty_fresh:{self.serial}"
+                    local=dict(env);local[fresh_name]=fresh
+                    replacement=[{"acquire":fresh_name},{"invoke":"bind.qxor","args":[b.width,fresh_name,name]},{"relinquish":fresh_name},{"relinquish":name}]
                     recompute=Captured(replacement,local,controls)
                 capture=f"$cleanup:{self.serial}";self.serial+=1
                 env[capture]=Captured(fragment,dict(env),controls,cleanup=True,recompute=recompute)

@@ -73,9 +73,9 @@ correctness/error claims or nested composition.
 
 Last full gate before the shift4 instruction: headless scripts/pre-push
 --working-tree exited0,168 tests in26.04s plus fmt/strict Clippy/shell. Current
-changes pass cargo build --offline --locked -j4 and80 focused
-source/history/certificate/selector/CLI/differential cases in9.132s;
-test_gate's2 cases also passed earlier in this shift. There are204 discovered
+changes pass cargo build --offline --locked -j4 and88 focused
+source/history/certificate/selector/CLI/differential cases in10.110s;
+test_gate's2 cases also passed earlier in this shift. There are212 discovered
 tests; this is not a current full-suite pass.
 The shift4 binding reserves all further full gates, pushed-SHA and hook checks
 for the orchestrator. No git process ran. The current batch requires review
@@ -124,7 +124,9 @@ keeps original caller targets and uses fresh T/F, compute/XOR/uncompute/releases
 fresh call indices are0/1. K63 validates indices against actual selected domains
 before target costs when known, unioning covered invocations. Tests cover token
 partitions, intervening joint outputs, nested inverses, control-set order, ties,
-exact time/count/peak/area formulas and source-adjoint/raw-inverse paths. General
+exact time/count/peak/area formulas and source-adjoint/raw-inverse paths. Allocation/free-only actions now support whole empty-sequence recompute with
+separate fresh leaf/carrier ordinals and source-adjoint/raw-inverse release points.
+Their private workspace identity preserves proved-clean CC registers. General
 release-ended chains and action-call prehistory/window checking remain required.
 Large integer arguments use typed decimal strings in pairing keys; adjacent
 i128 values above binary64 precision do not merge. f64 signs and NaN payloads
@@ -158,11 +160,17 @@ measured segments cannot be uncalled. Static declared/block-local measurement
 widths and dynamic spelling are checked; unknown dominating types defer. Two
 new complete VM differentials agree: clean-measure-program6steps/time6/peak2/area2
 and measure-uncall-fault FAILED5steps/time5/peak2/area4, both zero gates and reversed
-frames. There are nine ordinary native-program matches. The VM rejects topology
+frames. There are ten ordinary native-program matches. The VM rejects topology
 with exact stderr §8: unknown field topology. The consumer defect is queued;
 the report marks topology unavailable and omits match fields, then automatically
-compares all nine programs when the VM accepts topology. No topology VM match
-is claimed.
+compares all ten programs when the VM accepts topology. No topology VM match
+is claimed. workspace-measure-program also matches4steps/time4/peak2/area2,
+zero gates/reversed frames (hashd0cdbc63d64905b2e71a78e741b84103d356710785b9cc26b41ec4d5fd91e855).
+
+Schedule numeric strings now match coordinates/control counts by exact integer
+value, including fixed lproc instances and nested steps. Generated metadata
+encodes large coordinates as decimal strings before JCS, preventing adjacent
+2^80 iteration domains from sharing a key or ordinal counter.
 
 Open work: bph/.1/.2/.3; bph.4/.6/.7 track contract decisions and .5 K91 adoption. Complete
 source admission/type and remaining register/effect paths, remaining loop/record scaling, CC/R K55 propagation, K81 release-ended/independent-call cleanup

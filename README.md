@@ -73,11 +73,12 @@ Tests cover 2^20 physical cells with bounded summary work and compare small
 controlled cases against literal expansion. Scheme workspace remains included;
 wire aliases that defeat index renaming use literal traversal.
 
-Nine complete CC program differentials agree with the VM on all resource
+Ten complete CC program differentials agree with the VM on all resource
 rows, source steps and terminal status: a paired action, slice/concat register
 views, a stale-alias fault, block-image effects, disjoint register inverses,
 quantum segment uncall, nested classical uncall, clean measurement and a
-measurement-uncall fault. CC/R register accounting includes dynamic widths,
+measurement-uncall fault and measurement after private workspace cleanup.
+CC/R register accounting includes dynamic widths,
 aliases, opaque IDs, slices/concat and source-frame history reversal, including quantum calls. Reversed classical
 frames are charged separately from forward source steps. Proved-clean registers
 measure deterministically and consume their aliases; uncall across a measurement
@@ -104,6 +105,12 @@ including nonzero caller targets. Fresh calls have separate occurrence indices;
 source adjoints form new pairs while raw inverse retains forward paths. General
 release-ended chains, action-call histories and cleanup window validation remain
 required; this family does not complete K81.
+
+Actions containing only clean allocations and frees also support whole-cleanup
+recompute, including an empty computing sequence. The fresh allocation, XOR
+and releases have ordinary leaf ordinals; the cleanup carrier adds no charge.
+Raw inverse keeps the forward carrier, while a source adjoint has its replacement
+release point. General inverse chains remain required.
 
 Default CC/R topology replay reserves vertices for all live registers, checks
 native adjacency and scratch capacity, and restores placements during uncall.

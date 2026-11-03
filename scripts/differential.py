@@ -44,7 +44,7 @@ def run(root, estimator):
             "object_hash":predicted["object_hash"],"target_hash":predicted["target_hash"],"vm_native_gate_count":charged["gate_count"],"estimate_native_gate_count":predicted["resources"]["gate_count"],
             "vm_program_time":charged["time"],"vm_classical_steps":actual["steps"],"vm_nonclassical_time":str(quantum_time),"estimate_action_time":predicted["resources"]["time"],
             "vm_program_occupancy":charged["qubit_second"]["data"],"estimate_action_occupancy":predicted["resources"]["qubit_second[data]"],"space_relation":"action <= program"}
-    cases=[("native-pair-program","COMPLETED"),("register-views-program","COMPLETED"),("register-alias-fault","FAILED"),("block-image-program","COMPLETED"),("register-disjoint-pairs","COMPLETED"),("quantum-uncall-program","COMPLETED"),("nested-classical-uncall","COMPLETED"),("clean-measure-program","COMPLETED"),("measure-uncall-fault","FAILED")]
+    cases=[("native-pair-program","COMPLETED"),("register-views-program","COMPLETED"),("register-alias-fault","FAILED"),("block-image-program","COMPLETED"),("register-disjoint-pairs","COMPLETED"),("quantum-uncall-program","COMPLETED"),("nested-classical-uncall","COMPLETED"),("clean-measure-program","COMPLETED"),("measure-uncall-fault","FAILED"),("workspace-measure-program","COMPLETED")]
     def program(name,status,path,actual=None,compare=True):
         fixture=root/"examples"/(name+".bisa")
         predicted=json.loads(subprocess.run([str(estimator),str(fixture),"--target",str(path),"--region","main"],capture_output=True,text=True,timeout=30,check=True).stdout)
