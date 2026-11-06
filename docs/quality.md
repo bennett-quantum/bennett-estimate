@@ -3,6 +3,43 @@
 The estimator is Python; Cargo packages its stdlib-only interpreter and catalog.
 Coverage of the Rust launcher alone does not measure estimator semantics.
 
+## Terminal cleanup interleavings
+
+The K80 witness now also covers an independent `x y` between the two inverse
+CX rows and immediately before `qfree`. ISA 0.9 §11 K81 at gate-pinned
+`fd626d37aba1f719c3b7b2059be46cbfaf462886` excludes disjoint rows from the
+terminal chain and does not require textual adjacency. The partition keeps
+its occurrence ownership; recompute suppresses only the owned inverse rows,
+preserves the independent X once at its original point, and emits replacement
+leaves at the release carrier. No other textual-adjacency condition was found
+in the partition, ownership wrappers, cleanup selection or primitive replay.
+
+Both interleavings failed with the pending recompute-binding error before the
+fix. The shared witness retains the contiguous case and checks exact complete
+leaf traces in forward and raw-inverse traversal. Running the final test
+against the pre-fix source in memory passes both contiguous traversals and
+produces the four expected interleaving errors. Its expectations are hand
+derived: the contiguous case has two CXs with three live wires and five fresh
+compute/XOR/uncompute CXs with four, giving 7 gates, time 7, peak 4 and area
+26. With independent y, the two original CXs and X use four wires; the five
+replacement CXs use five, giving 8 gates, time 8, peak 5 and area 37.
+
+Verification after the repair, using the headless environment below:
+
+- `timeout 60 python3 -B -m unittest discover -s tests -p test_schedule.py -k test_k80 -v`: passed all six fixture/direction subcases.
+- `timeout 90 python3 -B -m unittest discover -s tests -p test_schedule.py -k cleanup -v`: 8 tests passed in 9.079 s.
+- `timeout 180 cargo test --offline --locked -j3 -- --test-threads=4`: all 240 Python tests and four Rust wrappers passed, no skips; 156.87 s wall, 156.17 s Cargo test interval, 123,748 KiB peak RSS.
+- `BENNETT_ESTIMATE_BIN=$CARGO_TARGET_DIR/debug/bennett-estimate timeout 180 python3 -B -m unittest discover -s tests -p test_estimate.py -k differential_rung3_and_rung2_inventory -v`: passed in 24.925 s (25.60 s wall), using VM pin `d9cb68433c08f4db8f7d8c90f121a8adae51759b`. This includes all ten complete CC-program resource comparisons. The pinned VM still reports topology unavailable, so no topology match is claimed.
+- `timeout 30 python3 -I -B scripts/quality_ratchet.py`: no regression, with the recorded baseline unchanged. Source cognitive-complexity mass decreased 6,377 → 6,376; test_schedule decreased 344 → 338, with maximum function lengths unchanged. The tests share one fixture table and dispatch trace inversion through a mapping.
+- `cargo fmt --check`, `timeout 60 cargo clippy --offline --locked -j3 --all-targets -- -D warnings`, and `bash -n scripts/pre-push scripts/check scripts/install-hooks.sh`: passed.
+
+The remaining sections record the earlier quality-baseline measurements.
+Coverage and the literal-inventory snapshot were not regenerated for this
+repair; their source hashes describe that earlier snapshot. The new witness
+expectations have the independent derivation above. The gate verifier
+materialised the missing pinned ISA checkout and rebuilt the pinned VM; it
+noted that the existing ISA pin is not reachable from `origin/main`.
+
 ## Reproduction
 
 Run headlessly with `TMPDIR=$PWD/.tmp/quality-estimate/tmp` and
