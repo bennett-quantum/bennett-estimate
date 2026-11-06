@@ -34,4 +34,4 @@ note = "vm origin/main; debug binary as differential oracle"
 name = "vm (debug)"
 argv = ["cargo", "build", "--offline"]
 outputs = ["target/debug/bennett-vm"]
-env = { CARGO_BUILD_JOBS = "4" }
+env = { CARGO_BUILD_JOBS = "3" }

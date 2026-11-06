@@ -93,7 +93,7 @@ matching instance and a nonmatching instance, rather than only parsing.
 Historical numeric literals had no recorded authorship derivation.
 `data/literal-expectations.json` explicitly inventories literal assertion
 sites, their complete assertion, expected value, observed values and test
-identity. `timeout 300 python3 -I -B scripts/record_expectations.py` reruns
+identity. `timeout 600 python3 -I -B scripts/record_expectations.py` reruns
 the tests and records them as **regenerated baselines**, never independent
 answers or retrospective hand derivations. It leaves expected values intact.
 Unexecuted conditional branches are labeled unexecuted rather than regenerated.
@@ -101,3 +101,58 @@ The implicit-length lift.load triples(66356,345,19648878) and
 (66480,376,21484636) are also explicitly regenerated regression expectations.
 Independent evidence is confined to published normative witnesses, the named
 paper derivations above, the brute oracle and the executed VM differential.
+
+## Phase equivalence
+
+Classical execution now has explicit `ClassicalMachine` state and arithmetic,
+register, quantum-call and execution methods. Token/register value types live
+at module scope. `Source.classical` initializes and runs that machine;
+`action_nodes` delegates action, oracle and in-place calls to named phases.
+Five red-first phase unit tests pass. No function in the implementation
+exceeds300 lines (the longest is the252-line padded oracle constructor).
+
+Before/after `timeout 180 python3 -I -B scripts/phase_snapshot.py <source>`
+compared244 requests across bounded fixtures, the pinned ideal target and the
+owned finite-topology target, with and without frame reconstruction. All186
+successful result documents and58 failure messages were byte-identical.
+Snapshot SHA-256: `c8564ec4f94c76403a6c718d91d429ccc38708688e06598714d3e4cbb8c6f401`.
+Scaling fixtures and positive padded budgets remain in the normal unit tests;
+they are not repeated by this bounded snapshot. The first wider snapshot
+hit its240-second limit and was replaced by this bounded comparison.
+
+Post-refactor default Cargo run:231 Python tests, four Rust wrappers, all
+passed in155.74s while other bounded verification ran concurrently.
+
+## Fail-fast and repository hygiene
+
+Index folding catches only its dedicated intentional-decline exception;
+malformed node TypeError/KeyError/ValueError/ContractError exceptions now
+propagate. A valid nonlinear index still traverses literally and produces
+its exact result. Mint validation catches only modeled budget-bound failures,
+preserving their diagnostic in `classical_fault_reason`; an internal validator
+ContractError propagates. Four red-first regressions exercise both distinctions.
+
+Pending reports retain contract codes/reasons and invocation bindings without
+task-tracker IDs. Known native-model metadata has unchecked obligations;
+unknown model versions explicitly report unsupported-model. Resource rows
+remain cost calculations. All tracked bytecode under owned paths was removed;
+ignore rules cover bytecode, caches, logs, Dolt LOCK files and `.darc` archives.
+
+## Final default validation
+
+`timeout 180 cargo test --offline --locked -j3 -- --test-threads=4` passed
+all237 Python tests (75 objects,123 accounting,16 selectors,23 other),
+through four Rust wrappers. `/usr/bin/time` measured **118.72s wall**,
+including compilation, with123,792KiB peak RSS. Cargo's test interval was
+118.10s. No tests are ignored or skipped.
+
+`cargo fmt --check`,
+`timeout 60 cargo clippy --offline --locked -j3 --all-targets -- -D warnings`,
+and `bash -n scripts/pre-push scripts/check scripts/install-hooks.sh` all
+passed. Spec bytes, feature pins and vendored catalog bytes were checked
+against the gate-pinned published source. No consumer or full push gate ran.
+
+One conditional assertion remains unexecuted in the provenance inventory:
+VM topology matching. The pinned VM rejects the topology field with
+`§8: unknown field topology`; the differential reports unavailable forecasts,
+keeps that matched-status branch and makes no topology-match claim.

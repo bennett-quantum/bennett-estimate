@@ -95,6 +95,14 @@ class InheritedReview(unittest.TestCase):
         self.assertEqual(supplied.doc["gates"][0]["realisation_model"], model)
         self.assertNotEqual(supplied.hash, original.hash)
         self.assertEqual(supplied.gate("x", ["data"], 0).time, original.gate("x", ["data"], 0).time)
+        self.assertEqual(supplied.native_model_obligations(),
+                         [{"gate_entry": 0, "version": "bennett.native-model/1", "status": "unchecked"}])
+        obj = e.Object.read((ROOT / "tests/fixtures/example3.bisa").read_text())
+        before = e.estimate(obj, original, "borrow_demo", [], ["0"] * 4)
+        after = e.estimate(obj, supplied, "borrow_demo", [], ["0"] * 4)
+        self.assertEqual(before["object_hash"], after["object_hash"])
+        self.assertEqual(before["resources"], after["resources"])
+        self.assertNotEqual(before["schedule_hash"], after["schedule_hash"])
         for bad in [None, {**model, "typo": 0}, {key: value for key, value in model.items() if key != "operand_map"}]:
             with self.subTest(model=bad), self.assertRaises(e.ContractError):
                 doc["gates"][0]["realisation_model"] = bad

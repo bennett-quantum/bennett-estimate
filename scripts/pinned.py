@@ -1,6 +1,5 @@
 """Resolve published test inputs only at the commits in gate.toml."""
 from pathlib import Path
-from functools import lru_cache
 import tomllib
 
 

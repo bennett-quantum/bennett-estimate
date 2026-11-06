@@ -6,7 +6,7 @@ export TMPDIR="${TMPDIR:-$root/.tmp/check/tmp}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$root/.tmp/check/target}"
 mkdir -p -- "$TMPDIR" "$CARGO_TARGET_DIR"
 cd -- "$root"
-timeout 180 cargo test --offline --locked -j4 -- --test-threads=4
+timeout 180 cargo test --offline --locked -j3 -- --test-threads=4
 cargo fmt --check
-timeout 60 cargo clippy --offline --locked -j4 --all-targets -- -D warnings
+timeout 60 cargo clippy --offline --locked -j3 --all-targets -- -D warnings
 bash -n scripts/pre-push scripts/check

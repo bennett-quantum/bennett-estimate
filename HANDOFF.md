@@ -71,15 +71,15 @@ certificate bindings/rows are rebuilt independently. Certificate output enriches
 supplied, identically bound proof metadata; it does not verify or invent
 correctness/error claims or nested composition.
 
-Last full gate before the shift4 instruction: headless scripts/pre-push
---working-tree exited0,168 tests in26.04s plus fmt/strict Clippy/shell. Current
-changes pass cargo build --offline --locked -j4 and88 focused
-source/history/certificate/selector/CLI/differential cases in10.110s;
-test_gate's2 cases also passed earlier in this shift. There are212 discovered
-tests; this is not a current full-suite pass.
-The shift4 binding reserves all further full gates, pushed-SHA and hook checks
-for the orchestrator. No git process ran. The current batch requires review
-before main is pushed.
+Round-1 quality evidence is in docs/quality.md. The post-refactor default run
+passed231 Python tests through four Rust wrappers in155.74s under concurrent
+verification. Final default validation passed all237 Python tests in118.72s wall
+(118.10s Cargo test interval), plus fmt, strict Clippy and shell syntax.
+Final coverage/provenance is recorded in docs/quality.md. The full push/consumer gate remains orchestrator-owned.
+The interpreter now has explicit classical machine state, named arithmetic,
+register and quantum-call phases, and separate action/oracle/in-place lowering.
+All244 bounded pre/post-refactor requests (186 successful documents,58 errors)
+were byte-identical. No implementation function exceeds300 lines.
 
 All 86 published K82 normalized leaf digests and complete literal resource
 profiles agree; all 16 binding cases pass. Rung-3 VM sums 0/1/3/7/255 match
@@ -181,7 +181,7 @@ are in docs/REVIEW_FINDINGS.md.
 
 m6p retains runner hook-check and real pushed-SHA execution. Owned scripts use
 the public pinned gate stub, with a git-free --working-tree entry before any
-git operation; root gate.toml is orchestrator-owned. Consumer b8o still requires
+git operation; gate.toml records the published test-input revisions. Consumer b8o still requires
 a modern full N=2^20 launch artifact and meaningful named-target estimate.
 The available legacy mini is diagnostic. The prescribed tiny superconducting
 target cannot fit the full 2^28-wire interface; a queued consumer change proposes
@@ -195,3 +195,16 @@ reference forecast under ideal-all-to-all is 23,657,972,470 gates, time
 or full SQLite/Grover claim.
 
 I2 b-isa-spec-r51 and absent artifacts do not remove any Grover/SQLite scope.
+
+Round-1 CLI fixes: oracle/token entries require explicit --budget, including
+zero. K86 model metadata uses the published closed field set and enters the
+target hash; realised-operation obligations are unchecked, with unknown model
+versions reported unsupported. SPEC_VERSIONS declares this additive feature
+as partial and gate.toml pins its K86/K91 source at fd626d3.
+Pending output contains contract codes/reasons, without task-tracker IDs.
+Index-fold failures now distinguish intentional literal traversal from malformed
+recipes. Mint bounds failures have a dedicated modeled-fault type/reason;
+internal validation defects propagate. Tracked bytecode was removed and ignored.
+Historical literals have an explicit regenerated provenance inventory; independent
+claims are limited to published witnesses, recorded paper calculations, the
+brute-force ledger and the executed VM differential.

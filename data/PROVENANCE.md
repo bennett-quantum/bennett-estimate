@@ -19,3 +19,10 @@ Sibling `bennett-targets/targets/*.json`, conformance ladder data and the
 published controlled-action certificate are read as data in the tests. The VM
 is invoked only as a binary differential oracle. See scripts/differential.py
 for its exact comparison scope and unavailable rung-2 result.
+
+`literal-expectations.json` records regenerated assertion baselines from this
+repository's passing tests. Earlier authorship derivations were not recorded;
+this inventory makes no independent-oracle claim. The generator preserves the
+expected literals. See docs/quality.md for the separately recorded paper
+calculations, independent brute ledger and the one unexecuted topology branch.
+All sibling data and VM evidence is resolved at the revisions in gate.toml.

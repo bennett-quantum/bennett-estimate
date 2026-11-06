@@ -31,16 +31,17 @@ def main():
         "finally: cov.stop(); cov.save()\n"
     )
     wrapper.chmod(0o755)
-    env = dict(os.environ, COVERAGE_FILE=str(data), BENNETT_ESTIMATE_BIN=str(wrapper))
+    env = dict(os.environ, COVERAGE_FILE=str(data), BENNETT_ESTIMATE_BIN=str(wrapper), PYTHONDONTWRITEBYTECODE="1")
 
     def group(name):
         with (directory / (name + ".log")).open("w") as log:
             subprocess.run([sys.executable, "-m", "coverage", "run", "--parallel-mode", "--branch", "--source=src",
-                            "tests/run_suite.py", name], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
+                            "scripts/record_expectations.py", name, str(directory / (name + ".json"))], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
                            timeout=480, check=True)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         list(pool.map(group, ("objects", "accounting", "selectors", "other")))
+    subprocess.run([sys.executable, "-I", "-B", "scripts/record_expectations.py", "--combine", str(directory)], cwd=ROOT, env=env, check=True)
     subprocess.run([sys.executable, "-m", "coverage", "combine", str(directory)], cwd=ROOT, env=env, check=True)
     subprocess.run([sys.executable, "-m", "coverage", "json", "-o", str(directory / "report.json")], cwd=ROOT, env=env, check=True)
     subprocess.run([sys.executable, "-m", "coverage", "report", "-m"], cwd=ROOT, env=env, check=True)

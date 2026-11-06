@@ -1,0 +1,4795 @@
+{
+  "schema": "literal-expectations/1",
+  "command": "timeout 600 python3 -I -B scripts/record_expectations.py",
+  "note": "Expected literals are unchanged. Regeneration labels describe present evidence, never earlier authorship.",
+  "catalog_sha256": "52dbc3f8f0c91d587fd933a43080385fd5284abcfec0ce84788229fcb15c53d8",
+  "assertions": [
+    {
+      "file": "tests/test_brute_accounting.py",
+      "line": 16,
+      "assertion": "self.assertEqual((ledger.time, ledger.gates, ledger.peak[\"data\"], ledger.area[\"data\"]), (56, 56, 7, 334))",
+      "expected": "(56, 56, 7, 334)",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_brute_accounting.BruteAccounting.test_paper_witness_for_the_independent_dispatch_ledger"
+      ],
+      "observed_values": [
+        "(Fraction(56, 1), 56, 7, Fraction(334, 1))"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 38,
+      "assertion": "self.assertEqual(e.jcs(9007199254740993),\"9007199254740992\")",
+      "expected": "'9007199254740992'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Arithmetic.test_jcs_large_integer_and_utf16_class_order"
+      ],
+      "observed_values": [
+        "'9007199254740992'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 43,
+      "assertion": "self.assertEqual(c.default_class,\"😀\")",
+      "expected": "'😀'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Arithmetic.test_jcs_large_integer_and_utf16_class_order"
+      ],
+      "observed_values": [
+        "'😀'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 48,
+      "assertion": "self.assertEqual(e.decimal_up(F(1, 8)), \"0.125\")",
+      "expected": "'0.125'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Arithmetic.test_upward_34"
+      ],
+      "observed_values": [
+        "'0.125'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 51,
+      "assertion": "self.assertEqual(e.escape(\"B]%[é\"), \"B%5D%25%5B%C3%A9\")",
+      "expected": "'B%5D%25%5B%C3%A9'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Arithmetic.test_upward_34"
+      ],
+      "observed_values": [
+        "'B%5D%25%5B%C3%A9'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 56,
+      "assertion": "self.assertEqual(e.expression({\"op\": \"log2inv_eps\", \"args\": []}, {\"eps\": F(1, 9)}, {}), 4)",
+      "expected": "4",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Arithmetic.test_expression_epsilon_decades"
+      ],
+      "observed_values": [
+        "Fraction(4, 1)"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 81,
+      "assertion": "self.assertEqual(len(t.hash), 64)",
+      "expected": "64",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 4,
+      "tests": [
+        "test_estimate.Targets.test_published_targets"
+      ],
+      "observed_values": [
+        "64"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 82,
+      "assertion": "self.assertEqual(t.gate(\"x\", [\"data\"], 0).counts[\"gate_count\"], 1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 4,
+      "tests": [
+        "test_estimate.Targets.test_published_targets"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 103,
+      "assertion": "self.assertEqual(t.gate(\"swap\",[\"alpha\",\"beta\"],0).time,4)",
+      "expected": "4",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Targets.test_scheme_target_order_and_exact_entry_prohibition"
+      ],
+      "observed_values": [
+        "4"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 104,
+      "assertion": "self.assertEqual(t.gate(\"swap\",[\"alpha\",\"beta\"],0).counts[\"gate_count\"],3)",
+      "expected": "3",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Targets.test_scheme_target_order_and_exact_entry_prohibition"
+      ],
+      "observed_values": [
+        "3"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 114,
+      "assertion": "self.assertEqual(p.time, 1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Profiles.test_sequence_and_repeat"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 115,
+      "assertion": "self.assertEqual(p.area[(\"data\", \"clean\")], 2)",
+      "expected": "2",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Profiles.test_sequence_and_repeat"
+      ],
+      "observed_values": [
+        "2"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 116,
+      "assertion": "self.assertEqual(p.peak[(\"data\", \"clean\")], 2)",
+      "expected": "2",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Profiles.test_sequence_and_repeat"
+      ],
+      "observed_values": [
+        "2"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 216,
+      "assertion": "self.assertEqual(events,[(0,()),(7,())])",
+      "expected": "[(0, ()), (7, ())]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Catalog.test_image_inverse_reverses_bits_with_empty_effective_controls"
+      ],
+      "observed_values": [
+        "[(0, ()), (7, ())]"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 218,
+      "assertion": "self.assertEqual(events,[(7,()),(0,())])",
+      "expected": "[(7, ()), (0, ())]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Catalog.test_image_inverse_reverses_bits_with_empty_effective_controls"
+      ],
+      "observed_values": [
+        "[(7, ()), (0, ())]"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 236,
+      "assertion": "self.assertEqual(literal.time,22)",
+      "expected": "22",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_estimate.Catalog.test_image_summary_counts_bytes_and_preserves_class_boundaries"
+      ],
+      "observed_values": [
+        "Profile(time=22, counts={'gate_count': 8}, delta={}, peak={}, area={}, gates={'x': 8}, error=0, inexact_operations=0)",
+        "22"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 263,
+      "assertion": "self.assertEqual([(p.time,p.peak[(\"data\",\"total\")],p.area[(\"data\",\"clean\")]) for p in profiles],\n                         [(66356,345,19648878),(66480,376,21484636)])",
+      "expected": "[(66356, 345, 19648878), (66480, 376, 21484636)]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Catalog.test_implicit_length_width_changes_exact_cost"
+      ],
+      "observed_values": [
+        "[(66356, 345, 19648878), (66480, 376, 21484636)]"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 271,
+      "assertion": "self.assertEqual(self.c.hash, \"5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197\")",
+      "expected": "'5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Catalog.test_published_identity"
+      ],
+      "observed_values": [
+        "'5de4e4995350313e50217880ba1b95de39cd043283b726337d4894efb005d197'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 272,
+      "assertion": "self.assertEqual(len(self.c.recipes), 219)",
+      "expected": "219",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Catalog.test_published_identity"
+      ],
+      "observed_values": [
+        "219"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 278,
+      "assertion": "self.assertEqual(self.c.recipe(\"named-test\",[],{\"q\":e.Bundle(\"q\",1,\"data\")}).time,1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Catalog.test_k82_named_interfaces_do_not_leak_typed_caller_names"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 286,
+      "assertion": "self.assertEqual(p.counts[\"gate_count\"], 2)",
+      "expected": "2",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Catalog.test_qxor_and_ripple"
+      ],
+      "observed_values": [
+        "2"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 288,
+      "assertion": "self.assertEqual(p.gates, {\"cx\": 62, \"ccx\": 16})",
+      "expected": "{'cx': 62, 'ccx': 16}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Catalog.test_qxor_and_ripple"
+      ],
+      "observed_values": [
+        "{'cx': 62, 'ccx': 16}"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 289,
+      "assertion": "self.assertEqual(p.time, 158)",
+      "expected": "158",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Catalog.test_qxor_and_ripple"
+      ],
+      "observed_values": [
+        "158"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 302,
+      "assertion": "self.assertEqual(p.time,21)",
+      "expected": "21",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Catalog.test_nested_captured_loops"
+      ],
+      "observed_values": [
+        "21"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 310,
+      "assertion": "self.assertEqual(c.body([node],env,((\"s\",0,\"data\"),)).time,3)",
+      "expected": "3",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Catalog.test_indexed_controls_and_middle_alias_are_not_hoisted"
+      ],
+      "observed_values": [
+        "3"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 315,
+      "assertion": "self.assertEqual(c.body([each],env,((\"s\",0,\"data\"),)).time,5)",
+      "expected": "5",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Catalog.test_indexed_controls_and_middle_alias_are_not_hoisted"
+      ],
+      "observed_values": [
+        "5"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 359,
+      "assertion": "self.assertEqual(p.peak[(\"data\",\"total\")],47)",
+      "expected": "47",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 3,
+      "tests": [
+        "test_estimate.Catalog.test_large_stack_summary_does_not_scan_cells"
+      ],
+      "observed_values": [
+        "47"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 405,
+      "assertion": "self.assertEqual(result[\"label\"],\"exact\")",
+      "expected": "'exact'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_lifted_free_million_entry_source_object_uses_table_summaries"
+      ],
+      "observed_values": [
+        "'exact'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 406,
+      "assertion": "self.assertEqual(result[\"padded_steps\"],{\"forward\":\"1\",\"inverse\":\"1\"})",
+      "expected": "{'forward': '1', 'inverse': '1'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_lifted_free_million_entry_source_object_uses_table_summaries"
+      ],
+      "observed_values": [
+        "{'forward': '1', 'inverse': '1'}"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 452,
+      "assertion": "self.assertEqual(e.estimate(obj,t,\"root\",[],[\"0\"]*4)[\"label\"],\"exact\")",
+      "expected": "'exact'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_distinct_legal_jump_widths_expose_ref_binding_gap"
+      ],
+      "observed_values": [
+        "'exact'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 459,
+      "assertion": "self.assertEqual(e.estimate(obj,t,\"root\",[],[\"0\",\"1\",\"8\",\"1\"])[\"label\"],\"exact\")",
+      "expected": "'exact'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_wide_unwritten_location_exposes_ret_delivery_contract_gap"
+      ],
+      "observed_values": [
+        "'exact'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 505,
+      "assertion": "self.assertEqual(parameter.symbol(\"parameter\")[\"signature\"][\"args\"],[\"i1\"])",
+      "expected": "['i1']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_published_source_binding_gaps_have_concrete_witnesses"
+      ],
+      "observed_values": [
+        "['i1']"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 530,
+      "assertion": "self.assertEqual([r[\"name\"] for r in state],[\"pc\",\"pc_prime\",\"faulted\",\"code\",\"result_val\",\"heap_used\",\"atop\",\"sp\",\"fp\",\"depth\",\"mem\",\"stack\",\"p\",\"alloctab\",\"frames\"])",
+      "expected": "['pc', 'pc_prime', 'faulted', 'code', 'result_val', 'heap_used', 'atop', 'sp', 'fp', 'depth', 'mem', 'stack', 'p', 'alloctab', 'frames']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_estimate.Objects.test_layout_construction_order_and_image_occupancy"
+      ],
+      "observed_values": [
+        "['pc', 'pc_prime', 'faulted', 'code', 'result_val', 'heap_used', 'atop', 'sp', 'fp', 'depth', 'mem', 'stack', 'p', 'alloctab', 'frames']"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 532,
+      "assertion": "self.assertEqual({n:widths[n] for n in [\"heap_used\",\"atop\",\"sp\",\"fp\",\"depth\",\"mem\",\"stack\",\"alloctab\",\"frames\"]},{\"heap_used\":5,\"atop\":2,\"sp\":1,\"fp\":1,\"depth\":1,\"mem\":64,\"stack\":32,\"alloctab\":132,\"frames\":74})",
+      "expected": "{'heap_used': 5, 'atop': 2, 'sp': 1, 'fp': 1, 'depth': 1, 'mem': 64, 'stack': 32, 'alloctab': 132, 'frames': 74}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_estimate.Objects.test_layout_construction_order_and_image_occupancy"
+      ],
+      "observed_values": [
+        "{'heap_used': 5, 'atop': 2, 'sp': 1, 'fp': 1, 'depth': 1, 'mem': 64, 'stack': 32, 'alloctab': 132, 'frames': 74}"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 534,
+      "assertion": "self.assertEqual(int(results[1][\"resources\"][\"gate_count\"])-int(results[0][\"resources\"][\"gate_count\"]),2)",
+      "expected": "2",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_layout_construction_order_and_image_occupancy"
+      ],
+      "observed_values": [
+        "2"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 535,
+      "assertion": "self.assertEqual(int(results[1][\"resources\"][\"qubit_second[data]\"])-int(results[0][\"resources\"][\"qubit_second[data]\"]),302)",
+      "expected": "302",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_layout_construction_order_and_image_occupancy"
+      ],
+      "observed_values": [
+        "302"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 542,
+      "assertion": "self.assertEqual(scheduled[\"resources\"],{\"peak_qubits[fast]\":\"2\",\"qubit_second[fast]\":\"2\",\"time\":\"1\"})",
+      "expected": "{'peak_qubits[fast]': '2', 'qubit_second[fast]': '2', 'time': '1'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_controlled_action_call_and_matching_schedule"
+      ],
+      "observed_values": [
+        "{'peak_qubits[fast]': '2', 'qubit_second[fast]': '2', 'time': '1'}"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 550,
+      "assertion": "self.assertEqual(result[\"gates\"],{\"x\":\"1\"})",
+      "expected": "{'x': '1'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_controlled_action_call_and_matching_schedule"
+      ],
+      "observed_values": [
+        "{'x': '1'}"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 551,
+      "assertion": "self.assertEqual(result[\"resources\"][\"time\"],\"1\")",
+      "expected": "'1'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_controlled_action_call_and_matching_schedule"
+      ],
+      "observed_values": [
+        "'1'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 552,
+      "assertion": "self.assertEqual(result[\"resources\"][\"peak_qubits[data]\"],\"2\")",
+      "expected": "'2'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_controlled_action_call_and_matching_schedule"
+      ],
+      "observed_values": [
+        "'2'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 558,
+      "assertion": "self.assertEqual(e.estimate(obj,t,\"outer\",[],[\"0\"]*4)[\"classical_steps\"],\"2\")",
+      "expected": "'2'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_classical_callee_fault_and_effect_validation"
+      ],
+      "observed_values": [
+        "'2'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 561,
+      "assertion": "self.assertEqual(e.estimate(obj,t,\"bad\",[],[\"0\"]*4)[\"classical_steps\"],\"3\")",
+      "expected": "'3'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_classical_callee_fault_and_effect_validation"
+      ],
+      "observed_values": [
+        "'3'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 574,
+      "assertion": "self.assertEqual(len(obj.functions), 12)",
+      "expected": "12",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_rung3_read_and_classical_steps"
+      ],
+      "observed_values": [
+        "12"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 580,
+      "assertion": "self.assertEqual(result[\"resources\"][\"time\"], \"21\")",
+      "expected": "'21'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_rung3_read_and_classical_steps"
+      ],
+      "observed_values": [
+        "'21'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 581,
+      "assertion": "self.assertEqual(result[\"label\"], \"exact\")",
+      "expected": "'exact'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_rung3_read_and_classical_steps"
+      ],
+      "observed_values": [
+        "'exact'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 583,
+      "assertion": "self.assertEqual(bound[\"label\"],\"bound\")",
+      "expected": "'bound'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_rung3_read_and_classical_steps"
+      ],
+      "observed_values": [
+        "'bound'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 584,
+      "assertion": "self.assertEqual(bound[\"resources\"][\"time\"],\"30\")",
+      "expected": "'30'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_rung3_read_and_classical_steps"
+      ],
+      "observed_values": [
+        "'30'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 591,
+      "assertion": "self.assertEqual(result[\"resources\"][\"gate_count\"], \"4\")",
+      "expected": "'4'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_borrow_action"
+      ],
+      "observed_values": [
+        "'4'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 592,
+      "assertion": "self.assertEqual(result[\"resources\"][\"time\"], \"4\")",
+      "expected": "'4'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_borrow_action"
+      ],
+      "observed_values": [
+        "'4'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 593,
+      "assertion": "self.assertEqual(result[\"resources\"][\"peak_qubits[data]\"], \"3\")",
+      "expected": "'3'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_borrow_action"
+      ],
+      "observed_values": [
+        "'3'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 594,
+      "assertion": "self.assertEqual(result[\"resources\"][\"qubit_second[data]\"], \"12\")",
+      "expected": "'12'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_borrow_action"
+      ],
+      "observed_values": [
+        "'12'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 610,
+      "assertion": "self.assertEqual(results[-1][\"label\"],\"exact\")",
+      "expected": "'exact'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_padded_oracle_budget_and_large_budget"
+      ],
+      "observed_values": [
+        "'exact'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 616,
+      "assertion": "self.assertEqual(result[\"label\"],\"exact\")",
+      "expected": "'exact'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Objects.test_million_cell_source_lookup_without_gate_materialisation"
+      ],
+      "observed_values": [
+        "'exact'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 714,
+      "assertion": "self.assertEqual(read.doc[\"regions\"][doc[\"bindings\"][\"closure_hash\"]][\"claims\"][0][\"label\"],\"proof\")",
+      "expected": "'proof'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Certificates.test_sampled_proof_request_is_parsed_without_a_verdict"
+      ],
+      "observed_values": [
+        "'proof'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 758,
+      "assertion": "self.assertEqual(cert.doc[\"versions\"][\"cert\"],\"0.9\")",
+      "expected": "'0.9'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.Certificates.test_published_reader_and_frame_negatives"
+      ],
+      "observed_values": [
+        "'0.9'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 776,
+      "assertion": "self.assertEqual(actual.returncode,3,actual.stderr)",
+      "expected": "3",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_pending_source_report_preserves_explicit_token_partition"
+      ],
+      "observed_values": [
+        "3"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 778,
+      "assertion": "self.assertEqual(report[\"invocation\"],{\"args\":[],\"budget\":[\"2\",\"0\",\"0\",\"0\"],\"token_aliases\":[0]})",
+      "expected": "{'args': [], 'budget': ['2', '0', '0', '0'], 'token_aliases': [0]}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_pending_source_report_preserves_explicit_token_partition"
+      ],
+      "observed_values": [
+        "{'args': [], 'budget': ['2', '0', '0', '0'], 'token_aliases': [0]}"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 779,
+      "assertion": "self.assertEqual(report[\"pending\"][0][\"code\"],\"EST-SOURCE-03\")",
+      "expected": "'EST-SOURCE-03'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_pending_source_report_preserves_explicit_token_partition"
+      ],
+      "observed_values": [
+        "'EST-SOURCE-03'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 789,
+      "assertion": "self.assertEqual(actual.returncode,0,actual.stderr)",
+      "expected": "0",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_estimate.CommandLine.test_classical_alias_partition_cli_has_exact_distinct_requests"
+      ],
+      "observed_values": [
+        "0"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 796,
+      "assertion": "self.assertEqual(invalid.stdout,\"\")",
+      "expected": "''",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_estimate.CommandLine.test_classical_alias_partition_cli_has_exact_distinct_requests"
+      ],
+      "observed_values": [
+        "1",
+        "''"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 807,
+      "assertion": "self.assertEqual((result[\"classical_status\"],result[\"classical_steps\"],result[\"reversed_classical_steps\"]),(\"FAILED\",\"10\",\"4\"))",
+      "expected": "('FAILED', '10', '4')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_classical_revoked_token_fixture_admission_and_failed_prefix"
+      ],
+      "observed_values": [
+        "('FAILED', '10', '4')"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 808,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"0\",\"peak_qubits[data]\":\"6\",\"qubit_second[data]\":\"9\",\"time\":\"14\"})",
+      "expected": "{'gate_count': '0', 'peak_qubits[data]': '6', 'qubit_second[data]': '9', 'time': '14'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_classical_revoked_token_fixture_admission_and_failed_prefix"
+      ],
+      "observed_values": [
+        "{'gate_count': '0', 'peak_qubits[data]': '6', 'qubit_second[data]': '9', 'time': '14'}"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 815,
+      "assertion": "self.assertEqual(admitted[\"status\"],\"ok\")",
+      "expected": "'ok'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_vm_and_reader_admit_published_dynamic_register_width_form"
+      ],
+      "observed_values": [
+        "'ok'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 823,
+      "assertion": "self.assertEqual(actual,{\"payload\":0,\"code\":7,\"steps\":1})",
+      "expected": "{'payload': 0, 'code': 7, 'steps': 1}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_vm_admits_large_table_fixture_and_reports_the_padded_boundary"
+      ],
+      "observed_values": [
+        "{'code': 7, 'payload': 0, 'steps': 1}"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 850,
+      "assertion": "self.assertEqual(actual.returncode,3,actual.stderr)",
+      "expected": "3",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 6,
+      "tests": [
+        "test_estimate.CommandLine.test_contract_dependent_outputs_are_pending_evidence"
+      ],
+      "observed_values": [
+        "3"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 852,
+      "assertion": "self.assertEqual(result[\"label\"],\"pending evidence\")",
+      "expected": "'pending evidence'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 6,
+      "tests": [
+        "test_estimate.CommandLine.test_contract_dependent_outputs_are_pending_evidence"
+      ],
+      "observed_values": [
+        "'pending evidence'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 883,
+      "assertion": "self.assertEqual(actual,{\"payload\":1,\"code\":0,\"steps\":3})",
+      "expected": "{'payload': 1, 'code': 0, 'steps': 3}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_vm_admits_and_runs_lifted_allocator_witness"
+      ],
+      "observed_values": [
+        "{'code': 0, 'payload': 1, 'steps': 3}"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 891,
+      "assertion": "self.assertEqual(checked[\"status\"],\"ok\")",
+      "expected": "'ok'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_estimate.CommandLine.test_vm_admits_contract_witnesses_and_runs_reference_payload"
+      ],
+      "observed_values": [
+        "'ok'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 904,
+      "assertion": "self.assertEqual(a.returncode,0,a.stderr)",
+      "expected": "0",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_deterministic_and_failure"
+      ],
+      "observed_values": [
+        "0"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 906,
+      "assertion": "self.assertEqual(json.loads(a.stdout)[\"resources\"],\n                         {\"gate_count\":\"4\",\"time\":\"4\",\"peak_qubits[data]\":\"3\",\"qubit_second[data]\":\"12\"})",
+      "expected": "{'gate_count': '4', 'time': '4', 'peak_qubits[data]': '3', 'qubit_second[data]': '12'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_deterministic_and_failure"
+      ],
+      "observed_values": [
+        "{'gate_count': '4', 'peak_qubits[data]': '3', 'qubit_second[data]': '12', 'time': '4'}"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 910,
+      "assertion": "self.assertEqual(bad.stdout,\"\")",
+      "expected": "''",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_deterministic_and_failure"
+      ],
+      "observed_values": [
+        "''"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 916,
+      "assertion": "self.assertEqual([r[\"steps\"] for r in report[\"rung3\"][\"rows\"]],[6,11,21,41,1281])",
+      "expected": "[6, 11, 21, 41, 1281]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_differential_rung3_and_rung2_inventory"
+      ],
+      "observed_values": [
+        "[6, 11, 21, 41, 1281]"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 917,
+      "assertion": "self.assertEqual([(r[\"region\"],r[\"status\"],r[\"steps\"]) for r in report[\"rung3\"][\"fault_rows\"]],[(\"divzero\",\"FAILED\",3),(\"memfault\",\"FAILED\",3),(\"unknown_effect\",\"FAILED\",3)])",
+      "expected": "[('divzero', 'FAILED', 3), ('memfault', 'FAILED', 3), ('unknown_effect', 'FAILED', 3)]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_differential_rung3_and_rung2_inventory"
+      ],
+      "observed_values": [
+        "[('divzero', 'FAILED', 3), ('memfault', 'FAILED', 3), ('unknown_effect', 'FAILED', 3)]"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 918,
+      "assertion": "self.assertEqual([(r[\"region\"],r[\"status\"],r[\"steps\"]) for r in report[\"rung3\"][\"history_rows\"]],[(\"nested\",\"COMPLETED\",11),(\"impure\",\"FAILED\",8)])",
+      "expected": "[('nested', 'COMPLETED', 11), ('impure', 'FAILED', 8)]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_differential_rung3_and_rung2_inventory"
+      ],
+      "observed_values": [
+        "[('nested', 'COMPLETED', 11), ('impure', 'FAILED', 8)]"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 920,
+      "assertion": "self.assertEqual((native[\"vm_native_gate_count\"],native[\"estimate_native_gate_count\"]),(\"8\",\"8\"))",
+      "expected": "('8', '8')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_differential_rung3_and_rung2_inventory"
+      ],
+      "observed_values": [
+        "('8', '8')"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 921,
+      "assertion": "self.assertEqual((native[\"vm_program_time\"],native[\"vm_classical_steps\"],native[\"vm_nonclassical_time\"],native[\"estimate_action_time\"]),(\"25\",7,\"18\",\"18\"))",
+      "expected": "('25', 7, '18', '18')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_differential_rung3_and_rung2_inventory"
+      ],
+      "observed_values": [
+        "('25', 7, '18', '18')"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 922,
+      "assertion": "self.assertEqual((native[\"estimate_action_occupancy\"],native[\"vm_program_occupancy\"],native[\"space_relation\"]),(\"72\",\"84\",\"action <= program\"))",
+      "expected": "('72', '84', 'action <= program')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_differential_rung3_and_rung2_inventory"
+      ],
+      "observed_values": [
+        "('72', '84', 'action <= program')"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 923,
+      "assertion": "self.assertEqual([(r[\"status\"],r[\"steps\"],r[\"resources\"][\"time\"],r[\"resources\"][\"qubit_second[data]\"]) for r in report[\"native_programs\"]],[(\"COMPLETED\",7,\"25\",\"84\"),(\"COMPLETED\",7,\"9\",\"20\"),(\"FAILED\",5,\"5\",\"6\"),(\"COMPLETED\",12,\"12\",\"0\"),(\"COMPLETED\",11,\"15\",\"26\"),(\"COMPLETED\",6,\"12\",\"8\"),(\"COMPLETED\",11,\"16\",\"0\"),(\"COMPLETED\",6,\"6\",\"2\"),(\"FAILED\",5,\"5\",\"4\"),(\"COMPLETED\",4,\"4\",\"2\")])",
+      "expected": "[('COMPLETED', 7, '25', '84'), ('COMPLETED', 7, '9', '20'), ('FAILED', 5, '5', '6'), ('COMPLETED', 12, '12', '0'), ('COMPLETED', 11, '15', '26'), ('COMPLETED', 6, '12', '8'), ('COMPLETED', 11, '16', '0'), ('COMPLETED', 6, '6', '2'), ('FAILED', 5, '5', '4'), ('COMPLETED', 4, '4', '2')]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_differential_rung3_and_rung2_inventory"
+      ],
+      "observed_values": [
+        "[('COMPLETED', 7, '25', '84'), ('COMPLETED', 7, '9', '20'), ('FAILED', 5, '5', '6'), ('COMPLETED', 12, '12', '0'), ('COMPLETED', 11, '15', '26'), ('COMPLETED', 6, '12', '8'), ('COMPLETED', 11, '16', '0'), ('COMPLETED', 6, '6', '2'), ('FAILED', 5, '5', '4'), ('COMPLETED', 4, '4', '2')]"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 924,
+      "assertion": "self.assertEqual([r[\"reversed_classical_steps\"] for r in report[\"native_programs\"]],[\"0\",\"0\",\"0\",\"0\",\"0\",\"4\",\"5\",\"0\",\"0\",\"0\"])",
+      "expected": "['0', '0', '0', '0', '0', '4', '5', '0', '0', '0']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_differential_rung3_and_rung2_inventory"
+      ],
+      "observed_values": [
+        "['0', '0', '0', '0', '0', '4', '5', '0', '0', '0']"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 929,
+      "assertion": "self.assertEqual(topology[\"reason\"],\"§8: unknown field topology\")",
+      "expected": "'§8: unknown field topology'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_estimate.CommandLine.test_differential_rung3_and_rung2_inventory"
+      ],
+      "observed_values": [
+        "'§8: unknown field topology'"
+      ]
+    },
+    {
+      "file": "tests/test_estimate.py",
+      "line": 932,
+      "assertion": "self.assertEqual(topology[\"status\"],\"matched\")",
+      "expected": "'matched'",
+      "provenance": "historical origin unrecorded; branch not executed, no regenerated or independent claim",
+      "observations": 0,
+      "tests": [],
+      "observed_values": []
+    },
+    {
+      "file": "tests/test_gate.py",
+      "line": 16,
+      "assertion": "self.assertEqual(config[\"schema\"],1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_gate.Hook.test_pinned_sibling_hook_configuration_and_git_free_working_tree"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_gate.py",
+      "line": 18,
+      "assertion": "self.assertEqual(config[\"check\"],[{\"name\":\"scripts/check\",\"argv\":[\"scripts/check\"]}])",
+      "expected": "[{'name': 'scripts/check', 'argv': ['scripts/check']}]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_gate.Hook.test_pinned_sibling_hook_configuration_and_git_free_working_tree"
+      ],
+      "observed_values": [
+        "[{'name': 'scripts/check', 'argv': ['scripts/check']}]"
+      ]
+    },
+    {
+      "file": "tests/test_gate.py",
+      "line": 19,
+      "assertion": "self.assertEqual(set(config[\"siblings\"]),{\"bennett-isa-spec\",\"bennett-targets\",\"bennett-conformance\",\"bennett-vm\"})",
+      "expected": "{'bennett-targets', 'bennett-conformance', 'bennett-isa-spec', 'bennett-vm'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_gate.Hook.test_pinned_sibling_hook_configuration_and_git_free_working_tree"
+      ],
+      "observed_values": [
+        "{'bennett-conformance', 'bennett-targets', 'bennett-vm', 'bennett-isa-spec'}"
+      ]
+    },
+    {
+      "file": "tests/test_gate.py",
+      "line": 21,
+      "assertion": "self.assertEqual(config[\"env\"][\"BENNETT_VM_BIN\"],\"{sibling:bennett-vm}/target/debug/bennett-vm\")",
+      "expected": "'{sibling:bennett-vm}/target/debug/bennett-vm'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_gate.Hook.test_pinned_sibling_hook_configuration_and_git_free_working_tree"
+      ],
+      "observed_values": [
+        "'{sibling:bennett-vm}/target/debug/bennett-vm'"
+      ]
+    },
+    {
+      "file": "tests/test_gate.py",
+      "line": 36,
+      "assertion": "self.assertEqual(marker.read_text(),\"checked\")",
+      "expected": "'checked'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_gate.Hook.test_pinned_sibling_hook_configuration_and_git_free_working_tree"
+      ],
+      "observed_values": [
+        "'checked'",
+        "0"
+      ]
+    },
+    {
+      "file": "tests/test_gate.py",
+      "line": 38,
+      "assertion": "self.assertEqual(subprocess.run([str(hook),\"--working-tree\"],env=env,capture_output=True,timeout=10).returncode,7)",
+      "expected": "7",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_gate.Hook.test_pinned_sibling_hook_configuration_and_git_free_working_tree"
+      ],
+      "observed_values": [
+        "7"
+      ]
+    },
+    {
+      "file": "tests/test_gate.py",
+      "line": 51,
+      "assertion": "self.assertEqual(runner.group(recursive),'selectors')",
+      "expected": "'selectors'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_gate.Hook.test_parallel_suites_partition_every_discovered_case_once"
+      ],
+      "observed_values": [
+        "'selectors'"
+      ]
+    },
+    {
+      "file": "tests/test_phases.py",
+      "line": 18,
+      "assertion": "self.assertEqual((result, failed), ((253, 8), False))",
+      "expected": "((253, 8), False)",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_phases.ClassicalPhases.test_arithmetic_resolves_signed_values_and_faults"
+      ],
+      "observed_values": [
+        "((253, 8), False)"
+      ]
+    },
+    {
+      "file": "tests/test_phases.py",
+      "line": 20,
+      "assertion": "self.assertEqual((result, failed), (None, True))",
+      "expected": "(None, True)",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_phases.ClassicalPhases.test_arithmetic_resolves_signed_values_and_faults"
+      ],
+      "observed_values": [
+        "(None, True)"
+      ]
+    },
+    {
+      "file": "tests/test_phases.py",
+      "line": 28,
+      "assertion": "self.assertEqual(p.delta[(\"data\", \"clean\")], 3)",
+      "expected": "3",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_phases.ClassicalPhases.test_register_phase_and_snapshot_restore_lifetimes"
+      ],
+      "observed_values": [
+        "3"
+      ]
+    },
+    {
+      "file": "tests/test_phases.py",
+      "line": 29,
+      "assertion": "self.assertEqual(machine.register_width(machine.registers[result[0].identity]), 3)",
+      "expected": "3",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_phases.ClassicalPhases.test_register_phase_and_snapshot_restore_lifetimes"
+      ],
+      "observed_values": [
+        "3"
+      ]
+    },
+    {
+      "file": "tests/test_phases.py",
+      "line": 31,
+      "assertion": "self.assertEqual(restored.delta[(\"data\", \"clean\")], -3)",
+      "expected": "-3",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_phases.ClassicalPhases.test_register_phase_and_snapshot_restore_lifetimes"
+      ],
+      "observed_values": [
+        "-3"
+      ]
+    },
+    {
+      "file": "tests/test_phases.py",
+      "line": 32,
+      "assertion": "self.assertEqual(machine.physical, {})",
+      "expected": "{}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_phases.ClassicalPhases.test_register_phase_and_snapshot_restore_lifetimes"
+      ],
+      "observed_values": [
+        "{}"
+      ]
+    },
+    {
+      "file": "tests/test_phases.py",
+      "line": 38,
+      "assertion": "self.assertEqual(calls.call_count, 1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_phases.ClassicalPhases.test_execution_combines_quantum_and_classical_phases"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_phases.py",
+      "line": 39,
+      "assertion": "self.assertEqual((steps, machine.source.classical_status), (7, \"COMPLETED\"))",
+      "expected": "(7, 'COMPLETED')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_phases.ClassicalPhases.test_execution_combines_quantum_and_classical_phases"
+      ],
+      "observed_values": [
+        "(7, 'COMPLETED')"
+      ]
+    },
+    {
+      "file": "tests/test_phases.py",
+      "line": 40,
+      "assertion": "self.assertEqual(profile.resources(machine.source.target),\n                         {\"gate_count\": 8, \"time\": 25, \"peak_qubits[data]\": 4, \"qubit_second[data]\": 84})",
+      "expected": "{'gate_count': 8, 'time': 25, 'peak_qubits[data]': 4, 'qubit_second[data]': 84}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_phases.ClassicalPhases.test_execution_combines_quantum_and_classical_phases"
+      ],
+      "observed_values": [
+        "{'gate_count': 8, 'peak_qubits[data]': 4, 'qubit_second[data]': 84, 'time': 25}"
+      ]
+    },
+    {
+      "file": "tests/test_phases.py",
+      "line": 56,
+      "assertion": "self.assertEqual(source.catalog.body([node], env).resources(source.target, {\"data\": 1}),\n                         {\"gate_count\": 1, \"time\": 1, \"peak_qubits[data]\": 1, \"qubit_second[data]\": 1})",
+      "expected": "{'gate_count': 1, 'time': 1, 'peak_qubits[data]': 1, 'qubit_second[data]': 1}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_phases.SourcePhases.test_action_call_phase_binds_and_expands_the_callee"
+      ],
+      "observed_values": [
+        "{'gate_count': 1, 'peak_qubits[data]': 1, 'qubit_second[data]': 1, 'time': 1}"
+      ]
+    },
+    {
+      "file": "tests/test_quality.py",
+      "line": 49,
+      "assertion": "self.assertEqual(e.expression({\"table\": \"t\", \"index\": \"k\"}, {\"k\": 1}, {\"t\": [2, 5]}), 5)",
+      "expected": "5",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_quality.CoverageEdges.test_indexed_table_expression_and_exact_division"
+      ],
+      "observed_values": [
+        "5"
+      ]
+    },
+    {
+      "file": "tests/test_quality.py",
+      "line": 76,
+      "assertion": "self.assertEqual(e.main(command), 1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_quality.InheritedReview.test_oracle_and_token_entries_require_explicit_budget"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_quality.py",
+      "line": 77,
+      "assertion": "self.assertEqual(out.getvalue(), \"\")",
+      "expected": "''",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_quality.InheritedReview.test_oracle_and_token_entries_require_explicit_budget"
+      ],
+      "observed_values": [
+        "''"
+      ]
+    },
+    {
+      "file": "tests/test_quality.py",
+      "line": 80,
+      "assertion": "self.assertEqual(e.main(command + [\"--budget\", \"0,0,0,0\"]), 0, err.getvalue())",
+      "expected": "0",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_quality.InheritedReview.test_oracle_and_token_entries_require_explicit_budget"
+      ],
+      "observed_values": [
+        "0"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 60,
+      "assertion": "self.assertEqual([a[\"ordinal\"] for a in addresses],[0,0])",
+      "expected": "[0, 0]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_large_source_coordinates_have_distinct_ordinals_and_lossless_keys"
+      ],
+      "observed_values": [
+        "[0, 0]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 70,
+      "assertion": "self.assertEqual(s.pick(\"gate\",actual,3,2,\"fwd\"),{\"realisation\":\"native\"})",
+      "expected": "{'realisation': 'native'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_decimal_string_path_coordinates_match_exact_integer_values"
+      ],
+      "observed_values": [
+        "{'realisation': 'native'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 76,
+      "assertion": "self.assertEqual(s.pick(\"gate\",actual,0,999,\"fwd\"),{\"realisation\":\"native\"})",
+      "expected": "{'realisation': 'native'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_decimal_string_path_coordinates_match_exact_integer_values"
+      ],
+      "observed_values": [
+        "{'realisation': 'native'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 85,
+      "assertion": "self.assertEqual(parsed.pick(\"gate\",[{**point(obj.symbol(\"worker\")[\"interface_hash\"]),\"instance\":[0]}],0),{\"realisation\":\"native\"})",
+      "expected": "{'realisation': 'native'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_fixed_instance_path_accepts_decimal_string_entry_positions"
+      ],
+      "observed_values": [
+        "{'realisation': 'native'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 98,
+      "assertion": "self.assertEqual(c.field_bindings,1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_captured_record_arrays_reuse_validation_without_rebinding_fields"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 105,
+      "assertion": "self.assertEqual(c.field_bindings,1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_captured_record_arrays_reuse_validation_without_rebinding_fields"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 121,
+      "assertion": "self.assertEqual(c.recipe(\"record-capture\",[\"f\",records],env).gates,{\"x\":2})",
+      "expected": "{'x': 2}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_record_fields_capture_wire_ids_and_validate_unvisited_entries"
+      ],
+      "observed_values": [
+        "{'x': 2}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 134,
+      "assertion": "self.assertEqual([(r[\"function\"].name,r[\"key\"]) for r in instances],[(\"root\",()),(\"worker\",(0,1,2)),(\"worker\",(1,0,2))])",
+      "expected": "[('root', ()), ('worker', (0, 1, 2)), ('worker', (1, 0, 2))]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_fixed_procedure_binding_closure_keeps_entry_positions_distinct"
+      ],
+      "observed_values": [
+        "[('root', ()), ('worker', (0, 1, 2)), ('worker', (1, 0, 2))]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 135,
+      "assertion": "self.assertEqual([r[\"first\"] for r in instances],[0,3,5])",
+      "expected": "[0, 3, 5]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_fixed_procedure_binding_closure_keeps_entry_positions_distinct"
+      ],
+      "observed_values": [
+        "[0, 3, 5]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 136,
+      "assertion": "self.assertEqual([r[\"arguments\"] for r in instances[1:]],[{\"ta\":0,\"tb\":1,\"c\":2},{\"ta\":1,\"tb\":0,\"c\":2}])",
+      "expected": "[{'ta': 0, 'tb': 1, 'c': 2}, {'ta': 1, 'tb': 0, 'c': 2}]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_fixed_procedure_binding_closure_keeps_entry_positions_distinct"
+      ],
+      "observed_values": [
+        "[{'ta': 0, 'tb': 1, 'c': 2}, {'ta': 1, 'tb': 0, 'c': 2}]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 137,
+      "assertion": "self.assertEqual([r[\"labels\"] for r in instances],[{\"entry\":0},{\"entry\":3},{\"entry\":5}])",
+      "expected": "[{'entry': 0}, {'entry': 3}, {'entry': 5}]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_fixed_procedure_binding_closure_keeps_entry_positions_distinct"
+      ],
+      "observed_values": [
+        "[{'entry': 0}, {'entry': 3}, {'entry': 5}]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 153,
+      "assertion": "self.assertEqual(obj.functions[\"worker\"].kind,\"lproc\")",
+      "expected": "'lproc'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_region_graph_includes_lproc_closure_but_allows_lproc_recursion"
+      ],
+      "observed_values": [
+        "'lproc'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 188,
+      "assertion": "self.assertEqual(count,86)",
+      "expected": "86",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_published_k82_all_86_expansion_digests"
+      ],
+      "observed_values": [
+        "86"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 230,
+      "assertion": "self.assertEqual(chosen,{\"realisation\":\"native\"})",
+      "expected": "{'realisation': 'native'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Selectors.test_specificity_per_kind_ties_and_covered_ties"
+      ],
+      "observed_values": [
+        "{'realisation': 'native'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 232,
+      "assertion": "self.assertEqual(selectors.pick(\"alloc\",[point()],0),{\"class\":\"data\"})",
+      "expected": "{'class': 'data'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Selectors.test_specificity_per_kind_ties_and_covered_ties"
+      ],
+      "observed_values": [
+        "{'class': 'data'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 243,
+      "assertion": "self.assertEqual(selectors.pick(\"gate\",[outer,inner],0,1,\"fwd\"),{\"realisation\":\"chosen\"})",
+      "expected": "{'realisation': 'chosen'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_root_nested_step_and_call_occurrence_context"
+      ],
+      "observed_values": [
+        "{'realisation': 'chosen'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 244,
+      "assertion": "self.assertEqual(selectors.pick(\"gate\",[outer],0,1,\"fwd\"),{\"realisation\":\"native\"})",
+      "expected": "{'realisation': 'native'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_root_nested_step_and_call_occurrence_context"
+      ],
+      "observed_values": [
+        "{'realisation': 'native'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 246,
+      "assertion": "self.assertEqual(selectors.pick(\"gate\",[other,inner],0,1,\"fwd\"),{\"realisation\":\"native\"})",
+      "expected": "{'realisation': 'native'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Selectors.test_root_nested_step_and_call_occurrence_context"
+      ],
+      "observed_values": [
+        "{'realisation': 'native'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 276,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"7\",\"time\":\"7\",\"peak_qubits[data]\":\"4\",\"qubit_second[data]\":\"26\"})",
+      "expected": "{'gate_count': '7', 'time': '7', 'peak_qubits[data]': '4', 'qubit_second[data]': '26'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_k80_primitive_terminal_chain_recompute_has_exact_published_leaves"
+      ],
+      "observed_values": [
+        "{'gate_count': '7', 'peak_qubits[data]': '4', 'qubit_second[data]': '26', 'time': '7'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 277,
+      "assertion": "self.assertEqual(result[\"cleanup_decisions\"][0][\"owned_points\"],[\"entry:3\",\"entry:4\",\"entry:5\"])",
+      "expected": "['entry:3', 'entry:4', 'entry:5']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_k80_primitive_terminal_chain_recompute_has_exact_published_leaves"
+      ],
+      "observed_values": [
+        "['entry:3', 'entry:4', 'entry:5']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 302,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"5\",\"time\":\"5\",\"peak_qubits[data]\":\"4\",\"qubit_second[data]\":\"18\"})",
+      "expected": "{'gate_count': '5', 'time': '5', 'peak_qubits[data]': '4', 'qubit_second[data]': '18'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_primitive_joint_inverse_has_only_first_release_owner"
+      ],
+      "observed_values": [
+        "{'gate_count': '5', 'peak_qubits[data]': '4', 'qubit_second[data]': '18', 'time': '5'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 303,
+      "assertion": "self.assertEqual([(d[\"chain\"][-1][\"point\"],d[\"owned_points\"]) for d in result[\"cleanup_decisions\"]],[(\"entry:4\",[\"entry:3\",\"entry:4\"]),(\"entry:5\",[\"entry:5\"])])",
+      "expected": "[('entry:4', ['entry:3', 'entry:4']), ('entry:5', ['entry:5'])]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_primitive_joint_inverse_has_only_first_release_owner"
+      ],
+      "observed_values": [
+        "[('entry:4', ['entry:3', 'entry:4']), ('entry:5', ['entry:5'])]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 314,
+      "assertion": "self.assertEqual(native.call_count,1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_primitive_cleanup_choice_is_lazy_and_does_not_replay_missing_history"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 338,
+      "assertion": "self.assertEqual([(d[\"chain\"][-1][\"point\"],d[\"ordinal\"],d[\"realisation\"]) for d in result[\"cleanup_decisions\"]],[(\"entry:1\",0,\"recompute\")])",
+      "expected": "[('entry:1', 0, 'recompute')]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_empty_clean_allocation_cleanup_supports_whole_recompute"
+      ],
+      "observed_values": [
+        "[('entry:1', 0, 'recompute')]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 353,
+      "assertion": "self.assertEqual(c.ledger.finish(),{\"gate_count\":2,\"time\":2,\"peak_qubits[data]\":4,\"qubit_second[data]\":8})",
+      "expected": "{'gate_count': 2, 'time': 2, 'peak_qubits[data]': 4, 'qubit_second[data]': 8}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 3,
+      "tests": [
+        "test_schedule.Accounting.test_empty_cleanup_adjoint_and_raw_inverse_keep_correct_carriers"
+      ],
+      "observed_values": [
+        "{'gate_count': 2, 'peak_qubits[data]': Fraction(4, 1), 'qubit_second[data]': Fraction(8, 1), 'time': 2}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 365,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"2\",\"time\":\"2\",\"peak_qubits[data]\":\"2\",\"peak_qubits[buffer]\":\"3\",\"qubit_second[data]\":\"4\",\"qubit_second[buffer]\":\"6\"})",
+      "expected": "{'gate_count': '2', 'time': '2', 'peak_qubits[data]': '2', 'peak_qubits[buffer]': '3', 'qubit_second[data]': '4', 'qubit_second[buffer]': '6'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_empty_recompute_carrier_zero_is_separate_from_fresh_leaf_zero"
+      ],
+      "observed_values": [
+        "{'gate_count': '2', 'peak_qubits[buffer]': '3', 'peak_qubits[data]': '2', 'qubit_second[buffer]': '6', 'qubit_second[data]': '4', 'time': '2'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 366,
+      "assertion": "self.assertEqual([r[\"class\"] for r in result[\"frame\"][\"scratch\"]],[\"data\",\"buffer\"])",
+      "expected": "['data', 'buffer']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_empty_recompute_carrier_zero_is_separate_from_fresh_leaf_zero"
+      ],
+      "observed_values": [
+        "['data', 'buffer']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 367,
+      "assertion": "self.assertEqual(len(result[\"cleanup_decisions\"]),1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_empty_recompute_carrier_zero_is_separate_from_fresh_leaf_zero"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 374,
+      "assertion": "self.assertEqual(result[\"classical_status\"],\"COMPLETED\")",
+      "expected": "'COMPLETED'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_proved_clean_measurement_survives_private_workspace_identity_call"
+      ],
+      "observed_values": [
+        "'COMPLETED'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 375,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"0\",\"time\":\"4\",\"peak_qubits[data]\":\"2\",\"qubit_second[data]\":\"2\"})",
+      "expected": "{'gate_count': '0', 'time': '4', 'peak_qubits[data]': '2', 'qubit_second[data]': '2'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_proved_clean_measurement_survives_private_workspace_identity_call"
+      ],
+      "observed_values": [
+        "{'gate_count': '0', 'peak_qubits[data]': '2', 'qubit_second[data]': '2', 'time': '4'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 383,
+      "assertion": "self.assertEqual(e.estimate(obj,target(),\"root\",[],[\"0\"]*4)[\"resources\"][\"time\"],\"6\")",
+      "expected": "'6'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_schedule_binding_matches_decimal_string_control_count"
+      ],
+      "observed_values": [
+        "'6'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 413,
+      "assertion": "self.assertEqual([context[\"path\"][-1][\"call_index\"] for context in result[\"invocation_contexts\"][1:]],[0,0,1])",
+      "expected": "[0, 0, 1]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_oracle_pair_recompute_keeps_caller_targets_and_owns_fresh_calls"
+      ],
+      "observed_values": [
+        "[0, 0, 1]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 414,
+      "assertion": "self.assertEqual([context[\"path\"][-1][\"point\"] for context in result[\"invocation_contexts\"][1:]],[\"entry:0\",\"entry:1\",\"entry:1\"])",
+      "expected": "['entry:0', 'entry:1', 'entry:1']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_oracle_pair_recompute_keeps_caller_targets_and_owns_fresh_calls"
+      ],
+      "observed_values": [
+        "['entry:0', 'entry:1', 'entry:1']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 415,
+      "assertion": "self.assertEqual([d[\"realisation\"] for d in result[\"cleanup_decisions\"]],[\"recompute\"])",
+      "expected": "['recompute']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_oracle_pair_recompute_keeps_caller_targets_and_owns_fresh_calls"
+      ],
+      "observed_values": [
+        "['recompute']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 429,
+      "assertion": "self.assertEqual(result[\"cleanup_decisions\"],[])",
+      "expected": "[]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_oracle_pair_carrier_ties_check_before_target_realisation"
+      ],
+      "observed_values": [
+        "[]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 445,
+      "assertion": "self.assertEqual([c[\"path\"][-1][\"call_index\"] for c in result[\"invocation_contexts\"][1:]],[0,0,1])",
+      "expected": "[0, 0, 1]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_oracle_cleanup_call_indices_follow_selected_expansion"
+      ],
+      "observed_values": [
+        "[0, 0, 1]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 506,
+      "assertion": "self.assertEqual(result[\"classical_steps\"],\"7\")",
+      "expected": "'7'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_ids_are_opaque_except_equality_and_zero"
+      ],
+      "observed_values": [
+        "'7'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 507,
+      "assertion": "self.assertEqual(result[\"resources\"][\"qubit_second[data]\"],\"5\")",
+      "expected": "'5'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_ids_are_opaque_except_equality_and_zero"
+      ],
+      "observed_values": [
+        "'5'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 516,
+      "assertion": "self.assertEqual(result[\"classical_steps\"],\"18\")",
+      "expected": "'18'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_id_memory_roundtrip_and_freshness_after_uncall"
+      ],
+      "observed_values": [
+        "'18'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 517,
+      "assertion": "self.assertEqual(result[\"resources\"][\"peak_qubits[data]\"],\"2\")",
+      "expected": "'2'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_id_memory_roundtrip_and_freshness_after_uncall"
+      ],
+      "observed_values": [
+        "'2'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 518,
+      "assertion": "self.assertEqual(result[\"resources\"][\"qubit_second[data]\"],\"26\")",
+      "expected": "'26'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_id_memory_roundtrip_and_freshness_after_uncall"
+      ],
+      "observed_values": [
+        "'26'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 536,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"2\",\"peak_qubits[data]\":\"1\",\"qubit_second[data]\":\"5\",\"time\":\"7\"})",
+      "expected": "{'gate_count': '2', 'peak_qubits[data]': '1', 'qubit_second[data]': '5', 'time': '7'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_matching_region_inverse_restores_register_entry_versions"
+      ],
+      "observed_values": [
+        "{'gate_count': '2', 'peak_qubits[data]': '1', 'qubit_second[data]': '5', 'time': '7'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 552,
+      "assertion": "self.assertEqual((result[\"classical_steps\"],result[\"resources\"][\"qubit_second[data]\"]),(\"6\",\"12\"))",
+      "expected": "('6', '12')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_reader_enforces_the_published_static_register_view_rules"
+      ],
+      "observed_values": [
+        "('6', '12')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 561,
+      "assertion": "self.assertEqual(result[\"classical_status\"],\"COMPLETED\")",
+      "expected": "'COMPLETED'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 3,
+      "tests": [
+        "test_schedule.Accounting.test_cc_control_views_are_consumed_once_by_wrapped_region_calls"
+      ],
+      "observed_values": [
+        "'COMPLETED'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 562,
+      "assertion": "self.assertEqual(result[\"classical_steps\"],\"7\")",
+      "expected": "'7'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 3,
+      "tests": [
+        "test_schedule.Accounting.test_cc_control_views_are_consumed_once_by_wrapped_region_calls"
+      ],
+      "observed_values": [
+        "'7'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 563,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"2\",\"peak_qubits[data]\":\"3\",\"qubit_second[data]\":\"18\",\"time\":\"9\"})",
+      "expected": "{'gate_count': '2', 'peak_qubits[data]': '3', 'qubit_second[data]': '18', 'time': '9'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 3,
+      "tests": [
+        "test_schedule.Accounting.test_cc_control_views_are_consumed_once_by_wrapped_region_calls"
+      ],
+      "observed_values": [
+        "{'gate_count': '2', 'peak_qubits[data]': '3', 'qubit_second[data]': '18', 'time': '9'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 577,
+      "assertion": "self.assertEqual(e.estimate(obj,target(),\"root\",[],[\"0\"]*4)[\"classical_steps\"],\"15\")",
+      "expected": "'15'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_block_effects_bind_images_zero_sectors_and_segment_reversal"
+      ],
+      "observed_values": [
+        "'15'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 604,
+      "assertion": "self.assertEqual((result[\"classical_status\"],result[\"classical_steps\"]),(\"COMPLETED\",\"5\"))",
+      "expected": "('COMPLETED', '5')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_reader_checks_device_declarations_and_zero_entropy_needs_no_tape"
+      ],
+      "observed_values": [
+        "('COMPLETED', '5')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 622,
+      "assertion": "self.assertEqual((result[\"classical_status\"],result[\"classical_steps\"]),(\"COMPLETED\",\"11\"))",
+      "expected": "('COMPLETED', '11')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_cc_inverse_pairs_on_disjoint_slices_restore_independent_versions"
+      ],
+      "observed_values": [
+        "('COMPLETED', '11')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 633,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"4\",\"peak_qubits[data]\":\"2\",\"qubit_second[data]\":\"20\",\"time\":\"13\"})",
+      "expected": "{'gate_count': '4', 'peak_qubits[data]': '2', 'qubit_second[data]': '20', 'time': '13'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_joint_call_inverse_requires_every_current_output_version"
+      ],
+      "observed_values": [
+        "{'gate_count': '4', 'peak_qubits[data]': '2', 'qubit_second[data]': '20', 'time': '13'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 649,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"2\",\"peak_qubits[data]\":\"1\",\"qubit_second[data]\":\"5\",\"time\":\"10\"})",
+      "expected": "{'gate_count': '2', 'peak_qubits[data]': '1', 'qubit_second[data]': '5', 'time': '10'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_region_inverse_pair_keeps_classical_token_identities"
+      ],
+      "observed_values": [
+        "{'gate_count': '2', 'peak_qubits[data]': '1', 'qubit_second[data]': '5', 'time': '10'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 656,
+      "assertion": "self.assertEqual(len(states.ranges[q.identity]),3)",
+      "expected": "3",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_wire_version_ranges_scale_with_source_boundaries"
+      ],
+      "observed_values": [
+        "3"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 669,
+      "assertion": "self.assertEqual((result[\"classical_steps\"],result[\"reversed_classical_steps\"]),(\"9\",\"6\"))",
+      "expected": "('9', '6')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_nested_uncall_skips_cancelled_register_frames_and_pure_id_queries"
+      ],
+      "observed_values": [
+        "('9', '6')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 670,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"0\",\"peak_qubits[data]\":\"1\",\"qubit_second[data]\":\"5\",\"time\":\"15\"})",
+      "expected": "{'gate_count': '0', 'peak_qubits[data]': '1', 'qubit_second[data]': '5', 'time': '15'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_nested_uncall_skips_cancelled_register_frames_and_pure_id_queries"
+      ],
+      "observed_values": [
+        "{'gate_count': '0', 'peak_qubits[data]': '1', 'qubit_second[data]': '5', 'time': '15'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 675,
+      "assertion": "self.assertEqual((result[\"classical_steps\"],result[\"reversed_classical_steps\"]),(\"6\",\"4\"))",
+      "expected": "('6', '4')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_classical_and_quantum_segment_reversal_charge_active_frames"
+      ],
+      "observed_values": [
+        "('6', '4')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 676,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"2\",\"peak_qubits[data]\":\"1\",\"qubit_second[data]\":\"8\",\"time\":\"12\"})",
+      "expected": "{'gate_count': '2', 'peak_qubits[data]': '1', 'qubit_second[data]': '8', 'time': '12'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_classical_and_quantum_segment_reversal_charge_active_frames"
+      ],
+      "observed_values": [
+        "{'gate_count': '2', 'peak_qubits[data]': '1', 'qubit_second[data]': '8', 'time': '12'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 680,
+      "assertion": "self.assertEqual((result[\"classical_steps\"],result[\"reversed_classical_steps\"]),(\"5\",\"3\"))",
+      "expected": "('5', '3')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_classical_and_quantum_segment_reversal_charge_active_frames"
+      ],
+      "observed_values": [
+        "('5', '3')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 681,
+      "assertion": "self.assertEqual(result[\"resources\"][\"time\"],\"8\")",
+      "expected": "'8'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_classical_and_quantum_segment_reversal_charge_active_frames"
+      ],
+      "observed_values": [
+        "'8'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 683,
+      "assertion": "self.assertEqual(bound[\"resources\"][\"time\"],\"10\")",
+      "expected": "'10'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_classical_and_quantum_segment_reversal_charge_active_frames"
+      ],
+      "observed_values": [
+        "'10'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 696,
+      "assertion": "self.assertEqual(result[\"gates\"],{\"t\":\"1\",\"tdg\":\"1\"})",
+      "expected": "{'t': '1', 'tdg': '1'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_quantum_segment_reversal_uses_adjoint_target_cost_and_lifetime_order"
+      ],
+      "observed_values": [
+        "{'t': '1', 'tdg': '1'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 697,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"2\",\"peak_qubits[data]\":\"1\",\"qubit_second[data]\":\"15\",\"time\":\"19\"})",
+      "expected": "{'gate_count': '2', 'peak_qubits[data]': '1', 'qubit_second[data]': '15', 'time': '19'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_quantum_segment_reversal_uses_adjoint_target_cost_and_lifetime_order"
+      ],
+      "observed_values": [
+        "{'gate_count': '2', 'peak_qubits[data]': '1', 'qubit_second[data]': '15', 'time': '19'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 702,
+      "assertion": "self.assertEqual((result[\"classical_steps\"],result[\"reversed_classical_steps\"]),(\"6\",\"4\"))",
+      "expected": "('6', '4')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_quantum_segment_reversal_uses_adjoint_target_cost_and_lifetime_order"
+      ],
+      "observed_values": [
+        "('6', '4')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 715,
+      "assertion": "self.assertEqual((result[\"classical_status\"],result[\"classical_steps\"],result[\"reversed_classical_steps\"]),(\"FAILED\",\"10\",\"4\"))",
+      "expected": "('FAILED', '10', '4')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_classical_minted_token_validity_follows_active_history"
+      ],
+      "observed_values": [
+        "('FAILED', '10', '4')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 716,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"0\",\"peak_qubits[data]\":\"6\",\"qubit_second[data]\":\"9\",\"time\":\"14\"})",
+      "expected": "{'gate_count': '0', 'peak_qubits[data]': '6', 'qubit_second[data]': '9', 'time': '14'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_classical_minted_token_validity_follows_active_history"
+      ],
+      "observed_values": [
+        "{'gate_count': '0', 'peak_qubits[data]': '6', 'qubit_second[data]': '9', 'time': '14'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 719,
+      "assertion": "self.assertEqual(e.estimate(live,target(),\"root\",[],[\"0\"]*4)[\"classical_status\"],\"COMPLETED\")",
+      "expected": "'COMPLETED'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_classical_minted_token_validity_follows_active_history"
+      ],
+      "observed_values": [
+        "'COMPLETED'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 728,
+      "assertion": "self.assertEqual(realised[\"resources\"],{\"gate_count\":\"8\",\"peak_qubits[data]\":\"4\",\"qubit_second[data]\":\"84\",\"time\":\"25\"})",
+      "expected": "{'gate_count': '8', 'peak_qubits[data]': '4', 'qubit_second[data]': '84', 'time': '25'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_default_topology_replay_and_selected_callee_schedule"
+      ],
+      "observed_values": [
+        "{'gate_count': '8', 'peak_qubits[data]': '4', 'qubit_second[data]': '84', 'time': '25'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 731,
+      "assertion": "self.assertEqual((failed[\"classical_status\"],failed[\"classical_steps\"]),(\"FAILED\",\"3\"))",
+      "expected": "('FAILED', '3')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_default_topology_replay_and_selected_callee_schedule"
+      ],
+      "observed_values": [
+        "('FAILED', '3')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 732,
+      "assertion": "self.assertEqual(failed[\"resources\"],{\"gate_count\":\"0\",\"peak_qubits[data]\":\"2\",\"qubit_second[data]\":\"2\",\"time\":\"3\"})",
+      "expected": "{'gate_count': '0', 'peak_qubits[data]': '2', 'qubit_second[data]': '2', 'time': '3'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_default_topology_replay_and_selected_callee_schedule"
+      ],
+      "observed_values": [
+        "{'gate_count': '0', 'peak_qubits[data]': '2', 'qubit_second[data]': '2', 'time': '3'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 743,
+      "assertion": "self.assertEqual(e.estimate(obj,target(),\"main\",[],[\"0\"]*4)[\"resources\"][\"time\"],\"25\")",
+      "expected": "'25'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_default_topology_replay_and_selected_callee_schedule"
+      ],
+      "observed_values": [
+        "'25'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 755,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"2\",\"peak_qubits[data]\":\"3\",\"qubit_second[data]\":\"11\",\"time\":\"6\"})",
+      "expected": "{'gate_count': '2', 'peak_qubits[data]': '3', 'qubit_second[data]': '11', 'time': '6'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_topology_reserves_uncalled_registers_and_restores_vertex_lifetimes"
+      ],
+      "observed_values": [
+        "{'gate_count': '2', 'peak_qubits[data]': '3', 'qubit_second[data]': '11', 'time': '6'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 765,
+      "assertion": "self.assertEqual((shared[\"classical_status\"],shared[\"classical_steps\"],shared[\"reversed_classical_steps\"],shared[\"resources\"][\"time\"]),(\"COMPLETED\",\"4\",\"2\",\"6\"))",
+      "expected": "('COMPLETED', '4', '2', '6')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_classical_explicit_alias_partitions_distinguish_equal_token_tuples"
+      ],
+      "observed_values": [
+        "('COMPLETED', '4', '2', '6')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 766,
+      "assertion": "self.assertEqual((distinct[\"classical_status\"],distinct[\"classical_steps\"],distinct[\"resources\"][\"time\"]),(\"FAILED\",\"3\",\"3\"))",
+      "expected": "('FAILED', '3', '3')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_classical_explicit_alias_partitions_distinguish_equal_token_tuples"
+      ],
+      "observed_values": [
+        "('FAILED', '3', '3')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 769,
+      "assertion": "self.assertEqual(shared[\"invocation\"][\"token_aliases\"],[0,0])",
+      "expected": "[0, 0]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_classical_explicit_alias_partitions_distinguish_equal_token_tuples"
+      ],
+      "observed_values": [
+        "[0, 0]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 770,
+      "assertion": "self.assertEqual(distinct[\"effective_schedule\"][\"bindings\"][\"token_aliases\"],[0,1])",
+      "expected": "[0, 1]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_classical_explicit_alias_partitions_distinguish_equal_token_tuples"
+      ],
+      "observed_values": [
+        "[0, 1]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 807,
+      "assertion": "self.assertEqual(contexts[-1][\"invocation\"][\"budget\"],[\"1\",\"0\",\"0\",\"0\"])",
+      "expected": "['1', '0', '0', '0']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_cc_and_q_alias_contexts_forward_without_an_action_primary"
+      ],
+      "observed_values": [
+        "['1', '0', '0', '0']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 819,
+      "assertion": "self.assertEqual(seen,[(\"root\",(\"A\",\"B\")),(\"bridge\",(\"B\",\"A\")),(\"leaf\",(\"B\",\"A\"))])",
+      "expected": "[('root', ('A', 'B')), ('bridge', ('B', 'A')), ('leaf', ('B', 'A'))]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 3,
+      "tests": [
+        "test_schedule.Accounting.test_cc_and_q_alias_contexts_forward_without_an_action_primary"
+      ],
+      "observed_values": [
+        "[('root', ('A', 'B')), ('bridge', ('B', 'A')), ('leaf', ('B', 'A'))]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 828,
+      "assertion": "self.assertEqual(contexts[0][\"invocation\"][\"token_aliases\"],[0,1,1])",
+      "expected": "[0, 1, 1]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_q_oracle_aliases_prepend_only_the_actual_primary_token"
+      ],
+      "observed_values": [
+        "[0, 1, 1]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 829,
+      "assertion": "self.assertEqual(len(contexts),5)",
+      "expected": "5",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_q_oracle_aliases_prepend_only_the_actual_primary_token"
+      ],
+      "observed_values": [
+        "5"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 831,
+      "assertion": "self.assertEqual(context[\"invocation\"][\"token_aliases\"],[0,0])",
+      "expected": "[0, 0]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 4,
+      "tests": [
+        "test_schedule.Accounting.test_q_oracle_aliases_prepend_only_the_actual_primary_token"
+      ],
+      "observed_values": [
+        "[0, 0]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 832,
+      "assertion": "self.assertEqual(context[\"invocation\"][\"budget\"],[\"1\",\"0\",\"0\",\"0\"])",
+      "expected": "['1', '0', '0', '0']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 4,
+      "tests": [
+        "test_schedule.Accounting.test_q_oracle_aliases_prepend_only_the_actual_primary_token"
+      ],
+      "observed_values": [
+        "['1', '0', '0', '0']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 850,
+      "assertion": "self.assertEqual(seen,[(\"root\",(\"P\",\"A\",\"B\")),(\"leaf\",(\"B\",\"A\"))])",
+      "expected": "[('root', ('P', 'A', 'B')), ('leaf', ('B', 'A'))]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_q_aliases_survive_fixed_lproc_bindings_and_lexical_captures"
+      ],
+      "observed_values": [
+        "[('root', ('P', 'A', 'B')), ('leaf', ('B', 'A'))]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 872,
+      "assertion": "self.assertEqual(len(contexts),5)",
+      "expected": "5",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_q_aliases_survive_qinplace_templates_and_source_loop_captures"
+      ],
+      "observed_values": [
+        "5"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 874,
+      "assertion": "self.assertEqual([c[\"path\"][0][\"iteration\"] for c in contexts[1:]],[[0],[0],[1],[1]])",
+      "expected": "[[0], [0], [1], [1]]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_q_aliases_survive_qinplace_templates_and_source_loop_captures"
+      ],
+      "observed_values": [
+        "[[0], [0], [1], [1]]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 905,
+      "assertion": "self.assertEqual(result[\"label\"],\"exact\")",
+      "expected": "'exact'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_program_matches_complete_native_vm_ledger"
+      ],
+      "observed_values": [
+        "'exact'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 906,
+      "assertion": "self.assertEqual(result[\"classical_steps\"],\"7\")",
+      "expected": "'7'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_program_matches_complete_native_vm_ledger"
+      ],
+      "observed_values": [
+        "'7'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 907,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"8\",\"peak_qubits[data]\":\"4\",\"qubit_second[data]\":\"84\",\"time\":\"25\"})",
+      "expected": "{'gate_count': '8', 'peak_qubits[data]': '4', 'qubit_second[data]': '84', 'time': '25'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_program_matches_complete_native_vm_ledger"
+      ],
+      "observed_values": [
+        "{'gate_count': '8', 'peak_qubits[data]': '4', 'qubit_second[data]': '84', 'time': '25'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 914,
+      "assertion": "self.assertEqual((result[\"classical_status\"],result[\"classical_steps\"]),(\"COMPLETED\",\"6\"))",
+      "expected": "('COMPLETED', '6')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 3,
+      "tests": [
+        "test_schedule.Accounting.test_cc_measurement_of_proved_clean_register_consumes_all_aliases"
+      ],
+      "observed_values": [
+        "('COMPLETED', '6')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 918,
+      "assertion": "self.assertEqual((result[\"classical_status\"],result[\"classical_steps\"]),(\"FAILED\",\"4\"))",
+      "expected": "('FAILED', '4')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_measurement_of_proved_clean_register_consumes_all_aliases"
+      ],
+      "observed_values": [
+        "('FAILED', '4')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 919,
+      "assertion": "self.assertEqual(result[\"resources\"][\"qubit_second[data]\"],\"4\")",
+      "expected": "'4'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_measurement_of_proved_clean_register_consumes_all_aliases"
+      ],
+      "observed_values": [
+        "'4'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 931,
+      "assertion": "self.assertEqual((result[\"classical_status\"],result[\"classical_steps\"],result[\"reversed_classical_steps\"]),(\"FAILED\",\"5\",\"0\"))",
+      "expected": "('FAILED', '5', '0')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_measurement_width_fault_and_segment_uncall_preflight"
+      ],
+      "observed_values": [
+        "('FAILED', '5', '0')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 932,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"0\",\"peak_qubits[data]\":\"2\",\"qubit_second[data]\":\"4\",\"time\":\"5\"})",
+      "expected": "{'gate_count': '0', 'peak_qubits[data]': '2', 'qubit_second[data]': '4', 'time': '5'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_measurement_width_fault_and_segment_uncall_preflight"
+      ],
+      "observed_values": [
+        "{'gate_count': '0', 'peak_qubits[data]': '2', 'qubit_second[data]': '4', 'time': '5'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 946,
+      "assertion": "self.assertEqual((result[\"classical_status\"],result[\"classical_steps\"]),(\"COMPLETED\",\"6\"))",
+      "expected": "('COMPLETED', '6')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_measurement_width_analysis_defers_unknown_dominating_definitions"
+      ],
+      "observed_values": [
+        "('COMPLETED', '6')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 947,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"0\",\"peak_qubits[data]\":\"3\",\"qubit_second[data]\":\"10\",\"time\":\"6\"})",
+      "expected": "{'gate_count': '0', 'peak_qubits[data]': '3', 'qubit_second[data]': '10', 'time': '6'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_measurement_width_analysis_defers_unknown_dominating_definitions"
+      ],
+      "observed_values": [
+        "{'gate_count': '0', 'peak_qubits[data]': '3', 'qubit_second[data]': '10', 'time': '6'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 954,
+      "assertion": "self.assertEqual(result[\"classical_steps\"],\"6\")",
+      "expected": "'6'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 3,
+      "tests": [
+        "test_schedule.Accounting.test_cc_dynamic_register_width_zero_capacity_and_alias_lifetimes"
+      ],
+      "observed_values": [
+        "'6'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 955,
+      "assertion": "self.assertEqual(result[\"resources\"][\"time\"],\"6\")",
+      "expected": "'6'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 3,
+      "tests": [
+        "test_schedule.Accounting.test_cc_dynamic_register_width_zero_capacity_and_alias_lifetimes"
+      ],
+      "observed_values": [
+        "'6'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 960,
+      "assertion": "self.assertEqual(result[\"classical_steps\"],\"1\")",
+      "expected": "'1'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_dynamic_register_width_zero_capacity_and_alias_lifetimes"
+      ],
+      "observed_values": [
+        "'1'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 961,
+      "assertion": "self.assertEqual(result[\"resources\"][\"peak_qubits[data]\"],\"0\")",
+      "expected": "'0'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_dynamic_register_width_zero_capacity_and_alias_lifetimes"
+      ],
+      "observed_values": [
+        "'0'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 969,
+      "assertion": "self.assertEqual(result[\"classical_steps\"],\"6\")",
+      "expected": "'6'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_call_alias_and_uncall_restores_ledger_without_reusing_ids"
+      ],
+      "observed_values": [
+        "'6'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 970,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"0\",\"peak_qubits[data]\":\"2\",\"qubit_second[data]\":\"10\",\"time\":\"9\"})",
+      "expected": "{'gate_count': '0', 'peak_qubits[data]': '2', 'qubit_second[data]': '10', 'time': '9'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_call_alias_and_uncall_restores_ledger_without_reusing_ids"
+      ],
+      "observed_values": [
+        "{'gate_count': '0', 'peak_qubits[data]': '2', 'qubit_second[data]': '10', 'time': '9'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 974,
+      "assertion": "self.assertEqual(result[\"classical_steps\"],\"5\")",
+      "expected": "'5'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_call_alias_and_uncall_restores_ledger_without_reusing_ids"
+      ],
+      "observed_values": [
+        "'5'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 975,
+      "assertion": "self.assertEqual(result[\"resources\"][\"qubit_second[data]\"],\"6\")",
+      "expected": "'6'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_call_alias_and_uncall_restores_ledger_without_reusing_ids"
+      ],
+      "observed_values": [
+        "'6'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 983,
+      "assertion": "self.assertEqual(result[\"classical_steps\"],\"8\")",
+      "expected": "'8'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_slice_concat_and_transfer_width_faults"
+      ],
+      "observed_values": [
+        "'8'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 984,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"gate_count\":\"2\",\"peak_qubits[data]\":\"3\",\"qubit_second[data]\":\"23\",\"time\":\"10\"})",
+      "expected": "{'gate_count': '2', 'peak_qubits[data]': '3', 'qubit_second[data]': '23', 'time': '10'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_slice_concat_and_transfer_width_faults"
+      ],
+      "observed_values": [
+        "{'gate_count': '2', 'peak_qubits[data]': '3', 'qubit_second[data]': '23', 'time': '10'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 989,
+      "assertion": "self.assertEqual((result[\"classical_steps\"],result[\"gates\"]),(\"2\",{}))",
+      "expected": "('2', {})",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_slice_concat_and_transfer_width_faults"
+      ],
+      "observed_values": [
+        "('2', {})"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 990,
+      "assertion": "self.assertEqual(result[\"resources\"][\"qubit_second[data]\"],\"2\")",
+      "expected": "'2'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_cc_register_slice_concat_and_transfer_width_faults"
+      ],
+      "observed_values": [
+        "'2'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1022,
+      "assertion": "self.assertEqual(actual[\"resources\"][\"time\"],\"32\")",
+      "expected": "'32'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_while_loop_carries_bindings_and_keeps_its_adjoint_flag_order"
+      ],
+      "observed_values": [
+        "'32'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1025,
+      "assertion": "self.assertEqual(actual[\"gates\"],{\"ccx\":\"4\",\"cx\":\"2\",\"x\":\"6\"})",
+      "expected": "{'ccx': '4', 'cx': '2', 'x': '6'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_while_loop_carries_bindings_and_keeps_its_adjoint_flag_order"
+      ],
+      "observed_values": [
+        "{'ccx': '4', 'cx': '2', 'x': '6'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1028,
+      "assertion": "self.assertEqual(rows[\"qubit_second[data]\"],195)",
+      "expected": "195",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_while_loop_carries_bindings_and_keeps_its_adjoint_flag_order"
+      ],
+      "observed_values": [
+        "Fraction(195, 1)"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1044,
+      "assertion": "self.assertEqual(summary[\"resources\"][\"qubit_second[data]\"],\"192\")",
+      "expected": "'192'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_while_summary_counts_scheme_workspace_borrow_and_accuracy"
+      ],
+      "observed_values": [
+        "'192'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1045,
+      "assertion": "self.assertEqual(summary[\"resources\"][\"qubit_second[special]\"],\"24\")",
+      "expected": "'24'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_while_summary_counts_scheme_workspace_borrow_and_accuracy"
+      ],
+      "observed_values": [
+        "'24'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1046,
+      "assertion": "self.assertEqual(summary[\"resources\"][\"peak_qubits[special]\"],\"3\")",
+      "expected": "'3'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_while_summary_counts_scheme_workspace_borrow_and_accuracy"
+      ],
+      "observed_values": [
+        "'3'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1047,
+      "assertion": "self.assertEqual(summary[\"resolved_default_epsilon_share\"],{\"numerator\":\"1\",\"denominator\":\"60\"})",
+      "expected": "{'numerator': '1', 'denominator': '60'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_while_summary_counts_scheme_workspace_borrow_and_accuracy"
+      ],
+      "observed_values": [
+        "{'numerator': '1', 'denominator': '60'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1058,
+      "assertion": "self.assertEqual(actual[\"resources\"][\"time\"],\"6\")",
+      "expected": "'6'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_qif_reallocations_keep_each_arm_and_outer_lifetime_bindings"
+      ],
+      "observed_values": [
+        "'6'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1059,
+      "assertion": "self.assertEqual(actual[\"resources\"][\"qubit_second[data]\"],\"15\")",
+      "expected": "'15'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_qif_reallocations_keep_each_arm_and_outer_lifetime_bindings"
+      ],
+      "observed_values": [
+        "'15'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1060,
+      "assertion": "self.assertEqual(actual[\"resources\"][\"qubit_second[special]\"],\"6\")",
+      "expected": "'6'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_qif_reallocations_keep_each_arm_and_outer_lifetime_bindings"
+      ],
+      "observed_values": [
+        "'6'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1085,
+      "assertion": "self.assertEqual(result[\"label\"],\"exact\")",
+      "expected": "'exact'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_many_procedure_returns_validate_global_locations_only_linearly"
+      ],
+      "observed_values": [
+        "'exact'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1108,
+      "assertion": "self.assertEqual(attempts,[])",
+      "expected": "[]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 4,
+      "tests": [
+        "test_schedule.Accounting.test_known_domain_ties_reject_before_any_realisation"
+      ],
+      "observed_values": [
+        "[]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1126,
+      "assertion": "self.assertEqual(e.estimate(obj,full,\"root\",args,[\"0\"]*4)[\"label\"],\"exact\")",
+      "expected": "'exact'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_nested_token_ties_keep_the_concrete_validation_stage"
+      ],
+      "observed_values": [
+        "'exact'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1137,
+      "assertion": "self.assertEqual(e.estimate(obj,full,\"root\",[],[\"0\"]*4)[\"gates\"],{\"h\":\"1\",\"x\":\"1\"})",
+      "expected": "{'h': '1', 'x': '1'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_admission_checks_nested_actions_and_respects_covering_entries"
+      ],
+      "observed_values": [
+        "{'h': '1', 'x': '1'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1150,
+      "assertion": "self.assertEqual(actual[\"gates\"],{\"x\":\"6\"})",
+      "expected": "{'x': '6'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_loop_reallocation_carries_changed_class_to_the_next_visit"
+      ],
+      "observed_values": [
+        "{'x': '6'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1151,
+      "assertion": "self.assertEqual(actual[\"resources\"][\"qubit_second[data]\"],\"8\")",
+      "expected": "'8'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_loop_reallocation_carries_changed_class_to_the_next_visit"
+      ],
+      "observed_values": [
+        "'8'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1152,
+      "assertion": "self.assertEqual(actual[\"resources\"][\"qubit_second[special]\"],\"4\")",
+      "expected": "'4'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_loop_reallocation_carries_changed_class_to_the_next_visit"
+      ],
+      "observed_values": [
+        "'4'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1153,
+      "assertion": "self.assertEqual([r[\"class\"] for r in actual[\"frame\"][\"scratch\"]],[\"data\",\"special\",\"special\",\"special\"])",
+      "expected": "['data', 'special', 'special', 'special']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_loop_reallocation_carries_changed_class_to_the_next_visit"
+      ],
+      "observed_values": [
+        "['data', 'special', 'special', 'special']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1158,
+      "assertion": "self.assertEqual(summary[\"resources\"][\"peak_qubits[data]\"],\"2\")",
+      "expected": "'2'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_loop_reallocation_carries_changed_class_to_the_next_visit"
+      ],
+      "observed_values": [
+        "'2'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1165,
+      "assertion": "self.assertEqual([r[\"width\"] for r in actual[\"frame\"][\"scratch\"]],[1])",
+      "expected": "[1]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_zero_visit_loop_keeps_the_entry_binding"
+      ],
+      "observed_values": [
+        "[1]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1166,
+      "assertion": "self.assertEqual(actual[\"resources\"][\"peak_qubits[data]\"],\"2\")",
+      "expected": "'2'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_zero_visit_loop_keeps_the_entry_binding"
+      ],
+      "observed_values": [
+        "'2'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1181,
+      "assertion": "self.assertEqual(actual[\"resources\"][\"qubit_second[data]\"],\"8\")",
+      "expected": "'8'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_changed_class_loop_keeps_iteration_addresses_and_inverse_lifetimes"
+      ],
+      "observed_values": [
+        "'8'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1182,
+      "assertion": "self.assertEqual(actual[\"resources\"][\"qubit_second[special]\"],\"4\")",
+      "expected": "'4'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_changed_class_loop_keeps_iteration_addresses_and_inverse_lifetimes"
+      ],
+      "observed_values": [
+        "'4'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1183,
+      "assertion": "self.assertEqual([r[\"class\"] for r in actual[\"frame\"][\"scratch\"]],[\"special\",\"special\",\"special\",\"data\"])",
+      "expected": "['special', 'special', 'special', 'data']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_changed_class_loop_keeps_iteration_addresses_and_inverse_lifetimes"
+      ],
+      "observed_values": [
+        "['special', 'special', 'special', 'data']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1189,
+      "assertion": "self.assertEqual(ledger.finish()[\"qubit_second[data]\"],8)",
+      "expected": "8",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_changed_class_loop_keeps_iteration_addresses_and_inverse_lifetimes"
+      ],
+      "observed_values": [
+        "Fraction(8, 1)"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1190,
+      "assertion": "self.assertEqual([r[\"class\"] for r in ledger.frame()[\"scratch\"]],[\"special\",\"special\",\"special\",\"data\"])",
+      "expected": "['special', 'special', 'special', 'data']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_changed_class_loop_keeps_iteration_addresses_and_inverse_lifetimes"
+      ],
+      "observed_values": [
+        "['special', 'special', 'special', 'data']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1208,
+      "assertion": "self.assertEqual(analytic[\"gates\"],{\"cx\":\"8\",\"x\":\"4\"})",
+      "expected": "{'cx': '8', 'x': '4'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_reallocated_source_name_keeps_each_lifetime_shape_inside_loops"
+      ],
+      "observed_values": [
+        "{'cx': '8', 'x': '4'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1209,
+      "assertion": "self.assertEqual(analytic[\"resources\"][\"qubit_second[data]\"],\"44\")",
+      "expected": "'44'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_reallocated_source_name_keeps_each_lifetime_shape_inside_loops"
+      ],
+      "observed_values": [
+        "'44'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1210,
+      "assertion": "self.assertEqual(analytic[\"resources\"][\"peak_qubits[data]\"],\"4\")",
+      "expected": "'4'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_reallocated_source_name_keeps_each_lifetime_shape_inside_loops"
+      ],
+      "observed_values": [
+        "'4'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1211,
+      "assertion": "self.assertEqual([r[\"width\"] for r in actual[\"frame\"][\"scratch\"]],[1,2,1,2])",
+      "expected": "[1, 2, 1, 2]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_reallocated_source_name_keeps_each_lifetime_shape_inside_loops"
+      ],
+      "observed_values": [
+        "[1, 2, 1, 2]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1221,
+      "assertion": "self.assertEqual(actual[\"gates\"],{\"x\":\"4\"})",
+      "expected": "{'x': '4'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_reallocated_class_and_state_survive_source_adjoint"
+      ],
+      "observed_values": [
+        "{'x': '4'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1222,
+      "assertion": "self.assertEqual(actual[\"resources\"][\"qubit_second[data]\"],\"6\")",
+      "expected": "'6'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_reallocated_class_and_state_survive_source_adjoint"
+      ],
+      "observed_values": [
+        "'6'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1223,
+      "assertion": "self.assertEqual(actual[\"resources\"][\"qubit_second[special]\"],\"12\")",
+      "expected": "'12'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_reallocated_class_and_state_survive_source_adjoint"
+      ],
+      "observed_values": [
+        "'12'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1224,
+      "assertion": "self.assertEqual([r[\"width\"] for r in actual[\"frame\"][\"scratch\"]],[1])",
+      "expected": "[1]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_reallocated_class_and_state_survive_source_adjoint"
+      ],
+      "observed_values": [
+        "[1]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1225,
+      "assertion": "self.assertEqual([r[\"width\"] for r in actual[\"frame\"][\"borrow\"]],[2])",
+      "expected": "[2]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_reallocated_class_and_state_survive_source_adjoint"
+      ],
+      "observed_values": [
+        "[2]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1234,
+      "assertion": "self.assertEqual(ledger.lookups,1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_native_accounting_resolves_each_live_operand_once"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1236,
+      "assertion": "self.assertEqual(ledger.lookups,1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_native_accounting_resolves_each_live_operand_once"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1238,
+      "assertion": "self.assertEqual(ledger.finish()[\"qubit_second[data]\"],2)",
+      "expected": "2",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_native_accounting_resolves_each_live_operand_once"
+      ],
+      "observed_values": [
+        "Fraction(2, 1)"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1239,
+      "assertion": "self.assertEqual(ledger.gates,{\"x\":2})",
+      "expected": "{'x': 2}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_native_accounting_resolves_each_live_operand_once"
+      ],
+      "observed_values": [
+        "{'x': 2}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1248,
+      "assertion": "self.assertEqual(seen,[(2,6)])",
+      "expected": "[(2, 6)]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_procedure_dynamic_jump_binds_absolute_canonical_end"
+      ],
+      "observed_values": [
+        "[(2, 6)]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1259,
+      "assertion": "self.assertEqual([c[\"raw_inverse\"] for c in contexts],[False,True,False,True])",
+      "expected": "[False, True, False, True]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_lproc_forwards_its_fixed_token_to_nested_oracle_invocations"
+      ],
+      "observed_values": [
+        "[False, True, False, True]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1279,
+      "assertion": "self.assertEqual([r[\"width\"] for r in actual[\"frame\"][\"history\"]],[18])",
+      "expected": "[18]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_recursive_fixed_instances_keep_separate_row_domains_for_equal_values"
+      ],
+      "observed_values": [
+        "[18]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1296,
+      "assertion": "self.assertEqual(ledger.gates,{\"x\":4,\"cx\":2})",
+      "expected": "{'x': 4, 'cx': 2}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_nested_inverse_reacquires_the_captured_scratch_binding"
+      ],
+      "observed_values": [
+        "{'x': 4, 'cx': 2}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1297,
+      "assertion": "self.assertEqual(ledger.finish()[\"qubit_second[data]\"],12)",
+      "expected": "12",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_nested_inverse_reacquires_the_captured_scratch_binding"
+      ],
+      "observed_values": [
+        "Fraction(12, 1)"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1298,
+      "assertion": "self.assertEqual(len(ledger.frame()[\"scratch\"]),2)",
+      "expected": "2",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_nested_inverse_reacquires_the_captured_scratch_binding"
+      ],
+      "observed_values": [
+        "2"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1317,
+      "assertion": "self.assertEqual([r[\"width\"] for r in streamed[\"frame\"][\"history\"]],[18])",
+      "expected": "[18]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_procedure_activation_rows_share_root_dispatch_and_ordered_locations"
+      ],
+      "observed_values": [
+        "[18]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1318,
+      "assertion": "self.assertEqual([r[\"width\"] for r in streamed[\"frame\"][\"scratch\"][:16]],[3,3,1,4,1,3,1,4,4,2,16,32,1,1,1,6])",
+      "expected": "[3, 3, 1, 4, 1, 3, 1, 4, 4, 2, 16, 32, 1, 1, 1, 6]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_procedure_activation_rows_share_root_dispatch_and_ordered_locations"
+      ],
+      "observed_values": [
+        "[3, 3, 1, 4, 1, 3, 1, 4, 4, 2, 16, 32, 1, 1, 1, 6]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1320,
+      "assertion": "self.assertEqual(set((length,tuple(instance),step,phase) for length,instance,step,phase in events),{(1,(),1,\"fwd\"),(1,(),1,\"rev\")})",
+      "expected": "{(1, (), 1, 'rev'), (1, (), 1, 'fwd')}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_procedure_activation_rows_share_root_dispatch_and_ordered_locations"
+      ],
+      "observed_values": [
+        "{(1, (), 1, 'rev'), (1, (), 1, 'fwd')}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1337,
+      "assertion": "self.assertEqual(summarized[\"resources\"][\"peak_qubits[data]\"],\"5\")",
+      "expected": "'5'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_default_summary_matches_replay_with_scheme_workspace_and_accuracy"
+      ],
+      "observed_values": [
+        "'5'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1338,
+      "assertion": "self.assertEqual(summarized[\"resolved_default_epsilon_share\"],{\"numerator\":\"1\",\"denominator\":\"60\"})",
+      "expected": "{'numerator': '1', 'denominator': '60'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_default_summary_matches_replay_with_scheme_workspace_and_accuracy"
+      ],
+      "observed_values": [
+        "{'numerator': '1', 'denominator': '60'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1348,
+      "assertion": "self.assertEqual(result[\"resources\"][\"peak_qubits[A]\"],\"0\")",
+      "expected": "'0'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_capacity_class_fallback_retries_an_unsupported_summary_class"
+      ],
+      "observed_values": [
+        "'0'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1349,
+      "assertion": "self.assertEqual(result[\"resources\"][\"peak_qubits[B]\"],\"1\")",
+      "expected": "'1'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_capacity_class_fallback_retries_an_unsupported_summary_class"
+      ],
+      "observed_values": [
+        "'1'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1350,
+      "assertion": "self.assertEqual(result[\"resources\"][\"time\"],\"1\")",
+      "expected": "'1'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_capacity_class_fallback_retries_an_unsupported_summary_class"
+      ],
+      "observed_values": [
+        "'1'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1366,
+      "assertion": "self.assertEqual(result[\"resources\"][\"peak_qubits[data]\"],\"1\")",
+      "expected": "'1'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_finite_capacity_and_accuracy_keep_trillion_iteration_summaries"
+      ],
+      "observed_values": [
+        "'1'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1383,
+      "assertion": "self.assertEqual(result[\"exact_resources\"][\"time\"],{\"numerator\":\"1\",\"denominator\":\"10\"})",
+      "expected": "{'numerator': '1', 'denominator': '10'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_approximate_loop_summary_keeps_exact_population_and_error"
+      ],
+      "observed_values": [
+        "{'numerator': '1', 'denominator': '10'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1392,
+      "assertion": "self.assertEqual(result[\"resources\"][\"time\"],\"200\")",
+      "expected": "'200'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_k58_exact_native_default_is_zero_but_explicit_share_keeps_array_order"
+      ],
+      "observed_values": [
+        "'200'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1393,
+      "assertion": "self.assertEqual(result[\"resolved_default_epsilon_share\"],{\"numerator\":\"0\",\"denominator\":\"1\"})",
+      "expected": "{'numerator': '0', 'denominator': '1'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_k58_exact_native_default_is_zero_but_explicit_share_keeps_array_order"
+      ],
+      "observed_values": [
+        "{'numerator': '0', 'denominator': '1'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1397,
+      "assertion": "self.assertEqual(explicit[\"resources\"][\"time\"],\"2\")",
+      "expected": "'2'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_k58_exact_native_default_is_zero_but_explicit_share_keeps_array_order"
+      ],
+      "observed_values": [
+        "'2'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1410,
+      "assertion": "self.assertEqual(result[\"resolved_default_epsilon_share\"],{\"numerator\":\"1\",\"denominator\":\"100\"})",
+      "expected": "{'numerator': '1', 'denominator': '100'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_k58_exact_scheme_still_counts_before_target_expansion"
+      ],
+      "observed_values": [
+        "{'numerator': '1', 'denominator': '100'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1421,
+      "assertion": "self.assertEqual(omitted[\"resources\"][\"time\"],\"4\")",
+      "expected": "'4'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_omitted_expansion_resolves_ref_but_foreign_libraries_reject"
+      ],
+      "observed_values": [
+        "'4'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1444,
+      "assertion": "self.assertEqual([r[\"width\"] for r in streamed[\"frame\"][\"history\"]],[5])",
+      "expected": "[5]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 2,
+      "tests": [
+        "test_schedule.Accounting.test_lifted_table_fields_share_packed_storage_and_add_no_history_slots"
+      ],
+      "observed_values": [
+        "[5]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1462,
+      "assertion": "self.assertEqual([(d[\"step\"],d[\"phase\"],d[\"ordinal\"],d[\"realisation\"]) for d in decisions],[(1,\"fwd\",0,\"recompute\"),(1,\"rev\",0,\"reverse\")])",
+      "expected": "[(1, 'fwd', 0, 'recompute'), (1, 'rev', 0, 'reverse')]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_lifted_oracle_uncall_has_whole_cleanup_recompute_carrier"
+      ],
+      "observed_values": [
+        "[(1, 'fwd', 0, 'recompute'), (1, 'rev', 0, 'reverse')]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1463,
+      "assertion": "self.assertEqual([c[\"path\"][-1][\"call_index\"] for c in result[\"invocation_contexts\"][1:]],[0,0,1,0,0])",
+      "expected": "[0, 0, 1, 0, 0]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_lifted_oracle_uncall_has_whole_cleanup_recompute_carrier"
+      ],
+      "observed_values": [
+        "[0, 0, 1, 0, 0]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1464,
+      "assertion": "self.assertEqual([c[\"raw_inverse\"] for c in result[\"invocation_contexts\"][1:]],[False,False,True,False,True])",
+      "expected": "[False, False, True, False, True]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_lifted_oracle_uncall_has_whole_cleanup_recompute_carrier"
+      ],
+      "observed_values": [
+        "[False, False, True, False, True]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1486,
+      "assertion": "self.assertEqual(allocations,[(0,1,\"special\"),(1,4,\"data\")])",
+      "expected": "[(0, 1, 'special'), (1, 4, 'data')]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_lifted_oracle_uncall_has_whole_cleanup_recompute_carrier"
+      ],
+      "observed_values": [
+        "[(0, 1, 'special'), (1, 4, 'data')]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1506,
+      "assertion": "self.assertEqual([c[\"region\"] for c in contexts],[\"root\",\"child\",\"flip\",\"flip\",\"child\"])",
+      "expected": "['root', 'child', 'flip', 'flip', 'child']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_lifted_region_rows_keep_nested_budget_arguments_and_reverse_context"
+      ],
+      "observed_values": [
+        "['root', 'child', 'flip', 'flip', 'child']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1508,
+      "assertion": "self.assertEqual(context[\"invocation\"][\"args\"],[\"1\"])",
+      "expected": "['1']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 4,
+      "tests": [
+        "test_schedule.Accounting.test_lifted_region_rows_keep_nested_budget_arguments_and_reverse_context"
+      ],
+      "observed_values": [
+        "['1']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1510,
+      "assertion": "self.assertEqual(context[\"inherited_controls\"],1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 4,
+      "tests": [
+        "test_schedule.Accounting.test_lifted_region_rows_keep_nested_budget_arguments_and_reverse_context"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1541,
+      "assertion": "self.assertEqual(events[0][0:2],(\"alloc\",\"$release\"))",
+      "expected": "('alloc', '$release')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_raw_inverse_oracle_swaps_support_partition_and_step_traversal"
+      ],
+      "observed_values": [
+        "('alloc', '$release')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1542,
+      "assertion": "self.assertEqual(events[-1][0:2],(\"release\",\"$construct\"))",
+      "expected": "('release', '$construct')",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_raw_inverse_oracle_swaps_support_partition_and_step_traversal"
+      ],
+      "observed_values": [
+        "('release', '$construct')"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1549,
+      "assertion": "self.assertEqual(support[0][3],\"rev\")",
+      "expected": "'rev'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_raw_inverse_oracle_swaps_support_partition_and_step_traversal"
+      ],
+      "observed_values": [
+        "'rev'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1572,
+      "assertion": "self.assertEqual(events,[(1,1),(0,0),(1,1),(0,0)])",
+      "expected": "[(1, 1), (0, 0), (1, 1), (0, 0)]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_raw_inverse_calls_keep_forward_ordinals_and_reverse_bit_order"
+      ],
+      "observed_values": [
+        "[(1, 1), (0, 0), (1, 1), (0, 0)]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1573,
+      "assertion": "self.assertEqual(result[\"gates\"],{\"cx\":\"4\",\"x\":\"2\"})",
+      "expected": "{'cx': '4', 'x': '2'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_raw_inverse_calls_keep_forward_ordinals_and_reverse_bit_order"
+      ],
+      "observed_values": [
+        "{'cx': '4', 'x': '2'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1581,
+      "assertion": "self.assertEqual(e.estimate(obj,target(),\"root\",[],[\"0\"]*4)[\"classical_steps\"],\"7\")",
+      "expected": "'7'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_fresh_mints_keep_identity_even_for_equal_budget_tuples"
+      ],
+      "observed_values": [
+        "'7'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1583,
+      "assertion": "self.assertEqual(e.estimate(same,target(),\"root\",[],[\"0\"]*4)[\"classical_steps\"],\"8\")",
+      "expected": "'8'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_fresh_mints_keep_identity_even_for_equal_budget_tuples"
+      ],
+      "observed_values": [
+        "'8'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1596,
+      "assertion": "self.assertEqual(bound[\"label\"],\"bound\")",
+      "expected": "'bound'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_tuple_only_root_tokens_do_not_guess_unknown_aliases"
+      ],
+      "observed_values": [
+        "'bound'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1610,
+      "assertion": "self.assertEqual(result[\"classical_steps\"],\"4\")",
+      "expected": "'4'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_classical_budget_mint_has_no_quantum_execution_cost"
+      ],
+      "observed_values": [
+        "'4'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1611,
+      "assertion": "self.assertEqual(result[\"gates\"],{})",
+      "expected": "{}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_classical_budget_mint_has_no_quantum_execution_cost"
+      ],
+      "observed_values": [
+        "{}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1613,
+      "assertion": "self.assertEqual(bound[\"label\"],\"bound\")",
+      "expected": "'bound'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_classical_budget_mint_has_no_quantum_execution_cost"
+      ],
+      "observed_values": [
+        "'bound'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1614,
+      "assertion": "self.assertEqual(bound[\"rational_upper_bounds\"][\"time\"],{\"numerator\":\"4\",\"denominator\":\"1\"})",
+      "expected": "{'numerator': '4', 'denominator': '1'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_classical_budget_mint_has_no_quantum_execution_cost"
+      ],
+      "observed_values": [
+        "{'numerator': '4', 'denominator': '1'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1622,
+      "assertion": "self.assertEqual(result[\"gates\"],{})",
+      "expected": "{}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_interface_width_above_2pow53_is_decimal_string_bound"
+      ],
+      "observed_values": [
+        "{}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1662,
+      "assertion": "self.assertEqual(result[\"time\"],5)",
+      "expected": "5",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_peak_uses_final_intervals_when_release_is_backdated"
+      ],
+      "observed_values": [
+        "5"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1663,
+      "assertion": "self.assertEqual(result[\"peak_qubits[data]\"],2)",
+      "expected": "2",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_peak_uses_final_intervals_when_release_is_backdated"
+      ],
+      "observed_values": [
+        "Fraction(2, 1)"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1664,
+      "assertion": "self.assertEqual(result[\"qubit_second[data]\"],6)",
+      "expected": "6",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_peak_uses_final_intervals_when_release_is_backdated"
+      ],
+      "observed_values": [
+        "Fraction(6, 1)"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1671,
+      "assertion": "self.assertEqual(ledger.frame()[\"ancillae\"][0][\"class\"],\"data\")",
+      "expected": "'data'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_source_alloc_selector_does_not_override_scheme_ancilla_class"
+      ],
+      "observed_values": [
+        "'data'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1682,
+      "assertion": "self.assertEqual(result[\"gates\"],{\"x\":\"6\"})",
+      "expected": "{'x': '6'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_loop_binding_carries_reallocated_lifetime_to_next_visit"
+      ],
+      "observed_values": [
+        "{'x': '6'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1683,
+      "assertion": "self.assertEqual(result[\"resources\"][\"peak_qubits[data]\"],\"1\")",
+      "expected": "'1'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_loop_binding_carries_reallocated_lifetime_to_next_visit"
+      ],
+      "observed_values": [
+        "'1'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1684,
+      "assertion": "self.assertEqual(len(result[\"frame\"][\"scratch\"]),4)",
+      "expected": "4",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_loop_binding_carries_reallocated_lifetime_to_next_visit"
+      ],
+      "observed_values": [
+        "4"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1685,
+      "assertion": "self.assertEqual(result[\"resources\"][\"qubit_second[data]\"],\"6\")",
+      "expected": "'6'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_loop_binding_carries_reallocated_lifetime_to_next_visit"
+      ],
+      "observed_values": [
+        "'6'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1697,
+      "assertion": "self.assertEqual([r[\"width\"] for r in streamed[\"frame\"][\"history\"]],[107])",
+      "expected": "[107]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_lifted_allocator_uses_all_four_ordered_history_slots"
+      ],
+      "observed_values": [
+        "[107]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1708,
+      "assertion": "self.assertEqual(ledger.gate(\"cx\",[q.bit(0),q.bit(2)],controls=((\"q\",0,\"any\"),)).time,1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_effective_control_identity_and_predicate_depth"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1716,
+      "assertion": "self.assertEqual(result[\"gates\"],{\"rz\":\"1\"})",
+      "expected": "{'rz': '1'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_parameter_angle_bits_and_permutation_source_restriction"
+      ],
+      "observed_values": [
+        "{'rz': '1'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1733,
+      "assertion": "self.assertEqual([c[\"path\"][-1][\"call_index\"] for c in result[\"invocation_contexts\"][1:]],[0,1])",
+      "expected": "[0, 1]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_qinplace_private_leaf_order_and_call_occurrences"
+      ],
+      "observed_values": [
+        "[0, 1]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1734,
+      "assertion": "self.assertEqual([r[\"width\"] for r in result[\"frame\"][\"scratch\"][:2]],[1,4])",
+      "expected": "[1, 4]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_qinplace_private_leaf_order_and_call_occurrences"
+      ],
+      "observed_values": [
+        "[1, 4]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1743,
+      "assertion": "self.assertEqual([r[\"class\"] for r in result[\"frame\"][\"scratch\"][:2]],[\"special\",\"data\"])",
+      "expected": "['special', 'data']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_qinplace_private_leaf_order_and_call_occurrences"
+      ],
+      "observed_values": [
+        "['special', 'data']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1754,
+      "assertion": "self.assertEqual([r[\"width\"] for r in result[\"frame\"][\"history\"]],[6,6,6])",
+      "expected": "[6, 6, 6]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_two_oracle_call_tokens_are_resolved_per_invocation"
+      ],
+      "observed_values": [
+        "[6, 6, 6]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1757,
+      "assertion": "self.assertEqual([c[\"path\"][-1][\"point\"] for c in contexts[1:]],[\"entry:0\",\"entry:1\"])",
+      "expected": "['entry:0', 'entry:1']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_two_oracle_call_tokens_are_resolved_per_invocation"
+      ],
+      "observed_values": [
+        "['entry:0', 'entry:1']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1773,
+      "assertion": "self.assertEqual(result[\"resources\"][\"time\"],\"8\")",
+      "expected": "'8'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_whole_intrinsic_cleanup_recompute_and_nonemitting_carrier"
+      ],
+      "observed_values": [
+        "'8'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1774,
+      "assertion": "self.assertEqual(result[\"resources\"][\"peak_qubits[data]\"],\"6\")",
+      "expected": "'6'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_whole_intrinsic_cleanup_recompute_and_nonemitting_carrier"
+      ],
+      "observed_values": [
+        "'6'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1775,
+      "assertion": "self.assertEqual(result[\"resources\"][\"qubit_second[data]\"],\"44\")",
+      "expected": "'44'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_whole_intrinsic_cleanup_recompute_and_nonemitting_carrier"
+      ],
+      "observed_values": [
+        "'44'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1776,
+      "assertion": "self.assertEqual(result[\"gates\"],{\"cx\":\"8\"})",
+      "expected": "{'cx': '8'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_whole_intrinsic_cleanup_recompute_and_nonemitting_carrier"
+      ],
+      "observed_values": [
+        "{'cx': '8'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1777,
+      "assertion": "self.assertEqual(len(result[\"cleanup_decisions\"]),1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_whole_intrinsic_cleanup_recompute_and_nonemitting_carrier"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1800,
+      "assertion": "self.assertEqual(events,[(\"alloc\",\"entry:2\",0),(\"cx\",\"entry:2\",1,0),(\"cx\",\"entry:2\",2,1),(\"cx\",\"entry:1\",0,0),(\"cx\",\"entry:1\",1,1),(\"cx\",\"entry:0\",0,0),(\"cx\",\"entry:0\",1,1),(\"release\",\"entry:0\",2)])",
+      "expected": "[('alloc', 'entry:2', 0), ('cx', 'entry:2', 1, 0), ('cx', 'entry:2', 2, 1), ('cx', 'entry:1', 0, 0), ('cx', 'entry:1', 1, 1), ('cx', 'entry:0', 0, 0), ('cx', 'entry:0', 1, 1), ('release', 'entry:0', 2)]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_scheduled_action_adjoint_replaces_source_before_expansion"
+      ],
+      "observed_values": [
+        "[('alloc', 'entry:2', 0), ('cx', 'entry:2', 1, 0), ('cx', 'entry:2', 2, 1), ('cx', 'entry:1', 0, 0), ('cx', 'entry:1', 1, 1), ('cx', 'entry:0', 0, 0), ('cx', 'entry:0', 1, 1), ('release', 'entry:0', 2)]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1801,
+      "assertion": "self.assertEqual(result[\"resources\"][\"time\"],\"6\")",
+      "expected": "'6'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_scheduled_action_adjoint_replaces_source_before_expansion"
+      ],
+      "observed_values": [
+        "'6'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1810,
+      "assertion": "self.assertEqual(baseline[\"resources\"][\"time\"],\"48\")",
+      "expected": "'48'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_callee_local_region_is_allocated_and_restored_at_call"
+      ],
+      "observed_values": [
+        "'48'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1811,
+      "assertion": "self.assertEqual(baseline[\"gates\"],{\"cx\":\"36\",\"x\":\"12\"})",
+      "expected": "{'cx': '36', 'x': '12'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_callee_local_region_is_allocated_and_restored_at_call"
+      ],
+      "observed_values": [
+        "{'cx': '36', 'x': '12'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1813,
+      "assertion": "self.assertEqual(streamed[\"resources\"][\"peak_qubits[data]\"],\"27\")",
+      "expected": "'27'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_callee_local_region_is_allocated_and_restored_at_call"
+      ],
+      "observed_values": [
+        "'27'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1814,
+      "assertion": "self.assertEqual([r[\"width\"] for r in streamed[\"frame\"][\"scratch\"]],[8,8,0,1,1,1,1,1,0,1,1,1,1,1])",
+      "expected": "[8, 8, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_callee_local_region_is_allocated_and_restored_at_call"
+      ],
+      "observed_values": [
+        "[8, 8, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1815,
+      "assertion": "self.assertEqual([c[\"region\"] for c in streamed[\"invocation_contexts\"]],[\"root\",\"child\"])",
+      "expected": "['root', 'child']",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_callee_local_region_is_allocated_and_restored_at_call"
+      ],
+      "observed_values": [
+        "['root', 'child']"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1826,
+      "assertion": "self.assertEqual(F(result[\"resources\"][\"time\"])-F(baseline[\"resources\"][\"time\"]),2)",
+      "expected": "2",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_oracle_schedule_selects_reverse_row_leaf"
+      ],
+      "observed_values": [
+        "Fraction(2, 1)"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1827,
+      "assertion": "self.assertEqual(int(result[\"gates\"][\"cx\"])-int(baseline[\"gates\"][\"cx\"]),3)",
+      "expected": "3",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_oracle_schedule_selects_reverse_row_leaf"
+      ],
+      "observed_values": [
+        "3"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1828,
+      "assertion": "self.assertEqual(int(result[\"gates\"][\"x\"])-int(baseline[\"gates\"][\"x\"]),-1)",
+      "expected": "-1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_oracle_schedule_selects_reverse_row_leaf"
+      ],
+      "observed_values": [
+        "-1"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1829,
+      "assertion": "self.assertEqual(result[\"frame\"][\"ancillae\"][0][\"scheme\"],\"triple-x\")",
+      "expected": "'triple-x'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_oracle_schedule_selects_reverse_row_leaf"
+      ],
+      "observed_values": [
+        "'triple-x'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1839,
+      "assertion": "self.assertEqual(ledger.finish()[\"peak_qubits[data]\"],2)",
+      "expected": "2",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_scheme_theta_and_template_validation"
+      ],
+      "observed_values": [
+        "Fraction(2, 1)"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1840,
+      "assertion": "self.assertEqual(ledger.frame()[\"ancillae\"][0][\"width\"],1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_scheme_theta_and_template_validation"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1892,
+      "assertion": "self.assertEqual(frame[\"slots\"],[{\"id\":\"mut:0\",\"role\":\"mut\",\"class\":\"data\",\"width\":1}])",
+      "expected": "[{'id': 'mut:0', 'role': 'mut', 'class': 'data', 'width': 1}]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_frame_reports_every_lifetime_and_excludes_inherited_controls"
+      ],
+      "observed_values": [
+        "[{'id': 'mut:0', 'role': 'mut', 'class': 'data', 'width': 1}]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1893,
+      "assertion": "self.assertEqual([r[\"width\"] for r in frame[\"scratch\"]],[2,2])",
+      "expected": "[2, 2]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_frame_reports_every_lifetime_and_excludes_inherited_controls"
+      ],
+      "observed_values": [
+        "[2, 2]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1894,
+      "assertion": "self.assertEqual([r[\"width\"] for r in frame[\"borrow\"]],[1])",
+      "expected": "[1]",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_frame_reports_every_lifetime_and_excludes_inherited_controls"
+      ],
+      "observed_values": [
+        "[1]"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1941,
+      "assertion": "self.assertEqual(result[\"resolved_default_epsilon_share\"],{\"numerator\":\"1\",\"denominator\":\"30\"})",
+      "expected": "{'numerator': '1', 'denominator': '30'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_default_accuracy_share_is_exact_one_thirtieth"
+      ],
+      "observed_values": [
+        "{'numerator': '1', 'denominator': '30'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1942,
+      "assertion": "self.assertEqual(result[\"exact_resources\"][\"time\"],{\"numerator\":\"1\",\"denominator\":\"10\"})",
+      "expected": "{'numerator': '1', 'denominator': '10'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_default_accuracy_share_is_exact_one_thirtieth"
+      ],
+      "observed_values": [
+        "{'numerator': '1', 'denominator': '10'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1957,
+      "assertion": "self.assertEqual(result[\"resources\"][\"peak_qubits[A]\"],\"1\")",
+      "expected": "'1'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_default_class_fallback_reaches_source_estimate"
+      ],
+      "observed_values": [
+        "'1'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1958,
+      "assertion": "self.assertEqual(result[\"resources\"][\"peak_qubits[B]\"],\"1\")",
+      "expected": "'1'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_default_class_fallback_reaches_source_estimate"
+      ],
+      "observed_values": [
+        "'1'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1973,
+      "assertion": "self.assertEqual(result[\"resources\"],{\"peak_qubits[fast]\":\"2\",\"qubit_second[fast]\":\"2\",\"time\":\"1\"})",
+      "expected": "{'peak_qubits[fast]': '2', 'qubit_second[fast]': '2', 'time': '1'}",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_published_controlled_schedule_and_topology_reach_estimator"
+      ],
+      "observed_values": [
+        "{'peak_qubits[fast]': '2', 'qubit_second[fast]': '2', 'time': '1'}"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1979,
+      "assertion": "self.assertEqual(e.estimate(obj,grid,\"controlled\",[],[\"0\"]*4)[\"resources\"][\"time\"],\"1\")",
+      "expected": "'1'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_published_controlled_schedule_and_topology_reach_estimator"
+      ],
+      "observed_values": [
+        "'1'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1991,
+      "assertion": "self.assertEqual(result[\"resources\"][\"time\"],\"4.5\")",
+      "expected": "'4.5'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_loop_iteration_coordinates_select_one_start"
+      ],
+      "observed_values": [
+        "'4.5'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 1992,
+      "assertion": "self.assertEqual(result[\"resources\"][\"qubit_second[data]\"],\"13.5\")",
+      "expected": "'13.5'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_loop_iteration_coordinates_select_one_start"
+      ],
+      "observed_values": [
+        "'13.5'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 2002,
+      "assertion": "self.assertEqual(rows[\"time\"],1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_disjoint_overlap_resource_and_dependent_start"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 2003,
+      "assertion": "self.assertEqual(rows[\"gate_count\"],2)",
+      "expected": "2",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_disjoint_overlap_resource_and_dependent_start"
+      ],
+      "observed_values": [
+        "2"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 2004,
+      "assertion": "self.assertEqual(rows[\"peak_qubits[data]\"],2)",
+      "expected": "2",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_disjoint_overlap_resource_and_dependent_start"
+      ],
+      "observed_values": [
+        "Fraction(2, 1)"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 2005,
+      "assertion": "self.assertEqual(rows[\"qubit_second[data]\"],2)",
+      "expected": "2",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_disjoint_overlap_resource_and_dependent_start"
+      ],
+      "observed_values": [
+        "Fraction(2, 1)"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 2017,
+      "assertion": "self.assertEqual(ledger.resolved_class(a),\"A\")",
+      "expected": "'A'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_class_capacity_fallback_and_zero_rows"
+      ],
+      "observed_values": [
+        "'A'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 2018,
+      "assertion": "self.assertEqual(ledger.resolved_class(b),\"B\")",
+      "expected": "'B'",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_class_capacity_fallback_and_zero_rows"
+      ],
+      "observed_values": [
+        "'B'"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 2022,
+      "assertion": "self.assertEqual(rows[\"peak_qubits[B]\"],2)",
+      "expected": "2",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_class_capacity_fallback_and_zero_rows"
+      ],
+      "observed_values": [
+        "Fraction(2, 1)"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 2024,
+      "assertion": "self.assertEqual(rows[\"peak_qubits[idle]\"],0)",
+      "expected": "0",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_class_capacity_fallback_and_zero_rows"
+      ],
+      "observed_values": [
+        "Fraction(0, 1)"
+      ]
+    },
+    {
+      "file": "tests/test_schedule.py",
+      "line": 2033,
+      "assertion": "self.assertEqual(ledger.finish()[\"time\"],1)",
+      "expected": "1",
+      "provenance": "historical origin unrecorded; regenerated estimator/test baseline, not an independent oracle",
+      "observations": 1,
+      "tests": [
+        "test_schedule.Accounting.test_topology_adjacency_and_retained_placements"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    }
+  ]
+}

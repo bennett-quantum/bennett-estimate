@@ -1,4 +1,10 @@
 target/
+.tmp/
+__pycache__/
+*.pyc
+*.log
+.beads/**/LOCK
+*.darc
 
 # Beads / Dolt files (added by bd init)
 .dolt/

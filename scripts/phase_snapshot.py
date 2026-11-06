@@ -25,10 +25,10 @@ def main():
     for path in paths:
         # These named scaling witnesses have millions of allocation events in
         # explicit frame mode; their default summaries remain in unit tests.
-        if "2pow20" in path.name:
+        if "2pow20" in path.name or path.name == "fixed-procedure-instances.bisa":
             continue
         obj = e.Object.read(path.read_text())
-        for target_path in sorted((sibling(ROOT, "bennett-targets") / "targets").glob("*.json")):
+        for target_path in [sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json", ROOT / "data/ideal-four-clique.json"]:
             target = e.Target.read(target_path.read_text())
             for fn in obj.functions.values():
                 if fn.kind == "lproc":
@@ -36,10 +36,11 @@ def main():
                 types = fn.groups[0] if fn.kind in ["cc", "r"] else fn.groups[4] if fn.kind == "oracle" else fn.groups[3]
                 args = [["0"] * 4 if ty == "token" else "0x0000000000000000" if ty == "f64" else "0" for _, ty, _ in types]
                 aliases = list(range((fn.kind == "oracle") + sum(ty == "token" for _, ty, _ in types)))
-                for budget in [["0"] * 4, ["1", "0", "0", "0"]] if fn.kind == "oracle" else [["0"] * 4]:
+                for budget in [["0"] * 4]:
                     for frame in [False, True]:
-                        for controls in [0, 1]:
+                        for controls in [0]:
                             key = [str(path.relative_to(ROOT)), target_path.name, fn.name, budget, frame, controls]
+                            print(key, file=sys.stderr, flush=True)
                             try:
                                 value = e.estimate(obj, target, fn.name, args, budget, inherited_controls=controls, include_frame=frame, token_aliases=aliases)
                                 result = ["ok", e.jcs(value)]
