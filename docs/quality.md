@@ -25,7 +25,7 @@ production still uses only the standard library. Install it in a local Python
 environment, then run:
 
 ```sh
-timeout 600 .tmp/quality-estimate/venv/bin/python scripts/measure_coverage.py
+timeout 600 .tmp/quality-estimate/venv/bin/python -B scripts/measure_coverage.py
 ```
 
 The script runs the four default groups concurrently, traces API execution
@@ -34,10 +34,12 @@ and the CLI Python source in subprocesses, combines their data and writes
 point for the Rust launcher; the default Cargo run separately tests the actual
 packaged launcher.
 
-**Statement coverage: 96.17% (4,067 / 4,229 statements)** on the pre-refactor
-quality checkpoint. Combined statement/branch coverage rounds to94%; it is a
-different denominator. All219 tests passed under instrumentation (slowest
-worker239.233s). The normal uninstrumented default remains71.99s.
+**Statement coverage:96.20% (4,252 / 4,420 statements)** on the final
+implementation, measured with the command above. Combined statement/branch
+coverage is94.35% (the report displays94%); it uses a different denominator.
+All237 tests passed under instrumentation; the slowest worker took461.882s.
+This instrumented run is separate from the118.72s default Cargo run.
+The same run regenerates the literal inventory from its passing assertions.
 
 The repository has one Python implementation module. The five lowest-covered
 substantial functions are recorded below with their missed-path disposition;
@@ -52,7 +54,7 @@ coverage is evidence, not a correctness threshold.
 | `Source.oracle_stream` | 91.84% | Remaining initialized-source storage branches overlap pending physical pseudo-location bindings (EST-SOURCE-01, tracked by the source-contract issue). Existing image/adjoint tests cover the supported quantum-image path; no physical carrier is invented to raise coverage. |
 
 These percentages identify the measured pre-refactor areas, before the added
-edge tests; the final measurement below supersedes the overall number.
+edge tests; the final overall measurement above includes the added tests and phase extraction.
 
 ## Oracle independence and literal provenance
 
@@ -156,3 +158,21 @@ One conditional assertion remains unexecuted in the provenance inventory:
 VM topology matching. The pinned VM rejects the topology field with
 `§8: unknown field topology`; the differential reports unavailable forecasts,
 keeps that matched-status branch and makes no topology-match claim.
+
+## Final coverage dispositions
+
+The final five least-covered substantial functions (at least30 executable
+statements) are below. Each has unit coverage; these are remaining branch
+gaps, not missing implementation declarations.
+
+| Function | Statement coverage | Tests and remaining evidence |
+| --- | ---: | --- |
+| `Source.lower_action_call` | 86.49% | Positive callee binding/expansion phase test and existing nested-call tests. Additional memory-interface forwarding combinations remain part of full linked-source coverage. |
+| `Catalog.safe_index_fold` | 87.30% | New malformed-node propagation and valid nonlinear-literal tests, plus existing middle-index/control-alias regressions. Remaining declines retain literal validation. |
+| `ClassicalMachine.__init__` | 87.50% | All classical phase tests initialize independent machines; block-image programs exercise persistent device state. Remaining global-image layout variants belong to the existing complete classical-source work. |
+| `ClassicalMachine.arithmetic` | 88.10% | Direct signed-division and zero-divisor unit tests, plus existing resolved arithmetic/opaque-ID programs. Complete per-op boundaries remain useful follow-up coverage. |
+| `Source.lower_qinplace` | 89.47% | Arity phase test and existing positive private-leaf/call-occurrence tests. Extra memory/classical capture combinations remain part of full context coverage. |
+
+The final inventory contains351 literal assertion sites,350 regenerated and
+one explicitly unexecuted topology-match branch. Every entry includes a hash
+of its test source; all hashes were checked against the final files.

@@ -26,3 +26,7 @@ this inventory makes no independent-oracle claim. The generator preserves the
 expected literals. See docs/quality.md for the separately recorded paper
 calculations, independent brute ledger and the one unexecuted topology branch.
 All sibling data and VM evidence is resolved at the revisions in gate.toml.
+
+The final coverage-integrated regeneration passed237 tests and recorded351
+literal assertion sites (350 observed, one explicitly unexecuted VM-topology
+match). Every site's source SHA-256 matches its test file at this checkpoint.

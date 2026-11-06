@@ -75,7 +75,10 @@ Round-1 quality evidence is in docs/quality.md. The post-refactor default run
 passed231 Python tests through four Rust wrappers in155.74s under concurrent
 verification. Final default validation passed all237 Python tests in118.72s wall
 (118.10s Cargo test interval), plus fmt, strict Clippy and shell syntax.
-Final coverage/provenance is recorded in docs/quality.md. The full push/consumer gate remains orchestrator-owned.
+Final Python statement coverage is96.20% (4252/4420); the same run passed
+all237 tests and regenerated350 of351 literal assertion sites, explicitly
+leaving the pinned VM topology-match branch unexecuted. All inventory test-file
+hashes match. Exact commands and dispositions are in docs/quality.md. The full push/consumer gate remains orchestrator-owned.
 The interpreter now has explicit classical machine state, named arithmetic,
 register and quantum-call phases, and separate action/oracle/in-place lowering.
 All244 bounded pre/post-refactor requests (186 successful documents,58 errors)
