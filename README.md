@@ -3,7 +3,8 @@
 Resource estimation from ISA objects, certificates and target descriptions, without materialising gates.
 
 Partial independent implementation of published ISA 0.9. See [requirements and
-coverage](docs/PLAN.md) and [handoff](HANDOFF.md) before relying on an estimate.
+coverage](docs/PLAN.md) before relying on an estimate.
+Current ecosystem handoff: [bennett/HANDOFF.md](../bennett/HANDOFF.md).
 The remaining source, scheduling and verification work is tracked in Beads
 under `bennett-estimate-bph`; the complete requested estimator is not yet delivered.
 
