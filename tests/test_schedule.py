@@ -10,12 +10,16 @@ from unittest.mock import patch
 from fractions import Fraction as F
 
 ROOT=Path(__file__).resolve().parents[1]
+import sys
+sys.path.insert(0, str(ROOT / "scripts"))
+from pinned import sibling
+
 spec=importlib.util.spec_from_file_location("scheduled_estimate",ROOT/"src/estimate.py")
 e=importlib.util.module_from_spec(spec);sys.modules[spec.name]=e;spec.loader.exec_module(e)
 
 
 def target():
-    return e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+    return e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
 
 
 def point(symbol="a"*64,point="entry:0",iteration=()):
@@ -77,7 +81,9 @@ class Selectors(unittest.TestCase):
         code="oracle @root (x:wire in) (t:wire) (f:wire[4]) () (a:i1)\nregs { r:reg[1] }\n^entry():\nr = lift.call @worker (x) () (a) ()\nlift.retval r\nlproc @worker (v:reg[1]) (r:reg[1]) () (a:i1 classical) ()\n^entry():\nlift.ret v"
         obj=make_program(code,{"root":root,"worker":worker})
         doc=schedule([entry(path=[{**point(obj.symbol("worker")["interface_hash"]),"instance":["0"]}],realisation="native")])
-        e.Schedule(doc,obj,"root")
+        parsed=e.Schedule(doc,obj,"root")
+        self.assertEqual(parsed.pick("gate",[{**point(obj.symbol("worker")["interface_hash"]),"instance":[0]}],0),{"realisation":"native"})
+        self.assertIsNone(parsed.pick("gate",[{**point(obj.symbol("worker")["interface_hash"]),"instance":[1]}],0))
 
     def test_captured_record_arrays_reuse_validation_without_rebinding_fields(self):
         class Counting(e.Catalog):
@@ -152,7 +158,7 @@ class Selectors(unittest.TestCase):
             make_object("perm_action @root (t:wire) () () () ()\nregs {  } bounds {0}\n^entry():\nqloop 0 {\naction_call @root (t) () () ()\n}",sig)
 
     def test_published_k82_all_86_expansion_digests(self):
-        doc=e.loads((ROOT.parent/"bennett-isa-spec/conformance/fixtures/accepted-k82-09/k82.json").read_text())
+        doc=e.loads((sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/accepted-k82-09/k82.json").read_text())
         count=0
         for edge in doc["edges"]:
             for instance in edge["instances"]:
@@ -182,7 +188,7 @@ class Selectors(unittest.TestCase):
         self.assertEqual(count,86)
 
     def test_published_k82_interfaces_and_binding_cases(self):
-        doc=e.loads((ROOT.parent/"bennett-isa-spec/conformance/fixtures/accepted-k82-09/k82.json").read_text())
+        doc=e.loads((sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/accepted-k82-09/k82.json").read_text())
         catalog=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),target())
         names=[n for n,r in catalog.recipes.items() if all(isinstance(f,str) for f in r["parameters"])]
         self.assertEqual(len(names),doc["catalog"]["named_interface_recipes"])
@@ -849,7 +855,7 @@ class Accounting(unittest.TestCase):
         result=e.estimate(obj,target(),"root",params,budget,token_aliases=aliases)
         params[0][0]="2";params.append("3");budget[0]="4";aliases[0]=1
         self.assertEqual(result["invocation"],{"args":[["1","0","0","0"]]*2,"budget":["0"]*4,"token_aliases":[0,0]})
-        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
+        fixture=sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/controlled-action-09"
         obj=e.Object.read((fixture/"controlled.bisa").read_text());t=e.Target.read((fixture/"target.json").read_text())
         result=e.estimate(obj,t,"controlled",[],["0"]*4)
         saved=e.jcs(result["effective_schedule"])
@@ -1626,7 +1632,7 @@ class Accounting(unittest.TestCase):
         self.assertEqual(result["resources"]["peak_qubits[data]"],str(2**101+1))
 
     def test_k12_certificate_production_preserves_supplied_proof_metadata(self):
-        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
+        fixture=sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/controlled-action-09"
         obj=e.Object.read((fixture/"controlled.bisa").read_text());t=e.Target.read((fixture/"target.json").read_text())
         result=e.estimate(obj,t,"controlled",[],["0"]*4)
         template=e.Certificate.read((fixture/"certificate.json").read_text())
@@ -1893,7 +1899,7 @@ class Accounting(unittest.TestCase):
     def test_certificate_resource_reconstruction_includes_frame(self):
         obj=e.Object.read((ROOT/"tests/fixtures/example3.bisa").read_text());t=target()
         result=e.estimate(obj,t,"borrow_demo",[],["0"]*4,include_frame=True)
-        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09/certificate.json"
+        fixture=sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/controlled-action-09/certificate.json"
         doc=e.loads(fixture.read_text());root=result["closure_hash"]
         region=next(iter(doc["regions"].values()))
         region.update(frame=e.loads(e.jcs(result["frame"])),signature=obj.symbol("borrow_demo")["signature"],kind="perm_action",bounds=[1],resources=result["resources"],estimate={"precision_digits":34,"exact_resources":result["exact_resources"]},gates_used={n:{"count":int(v)} for n,v in result["gates"].items()},claims=[])
@@ -1911,7 +1917,7 @@ class Accounting(unittest.TestCase):
             e.Certificate.read(e.jcs(doc)).check_resource_rows(result)
 
     def test_certificate_cannot_change_root_signature_or_gate_inventory(self):
-        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
+        fixture=sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/controlled-action-09"
         obj=e.Object.read((fixture/"controlled.bisa").read_text());t=e.Target.read((fixture/"target.json").read_text())
         result=e.estimate(obj,t,"controlled",[],["0"]*4)
         doc=e.loads((fixture/"certificate.json").read_text());region=doc["regions"][result["closure_hash"]]
@@ -1960,7 +1966,7 @@ class Accounting(unittest.TestCase):
             self.assertEqual(ledger.finish(),p.resources(t,{"data":sum(b.width for b in env.values())}),name)
 
     def test_published_controlled_schedule_and_topology_reach_estimator(self):
-        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
+        fixture=sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/controlled-action-09"
         obj=e.Object.read((fixture/"controlled.bisa").read_text())
         t=e.Target.read((fixture/"target.json").read_text())
         result=e.estimate(obj,t,"controlled",[],["0"]*4)

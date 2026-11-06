@@ -351,7 +351,16 @@ class Target:
             require(isinstance(values, list), "table must be array")
             for n in values: require(cls.number(n) >= 0, "negative table value")
         for gate in d["gates"]:
-            keys(gate, ["op", "classes", "controls", "epsilon", "cost"], ["params"], "gate")
+            keys(gate, ["op", "classes", "controls", "epsilon", "cost"], ["params", "realisation_model"], "gate")
+            if "realisation_model" in gate:
+                model = gate["realisation_model"]
+                require(isinstance(model, dict) and isinstance(model.get("version"), str), "K86: native model needs a version")
+                if model["version"] == "bennett.native-model/1":
+                    keys(model, ["version", "kind", "arity", "basis", "parameter_bindings", "control_models", "data", "operand_map"], context="native model")
+                    require(model["kind"] == "unitary", "K86: native model must identify a phase-bearing unitary")
+                # Model bytes bind target_hash. Resource estimation consumes
+                # costs, not matrices; numerical model obligations belong to
+                # the independent checker and are never claimed here.
             require(gate["op"] in GATES or gate["op"] == "mcx", "unknown gate")
             require(gate.get("params", []) == (["theta"] if gate["op"] in ["rx", "ry", "rz"] else []), "gate parameter arity")
             require(gate["classes"] and all(c == "*" or c in d["classes"] for c in gate["classes"]), "unknown gate class")
@@ -4688,7 +4697,7 @@ def main(argv=None):
     parser.add_argument("--region",help="required for objects with multiple executable definitions")
     parser.add_argument("--params",default="[]",help="complete K13 JSON array, or @file")
     parser.add_argument("--token-aliases",help="canonical K91 token equality partition as a JSON array, or @file")
-    parser.add_argument("--budget",default="0,0,0,0",help="B,heap,stack,depth (default is the explicit zero tuple)")
+    parser.add_argument("--budget",help="B,heap,stack,depth; required for oracle/token-taking entries, including an explicit zero tuple")
     parser.add_argument("--variant",default="forward")
     parser.add_argument("--inherited-controls",type=int,default=0)
     parser.add_argument("--epsilon",default="0",help="exact decimal requested accuracy (default 0)")
@@ -4705,12 +4714,17 @@ def main(argv=None):
         candidates=[f.name for f in obj.functions.values() if f.kind!="lproc"]
         region=a.region or (candidates[0] if len(candidates)==1 else None)
         require(region is not None,"multiple entry regions: supply --region")
+        require(region in obj.functions,"unknown entry region")
+        fn=obj.functions[region]
+        groups=fn.groups[0] if fn.kind in ["cc","r"] else fn.groups[4] if fn.kind=="oracle" else fn.groups[3]
+        require(a.budget is not None or fn.kind!="oracle" and all(ty!="token" for n,ty,r in groups),
+                "E_ARG: oracle/token-taking entry requires --budget B,heap,stack,depth (use --budget 0,0,0,0 for zero)")
         params=loads(Path(a.params[1:]).read_text() if a.params.startswith("@") else a.params)
         aliases=None
         if a.token_aliases is not None:
             aliases=loads(Path(a.token_aliases[1:]).read_text() if a.token_aliases.startswith("@") else a.token_aliases)
             require(isinstance(aliases,list),"E_ARG: token_aliases must be a JSON array")
-        budget=a.budget.split(",")
+        budget=a.budget.split(",") if a.budget is not None else ["0"]*4
         result=estimate(obj,target,region,params,budget,a.variant,a.inherited_controls,a.classical_step_bound,a.epsilon,a.include_frame or a.certificate is not None or a.certificate_template is not None,aliases)
         if a.certificate:
             result["certificate_status"]=Certificate.read(a.certificate.read_text()).check_resource_rows(result)

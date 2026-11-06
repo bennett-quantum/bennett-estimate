@@ -13,10 +13,10 @@ name = "scripts/check"
 argv = ["scripts/check"]
 
 [siblings."bennett-isa-spec"]
-sha = "ecaaac060c44e317d1181345fa6b8e38c096c099"
-note = "ISA main as gated by the 2026-11-02 push wave (spec text identical to SPEC_VERSIONS.toml commit e424d67)"
+sha = "fd626d37aba1f719c3b7b2059be46cbfaf462886"
+note = "Published K86/K91 additive target/token contracts; base implementation remains partial"
 [siblings."bennett-isa-spec".files]
-"spec/Bennett-ISA-Spec-0.9.md" = "021d5df978f293c36174b73de9facc0884f7502a4bc5c0ab7a621b0ca7071c25"
+"spec/Bennett-ISA-Spec-0.9.md" = "bbd887c7841f4eed40f7b3518270a8f2cf781204c14ac4cc3eabca5c5b4b8c3b"
 
 [siblings."bennett-targets"]
 sha = "4a74c627559250b2353936abcd46adceab738a97"
