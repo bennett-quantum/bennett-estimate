@@ -9,6 +9,10 @@ CARGO_TARGET_DIR = "{root}/.tmp/gate-target"
 BENNETT_VM_BIN = "{sibling:bennett-vm}/target/debug/bennett-vm"
 
 [[check]]
+name = "quality baseline"
+argv = ["python3", "-I", "-B", "scripts/quality_ratchet.py"]
+
+[[check]]
 name = "scripts/check"
 argv = ["scripts/check"]
 

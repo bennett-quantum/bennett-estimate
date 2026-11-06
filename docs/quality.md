@@ -176,3 +176,67 @@ gaps, not missing implementation declarations.
 The final inventory contains351 literal assertion sites,350 regenerated and
 one explicitly unexecuted topology-match branch. Every entry includes a hash
 of its test source; all hashes were checked against the final files.
+
+## Quality ratchet
+
+`python3 -I -B scripts/quality_ratchet.py` is the single quality gate check.
+`--record` prints a candidate baseline for review; the check never rewrites it.
+The baseline below measures tracked Python under `src/`, `scripts/` and
+`tests/` (including nested functions). Rust remains the small packaging launcher;
+this AST metric measures the Python implementation and its tooling/tests.
+
+Function lengths are physical definition-to-end spans, including nested
+function bodies. The sorted lists are exact empirical distributions, without
+size buckets or a fixed length limit. For each file the gate rejects an increase
+in the fraction of functions at or above any observed length. It also rejects
+increased cognitive-complexity mass or trivial-wrapper count per file. New files
+start at zero; moving code or changing the baseline requires explicit review.
+Complexity adds `1 + nesting depth` for if/conditional expressions, loops,
+exception handlers, matches and comprehensions, and one per extra boolean
+operand. Function boundaries reset nesting; this is a documented AST proxy,
+not an external analyser's cognitive-complexity score. A trivial wrapper has
+only one returned/executed call with simple name/attribute arguments and no
+keywords, after excluding its docstring. Pairing these metrics discourages
+splitting into delegating functions just to improve length or nesting.
+
+The script also greps tracked paths for bytecode/cache/log/lock/backup/progress
+litter (`Cargo.lock` is the intentional dependency manifest), and source,
+tooling, example, fixture and data text for bead/job/shift/review identifiers.
+Test code and documentation may discuss the process. Both match lists are
+empty. These are the `LITTER` and `PROCESS` expressions in the same script;
+they are hygiene checks, not semantic evidence. The gate rejects increased
+match counts. No coverage threshold or dashboard is introduced.
+
+Red-first evidence: the new scratch-repository test initially failed because
+the script did not exist; after implementation it passed. It records a
+three-line function in `TMPDIR`, accepts the unchanged file, then requires
+exit 1 for longer code, added control flow, a trivial wrapper, a process
+identifier and tracked log litter. All deliberately worse files stay outside
+the source tree. `timeout 30 python3 -I -B -m unittest discover -s tests -p
+test_quality_ratchet.py -v` passed. The hook-configuration test was also seen
+red before adding the one new `gate.toml` check, then passed.
+
+<!-- quality-baseline -->
+```json
+{"files": {
+  "scripts/differential.py": {"cognitive_complexity": 76, "function_lengths": [18, 71], "trivial_wrappers": 0},
+  "scripts/measure_coverage.py": {"cognitive_complexity": 2, "function_lengths": [5, 36], "trivial_wrappers": 0},
+  "scripts/phase_snapshot.py": {"cognitive_complexity": 63, "function_lengths": [34], "trivial_wrappers": 0},
+  "scripts/pinned.py": {"cognitive_complexity": 23, "function_lengths": [11, 28], "trivial_wrappers": 0},
+  "scripts/quality_ratchet.py": {"cognitive_complexity": 63, "function_lengths": [3, 4, 11, 18, 18, 18, 23], "trivial_wrappers": 0},
+  "scripts/record_expectations.py": {"cognitive_complexity": 38, "function_lengths": [4, 10, 11, 17, 58], "trivial_wrappers": 0},
+  "src/estimate.py": {"cognitive_complexity": 7036, "function_lengths": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 15, 15, 15, 15, 16, 16, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 19, 19, 20, 21, 21, 21, 22, 22, 23, 23, 24, 24, 24, 25, 25, 26, 26, 26, 26, 26, 27, 29, 29, 30, 31, 32, 35, 36, 36, 36, 37, 37, 38, 40, 42, 45, 46, 48, 49, 52, 55, 57, 57, 59, 59, 60, 60, 62, 63, 66, 69, 69, 70, 71, 71, 80, 85, 88, 98, 121, 147, 166, 176, 207, 247, 252], "trivial_wrappers": 7},
+  "tests/brute_ledger.py": {"cognitive_complexity": 39, "function_lengths": [2, 5, 5, 6, 7, 17, 32], "trivial_wrappers": 0},
+  "tests/run_suite.py": {"cognitive_complexity": 14, "function_lengths": [4, 8, 10], "trivial_wrappers": 0},
+  "tests/test_brute_accounting.py": {"cognitive_complexity": 24, "function_lengths": [4, 4, 13, 14, 23], "trivial_wrappers": 0},
+  "tests/test_estimate.py": {"cognitive_complexity": 157, "function_lengths": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 13, 13, 13, 14, 14, 14, 14, 15, 15, 16, 16, 16, 16, 16, 16, 16, 17, 18, 19, 19, 19, 21, 23], "trivial_wrappers": 0},
+  "tests/test_fail_fast.py": {"cognitive_complexity": 1, "function_lengths": [2, 4, 6, 7, 7, 8], "trivial_wrappers": 0},
+  "tests/test_gate.py": {"cognitive_complexity": 8, "function_lengths": [12, 26], "trivial_wrappers": 0},
+  "tests/test_output.py": {"cognitive_complexity": 0, "function_lengths": [9, 12], "trivial_wrappers": 0},
+  "tests/test_phases.py": {"cognitive_complexity": 1, "function_lengths": [5, 5, 6, 7, 7, 8, 11], "trivial_wrappers": 0},
+  "tests/test_quality.py": {"cognitive_complexity": 9, "function_lengths": [7, 9, 11, 15, 15, 27], "trivial_wrappers": 0},
+  "tests/test_quality_ratchet.py": {"cognitive_complexity": 2, "function_lengths": [40], "trivial_wrappers": 0},
+  "tests/test_schedule.py": {"cognitive_complexity": 344, "function_lengths": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 17, 17, 17, 18, 19, 19, 19, 19, 19, 19, 20, 20, 21, 23, 23, 24, 24, 25, 26, 29, 31, 31, 32, 38, 40], "trivial_wrappers": 0}
+}, "litter": [], "process_identifiers": []}
+```
+<!-- /quality-baseline -->

@@ -15,7 +15,8 @@ class Hook(unittest.TestCase):
         config=tomllib.loads((ROOT/"gate.toml").read_text())
         self.assertEqual(config["schema"],1)
         self.assertRegex(config["tool_sha"],r"^[0-9a-f]{40}$")
-        self.assertEqual(config["check"],[{"name":"scripts/check","argv":["scripts/check"]}])
+        self.assertEqual(config["check"],[{"name":"quality baseline","argv":["python3","-I","-B","scripts/quality_ratchet.py"]},
+                                          {"name":"scripts/check","argv":["scripts/check"]}])
         self.assertEqual(set(config["siblings"]),{"bennett-isa-spec","bennett-targets","bennett-conformance","bennett-vm"})
         for sibling in config["siblings"].values():self.assertRegex(sibling["sha"],r"^[0-9a-f]{40}$")
         self.assertEqual(config["env"]["BENNETT_VM_BIN"],"{sibling:bennett-vm}/target/debug/bennett-vm")
