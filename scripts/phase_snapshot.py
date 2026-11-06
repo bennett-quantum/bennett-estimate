@@ -36,17 +36,16 @@ def main():
                 types = fn.groups[0] if fn.kind in ["cc", "r"] else fn.groups[4] if fn.kind == "oracle" else fn.groups[3]
                 args = [["0"] * 4 if ty == "token" else "0x0000000000000000" if ty == "f64" else "0" for _, ty, _ in types]
                 aliases = list(range((fn.kind == "oracle") + sum(ty == "token" for _, ty, _ in types)))
-                for budget in [["0"] * 4]:
-                    for frame in [False, True]:
-                        for controls in [0]:
-                            key = [str(path.relative_to(ROOT)), target_path.name, fn.name, budget, frame, controls]
-                            print(key, file=sys.stderr, flush=True)
-                            try:
-                                value = e.estimate(obj, target, fn.name, args, budget, inherited_controls=controls, include_frame=frame, token_aliases=aliases)
-                                result = ["ok", e.jcs(value)]
-                            except e.ContractError as error:
-                                result = ["error", str(error)]
-                            results.append([key, result])
+                budget = ["0"] * 4
+                for frame in [False, True]:
+                    key = [str(path.relative_to(ROOT)), target_path.name, fn.name, budget, frame, 0]
+                    print(key, file=sys.stderr, flush=True)
+                    try:
+                        value = e.estimate(obj, target, fn.name, args, budget, include_frame=frame, token_aliases=aliases)
+                        result = ["ok", e.jcs(value)]
+                    except e.ContractError as error:
+                        result = ["error", str(error)]
+                    results.append([key, result])
     print(json.dumps(results, ensure_ascii=False, separators=(",", ":")))
 
 

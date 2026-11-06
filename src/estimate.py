@@ -11,6 +11,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from decimal import Decimal
+from enum import Enum, auto
 from fractions import Fraction as F
 from functools import lru_cache
 from pathlib import Path
@@ -1438,6 +1439,41 @@ def known_opcode(op):
     return op in binary|predicates|classical|registers|action|lifted|GATES.keys()|{"qjump","qbranch","qjumpr"} or bool(re.fullmatch(r"(?:lift\.)?(?:const|zext|sext|trunc|load|store)\.i[1-9][0-9]*",op)) or bool(re.fullmatch(r"(?:ptrtoint|measure)\.i[1-9][0-9]*",op))
 
 
+class ClassicalKind(Enum):
+    ARITHMETIC = auto()
+    REGISTER = auto()
+    QUANTUM = auto()
+    BRANCH = auto()
+    RETURN = auto()
+    FAULT = auto()
+    CALL = auto()
+    UNCALL = auto()
+    ALLOCATE = auto()
+    FREE = auto()
+    MEMORY = auto()
+    MINT = auto()
+    MEASURE = auto()
+    EFFECT = auto()
+    OTHER = auto()
+
+
+# ISA §3.3/§7 classical operation families. Widths remain in the raw opcode;
+# source construction and canonical object hashes retain the original spelling.
+CLASSICAL_KINDS = {
+    **dict.fromkeys(["add", "sub", "mul", "and", "or", "xor", "shl", "lshr", "ashr",
+                     "udiv", "urem", "sdiv", "srem", "inttoptr", "select"], ClassicalKind.ARITHMETIC),
+    **dict.fromkeys(["qreg.new", "qreg.free", "qreg.slice", "qreg.concat", "qreg.width",
+                     "qreg.id", "qreg.from_id"], ClassicalKind.REGISTER),
+    **dict.fromkeys(["action_call", "oracle_call", "adj", "ctl"], ClassicalKind.QUANTUM),
+    "br": ClassicalKind.BRANCH, "ret": ClassicalKind.RETURN,
+    "trap": ClassicalKind.FAULT, "fault": ClassicalKind.FAULT,
+    "call": ClassicalKind.CALL, "uncall": ClassicalKind.UNCALL,
+    "alloc": ClassicalKind.ALLOCATE, "free": ClassicalKind.FREE,
+    "budget.mint": ClassicalKind.MINT, "measure": ClassicalKind.MEASURE,
+    "effect": ClassicalKind.EFFECT,
+}
+
+
 @dataclass
 class Instruction:
     op: str
@@ -1447,6 +1483,19 @@ class Instruction:
     otherwise: list = field(default_factory=list)
     block: str = ""
     ordinal: int = 0
+    classical_kind: ClassicalKind = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self.op.startswith(("const.i", "icmp.", "zext.i", "sext.i", "trunc.i", "ptrtoint.i")):
+            self.classical_kind = ClassicalKind.ARITHMETIC
+        elif self.op.startswith(("load.i", "store.i")):
+            self.classical_kind = ClassicalKind.MEMORY
+        elif self.op.startswith("measure.i"):
+            self.classical_kind = ClassicalKind.MEASURE
+        else:
+            # OTHER is still a source opcode; the classical executor rejects it
+            # explicitly if it is reached, rather than emitting an exact cost.
+            self.classical_kind = CLASSICAL_KINDS.get(self.op, ClassicalKind.OTHER)
 
 
 @dataclass
@@ -2782,7 +2831,7 @@ class ClassicalMachine:
             jumped = False
             for inst in code:
                 op, a = (inst.op, inst.args)
-                pure = op in ['br', 'add', 'sub', 'mul', 'and', 'or', 'xor', 'shl', 'lshr', 'ashr', 'udiv', 'urem', 'sdiv', 'srem', 'select', 'inttoptr', 'qreg.width', 'qreg.id', 'qreg.from_id'] or op.startswith(('const.i', 'icmp.', 'load.i', 'zext.i', 'sext.i', 'trunc.i', 'ptrtoint.i'))
+                pure = inst.classical_kind in {ClassicalKind.BRANCH, ClassicalKind.ARITHMETIC} or op in ['qreg.width', 'qreg.id', 'qreg.from_id'] or op.startswith('load.i')
                 frame_index = len(self.history)
                 self.history.append({'active': True, 'pure': pure, 'marker': op == 'uncall'})
                 if op in ['qreg.new', 'qreg.free', 'qreg.slice', 'qreg.concat', 'action_call', 'oracle_call', 'adj', 'ctl']:
@@ -2790,186 +2839,187 @@ class ClassicalMachine:
                 p = p.then(Profile(time=rational(self.source.target.doc['capabilities']['classical_step_time'])))
                 steps += 1
                 result = None
-                if op.startswith('const.i') or (op in ['add', 'sub', 'mul', 'and', 'or', 'xor', 'shl', 'lshr', 'ashr', 'udiv', 'urem', 'sdiv', 'srem'] or op.startswith('icmp.')) or (op.startswith(('zext.i', 'sext.i', 'trunc.i', 'ptrtoint.i')) or op == 'inttoptr') or (op == 'select'):
-                    result, failed = self.arithmetic(inst, get)
-                    if failed:
+                match inst.classical_kind:
+                    case ClassicalKind.ARITHMETIC:
+                        result, failed = self.arithmetic(inst, get)
+                        if failed:
+                            return (p, steps, [], True)
+                    case ClassicalKind.BRANCH:
+                        block = jump(a[0] if len(a) == 1 else a[1] if get(a[0])[0] else a[2])
+                        jumped = True
+                        break
+                    case ClassicalKind.RETURN:
+                        results = [get(n) for n in a]
+                        if not all((self.transfer(ty, value) for (n, ty, r), value in zip(function.groups[1], results))):
+                            return (p, steps, [], True)
+                        return (p, steps, results, False)
+                    case ClassicalKind.FAULT:
                         return (p, steps, [], True)
-                elif op == 'br':
-                    block = jump(a[0] if len(a) == 1 else a[1] if get(a[0])[0] else a[2])
-                    jumped = True
-                    break
-                elif op == 'ret':
-                    results = [get(n) for n in a]
-                    if not all((self.transfer(ty, value) for (n, ty, r), value in zip(function.groups[1], results))):
-                        return (p, steps, [], True)
-                    return (p, steps, results, False)
-                elif op in ['trap', 'fault']:
-                    return (p, steps, [], True)
-                elif op == 'call':
-                    callee = self.source.obj.functions[a[0].removeprefix('@')]
-                    params = callee.groups[0]
-                    require(len(params) == len(a) - 1, 'call argument arity')
-                    actuals = [get(actual) for actual in a[1:]]
-                    if not all((self.transfer(ty, value) for (n, ty, r), value in zip(params, actuals))):
-                        return (p, steps, [], True)
-                    before = (dict(self.memory), dict(self.allocations), self.bump, self.clock, self.atop, dict(self.blocks))
-                    before_registers = self.register_snapshot()
-                    previous = {n: (env.get(n), versions.get(n)) for n in inst.lhs}
-                    cp, cs, results, failed = self.execute(callee, {n: value for (n, ty, r), value in zip(params, actuals)})
-                    p = p.then(cp)
-                    steps += cs
-                    if failed:
-                        return (p, steps, [], True)
-                    require(len(results) == len(inst.lhs), 'call result arity')
-                    for n, value in zip(inst.lhs, results):
-                        put(n, value)
-                    self.segments.append({'name': callee.name, 'args': actuals, 'results': results, 'start': frame_index, 'end': len(self.history), 'active': True, 'before': before, 'before_registers': before_registers, 'env': env, 'versions': versions, 'previous': previous, 'produced': {n: versions[n] for n in inst.lhs}})
-                    continue
-                elif op == 'uncall':
-                    require(len(a) == 3, 'uncall needs argument/result lists')
-                    pending = [s for s in self.segments if s['active']]
-                    if not pending:
-                        return (p, steps, [], True)
-                    segment = max(pending, key=lambda s: s['end'])
-                    arguments = [get(n) for n in list_operand(a[1])]
-                    results = [get(n) for n in list_operand(a[2])]
-                    if segment['name'] != a[0].removeprefix('@') or any((f.get('measured', False) for f in self.history[segment['start']:segment['end']])) or any((f['active'] and (not f['pure']) and (not f['marker']) for f in self.history[segment['end']:frame_index])) or (not self.equal_values(segment['args'], arguments)) or (not self.equal_values(segment['results'], results)):
-                        return (p, steps, [], True)
-                    for frame in reversed(self.history[segment['start']:segment['end']]):
-                        if not frame['active'] or frame['marker']:
-                            continue
-                        p = p.then(Profile(time=rational(self.source.target.doc['capabilities']['classical_step_time'])))
-                        self.reversed_steps += 1
-                        if 'inverse' in frame:
-                            p = p.then(frame['inverse']())
-                        if 'registers' in frame:
-                            p = p.then(self.restore_registers(frame['registers']))
-                        frame['active'] = False
-                    p = p.then(self.restore_registers(segment['before_registers']))
-                    old_memory, old_allocations, self.bump, self.clock, self.atop, old_blocks = segment['before']
-                    self.memory.clear()
-                    self.memory.update(old_memory)
-                    self.allocations.clear()
-                    self.allocations.update(old_allocations)
-                    self.blocks.clear()
-                    self.blocks.update(old_blocks)
-                    for n, version in segment['produced'].items():
-                        if segment['versions'].get(n) != version:
-                            continue
-                        value, prior_version = segment['previous'][n]
-                        if prior_version is None:
-                            segment['env'].pop(n, None)
-                            segment['versions'].pop(n, None)
-                        else:
-                            segment['env'][n] = value
-                            segment['versions'][n] = prior_version
-                    for child in self.segments:
-                        if segment['start'] <= child['start'] and child['end'] <= segment['end']:
-                            child['active'] = False
-                elif op == 'alloc':
-                    n = get(a[0])[0]
-                    base = self.bump
-                    self.bump += max(1, n)
-                    if self.bump > integer(self.layout.get('heap_base', 0)) + integer(self.layout.get('heap_limit_max', 0)) or self.atop >= 1 << integer(self.layout.get('A_tab', 0)):
-                        return (p, steps, [], True)
-                    self.allocations[base] = (n, False)
-                    self.atop += 1
-                    result = (base, self.source.obj.ptr)
-                elif op == 'free':
-                    base = get(a[0])[0]
-                    if base not in self.allocations or self.allocations[base][1]:
-                        return (p, steps, [], True)
-                    del self.allocations[base]
-                elif op.startswith(('load.i', 'store.i')):
-                    width = int(op.split('.i')[-1])
-                    address = get(a[0])[0]
-                    size = width // 8
-                    if not any((base <= address and address + size <= base + n for base, (n, pinned) in self.allocations.items())):
-                        return (p, steps, [], True)
-                    if op.startswith('load'):
-                        require(all((self.memory.get(address + i, 0) is not None for i in range(size))), 'cost control depends on unresolved effect/measurement data; a path bound is required')
-                        content = [self.memory.get(address + i, 0) for i in range(size)]
-                        if any((isinstance(byte, tuple) for byte in content)):
-                            require(size == 8 and all((byte == (content[0][0], i) for i, byte in enumerate(content))) and isinstance(content[0][0], RegisterId), 'opaque register id partial load needs explicit binding evidence')
-                            result = (content[0][0], width)
-                        else:
-                            result = (sum((byte << 8 * i for i, byte in enumerate(content))), width)
-                    else:
-                        value = get(a[1])[0]
-                        if isinstance(value, RegisterId):
-                            require(size == 8, 'opaque register id partial store needs explicit binding evidence')
-                            self.memory.update({address + i: (value, i) for i in range(size)})
-                        else:
-                            self.memory.update({address + i: value >> 8 * i & 255 for i in range(size)})
-                elif op == 'budget.mint':
-                    require(len(a) == 5 and a[0].startswith('@'), 'budget.mint needs oracle and four i64 components')
-                    name = a[0][1:]
-                    require(name in self.source.obj.functions and self.source.obj.functions[name].kind == 'oracle', 'budget.mint requires linked oracle')
-                    components = [get(n) for n in a[1:]]
-                    require(all((width == 64 for value, width in components)), 'budget.mint components must be i64')
-                    token = [str(value) for value, width in components]
-                    try:
-                        validate_budget(token, self.source.obj)
-                    except BudgetConstraintError as error:
-                        self.fault_reason = str(error)
-                        return (p, steps, [], True)
-                    result = (MintedToken(frame_index, tuple(token)), 0)
-                elif op == 'qreg.new' or op in ['qreg.width', 'qreg.id', 'qreg.free', 'qreg.slice', 'qreg.concat'] or op == 'qreg.from_id':
-                    change, result, failed = self.register_operation(inst, get, register, unsigned64)
-                    p = p.then(change)
-                    if failed:
-                        return (p, steps, [], True)
-                elif op in ['action_call', 'oracle_call', 'adj', 'ctl']:
-                    change, failed = self.quantum_call(inst, get, register, frame_index)
-                    p = p.then(change)
-                    if failed:
-                        return (p, steps, [], True)
-                elif op == 'measure' or op.startswith('measure.i'):
-                    record = register(a[0])
-                    if record is None:
-                        return (p, steps, [], True)
-                    width = self.register_width(record)
-                    measured = width if op == 'measure' else integer(op[9:], 1)
-                    require(1 <= measured <= 128, '§3.3: measurement width must be in 1..128')
-                    if measured != width:
-                        return (p, steps, [], True)
-                    require(all((clean for identity, lo, hi, version, clean in self.register_states.capture(record['parts']))), 'measurement-dependent path/cleanliness evidence remains pending; no exact estimate emitted')
-                    for b in record['parts']:
-                        require(b.identity in self.physical, 'measured allocation identity is not live')
-                        del self.physical[b.identity]
-                        del self.register_states.ranges[b.identity]
-                        self.placements.pop(b.identity, None)
-                        p = p.then(space_profile(b.cls, 'clean', -b.width))
-                    record['state'] = 'consumed'
-                    self.history[frame_index]['measured'] = True
-                    result = (0, measured)
-                elif op == 'effect':
-                    dev = a[0]
-                    if dev not in ['clock.read', 'entropy.read', 'console.write', 'block.read', 'block.write']:
-                        return (p, steps, [], True)
-                    ptr = get(a[2] if dev.startswith('block.') else a[1])[0]
-                    size = 8 if dev == 'clock.read' else get(a[2])[0] if dev in ['entropy.read', 'console.write'] else 512
-                    if not any((base <= ptr and ptr + size <= base + n for base, (n, _) in self.allocations.items())):
-                        return (p, steps, [], True)
-                    if dev == 'console.write':
+                    case ClassicalKind.CALL:
+                        callee = self.source.obj.functions[a[0].removeprefix('@')]
+                        params = callee.groups[0]
+                        require(len(params) == len(a) - 1, 'call argument arity')
+                        actuals = [get(actual) for actual in a[1:]]
+                        if not all((self.transfer(ty, value) for (n, ty, r), value in zip(params, actuals))):
+                            return (p, steps, [], True)
+                        before = (dict(self.memory), dict(self.allocations), self.bump, self.clock, self.atop, dict(self.blocks))
+                        before_registers = self.register_snapshot()
+                        previous = {n: (env.get(n), versions.get(n)) for n in inst.lhs}
+                        cp, cs, results, failed = self.execute(callee, {n: value for (n, ty, r), value in zip(params, actuals)})
+                        p = p.then(cp)
+                        steps += cs
+                        if failed:
+                            return (p, steps, [], True)
+                        require(len(results) == len(inst.lhs), 'call result arity')
+                        for n, value in zip(inst.lhs, results):
+                            put(n, value)
+                        self.segments.append({'name': callee.name, 'args': actuals, 'results': results, 'start': frame_index, 'end': len(self.history), 'active': True, 'before': before, 'before_registers': before_registers, 'env': env, 'versions': versions, 'previous': previous, 'produced': {n: versions[n] for n in inst.lhs}})
                         continue
-                    if dev == 'clock.read':
-                        self.memory.update({ptr + i: self.clock >> 8 * i & 255 for i in range(8)})
-                        self.clock = (self.clock + 1) % (1 << 64)
-                    elif dev in ['block.read', 'block.write']:
-                        sector, sector_width = get(a[1])
-                        require(sector_width == 64, '§7.3: block sector requires i64')
-                        require(isinstance(sector, int), 'opaque register id cannot resolve a block-sector address')
-                        if dev == 'block.read':
-                            self.memory.update({ptr + i: byte for i, byte in enumerate(self.blocks.get(sector, (0,) * 512))})
+                    case ClassicalKind.UNCALL:
+                        require(len(a) == 3, 'uncall needs argument/result lists')
+                        pending = [s for s in self.segments if s['active']]
+                        if not pending:
+                            return (p, steps, [], True)
+                        segment = max(pending, key=lambda s: s['end'])
+                        arguments = [get(n) for n in list_operand(a[1])]
+                        results = [get(n) for n in list_operand(a[2])]
+                        if segment['name'] != a[0].removeprefix('@') or any((f.get('measured', False) for f in self.history[segment['start']:segment['end']])) or any((f['active'] and (not f['pure']) and (not f['marker']) for f in self.history[segment['end']:frame_index])) or (not self.equal_values(segment['args'], arguments)) or (not self.equal_values(segment['results'], results)):
+                            return (p, steps, [], True)
+                        for frame in reversed(self.history[segment['start']:segment['end']]):
+                            if not frame['active'] or frame['marker']:
+                                continue
+                            p = p.then(Profile(time=rational(self.source.target.doc['capabilities']['classical_step_time'])))
+                            self.reversed_steps += 1
+                            if 'inverse' in frame:
+                                p = p.then(frame['inverse']())
+                            if 'registers' in frame:
+                                p = p.then(self.restore_registers(frame['registers']))
+                            frame['active'] = False
+                        p = p.then(self.restore_registers(segment['before_registers']))
+                        old_memory, old_allocations, self.bump, self.clock, self.atop, old_blocks = segment['before']
+                        self.memory.clear()
+                        self.memory.update(old_memory)
+                        self.allocations.clear()
+                        self.allocations.update(old_allocations)
+                        self.blocks.clear()
+                        self.blocks.update(old_blocks)
+                        for n, version in segment['produced'].items():
+                            if segment['versions'].get(n) != version:
+                                continue
+                            value, prior_version = segment['previous'][n]
+                            if prior_version is None:
+                                segment['env'].pop(n, None)
+                                segment['versions'].pop(n, None)
+                            else:
+                                segment['env'][n] = value
+                                segment['versions'][n] = prior_version
+                        for child in self.segments:
+                            if segment['start'] <= child['start'] and child['end'] <= segment['end']:
+                                child['active'] = False
+                    case ClassicalKind.ALLOCATE:
+                        n = get(a[0])[0]
+                        base = self.bump
+                        self.bump += max(1, n)
+                        if self.bump > integer(self.layout.get('heap_base', 0)) + integer(self.layout.get('heap_limit_max', 0)) or self.atop >= 1 << integer(self.layout.get('A_tab', 0)):
+                            return (p, steps, [], True)
+                        self.allocations[base] = (n, False)
+                        self.atop += 1
+                        result = (base, self.source.obj.ptr)
+                    case ClassicalKind.FREE:
+                        base = get(a[0])[0]
+                        if base not in self.allocations or self.allocations[base][1]:
+                            return (p, steps, [], True)
+                        del self.allocations[base]
+                    case ClassicalKind.MEMORY:
+                        width = int(op.split('.i')[-1])
+                        address = get(a[0])[0]
+                        size = width // 8
+                        if not any((base <= address and address + size <= base + n for base, (n, pinned) in self.allocations.items())):
+                            return (p, steps, [], True)
+                        if op.startswith('load'):
+                            require(all((self.memory.get(address + i, 0) is not None for i in range(size))), 'cost control depends on unresolved effect/measurement data; a path bound is required')
+                            content = [self.memory.get(address + i, 0) for i in range(size)]
+                            if any((isinstance(byte, tuple) for byte in content)):
+                                require(size == 8 and all((byte == (content[0][0], i) for i, byte in enumerate(content))) and isinstance(content[0][0], RegisterId), 'opaque register id partial load needs explicit binding evidence')
+                                result = (content[0][0], width)
+                            else:
+                                result = (sum((byte << 8 * i for i, byte in enumerate(content))), width)
                         else:
-                            self.blocks[sector] = tuple((self.memory.get(ptr + i, 0) for i in range(512)))
-                    elif dev == 'entropy.read' and size == 0:
-                        continue
-                    else:
-                        raise ContractError(f'exact classical effect-state binding pending: {dev}; use an explicit conditional step bound')
-                else:
-                    raise ContractError(f'classical source binding not implemented: {op}; no exact estimate emitted')
+                            value = get(a[1])[0]
+                            if isinstance(value, RegisterId):
+                                require(size == 8, 'opaque register id partial store needs explicit binding evidence')
+                                self.memory.update({address + i: (value, i) for i in range(size)})
+                            else:
+                                self.memory.update({address + i: value >> 8 * i & 255 for i in range(size)})
+                    case ClassicalKind.MINT:
+                        require(len(a) == 5 and a[0].startswith('@'), 'budget.mint needs oracle and four i64 components')
+                        name = a[0][1:]
+                        require(name in self.source.obj.functions and self.source.obj.functions[name].kind == 'oracle', 'budget.mint requires linked oracle')
+                        components = [get(n) for n in a[1:]]
+                        require(all((width == 64 for value, width in components)), 'budget.mint components must be i64')
+                        token = [str(value) for value, width in components]
+                        try:
+                            validate_budget(token, self.source.obj)
+                        except BudgetConstraintError as error:
+                            self.fault_reason = str(error)
+                            return (p, steps, [], True)
+                        result = (MintedToken(frame_index, tuple(token)), 0)
+                    case ClassicalKind.REGISTER:
+                        change, result, failed = self.register_operation(inst, get, register, unsigned64)
+                        p = p.then(change)
+                        if failed:
+                            return (p, steps, [], True)
+                    case ClassicalKind.QUANTUM:
+                        change, failed = self.quantum_call(inst, get, register, frame_index)
+                        p = p.then(change)
+                        if failed:
+                            return (p, steps, [], True)
+                    case ClassicalKind.MEASURE:
+                        record = register(a[0])
+                        if record is None:
+                            return (p, steps, [], True)
+                        width = self.register_width(record)
+                        measured = width if op == 'measure' else integer(op[9:], 1)
+                        require(1 <= measured <= 128, '§3.3: measurement width must be in 1..128')
+                        if measured != width:
+                            return (p, steps, [], True)
+                        require(all((clean for identity, lo, hi, version, clean in self.register_states.capture(record['parts']))), 'measurement-dependent path/cleanliness evidence remains pending; no exact estimate emitted')
+                        for b in record['parts']:
+                            require(b.identity in self.physical, 'measured allocation identity is not live')
+                            del self.physical[b.identity]
+                            del self.register_states.ranges[b.identity]
+                            self.placements.pop(b.identity, None)
+                            p = p.then(space_profile(b.cls, 'clean', -b.width))
+                        record['state'] = 'consumed'
+                        self.history[frame_index]['measured'] = True
+                        result = (0, measured)
+                    case ClassicalKind.EFFECT:
+                        dev = a[0]
+                        if dev not in ['clock.read', 'entropy.read', 'console.write', 'block.read', 'block.write']:
+                            return (p, steps, [], True)
+                        ptr = get(a[2] if dev.startswith('block.') else a[1])[0]
+                        size = 8 if dev == 'clock.read' else get(a[2])[0] if dev in ['entropy.read', 'console.write'] else 512
+                        if not any((base <= ptr and ptr + size <= base + n for base, (n, _) in self.allocations.items())):
+                            return (p, steps, [], True)
+                        if dev == 'console.write':
+                            continue
+                        if dev == 'clock.read':
+                            self.memory.update({ptr + i: self.clock >> 8 * i & 255 for i in range(8)})
+                            self.clock = (self.clock + 1) % (1 << 64)
+                        elif dev in ['block.read', 'block.write']:
+                            sector, sector_width = get(a[1])
+                            require(sector_width == 64, '§7.3: block sector requires i64')
+                            require(isinstance(sector, int), 'opaque register id cannot resolve a block-sector address')
+                            if dev == 'block.read':
+                                self.memory.update({ptr + i: byte for i, byte in enumerate(self.blocks.get(sector, (0,) * 512))})
+                            else:
+                                self.blocks[sector] = tuple((self.memory.get(ptr + i, 0) for i in range(512)))
+                        elif dev == 'entropy.read' and size == 0:
+                            continue
+                        else:
+                            raise ContractError(f'exact classical effect-state binding pending: {dev}; use an explicit conditional step bound')
+                    case _:
+                        raise ContractError(f'classical source binding not implemented: {op}; no exact estimate emitted')
                 if result is not None:
                     require(len(inst.lhs) == 1, 'classical result arity')
                     put(inst.lhs[0], result)
@@ -2980,7 +3030,6 @@ class ClassicalMachine:
     def arithmetic(self, inst, get):
         op, a = (inst.op, inst.args)
         result = None
-        p = Profile()
         if op.startswith('const.i'):
             width = integer(op[7:], 1)
             result = (integer(a[0]) % (1 << width), width)
@@ -3107,7 +3156,6 @@ class ClassicalMachine:
 
     def quantum_call(self, inst, get, register, frame_index):
         op, a = (inst.op, inst.args)
-        result = None
         p = Profile()
         if op in ['action_call', 'oracle_call', 'adj', 'ctl']:
             call_op, actual = (op, list(a))
@@ -3946,10 +3994,6 @@ class Source:
         elif B:add("frames",self.fresh("frames",B*Q))
         return records
 
-    def classical(self, fn, args, token_aliases=None):
-        """Resolve, execute and account for a classical control path."""
-        return ClassicalMachine(self, fn, args, token_aliases).run()
-
     @staticmethod
     def binding_types(env,regions):
         inactive=env.get(_SOURCE_INACTIVE,())
@@ -4089,7 +4133,7 @@ class Source:
         require(fn.kind in ["action","perm_action"],"action_call requires action")
         actual_groups=[list_operand(x) for x in a[1:]]
         require(all(len(g)==len(v) for g,v in zip(fn.groups[:4],actual_groups)),"action call argument arity")
-        child,child_regions={},{}
+        child={}
         all_wires=[]
         for group,actuals in zip(fn.groups[:2],actual_groups[:2]):
             for (n,ty,role),actual in zip(group,actuals):
@@ -4100,7 +4144,7 @@ class Source:
             require(actual in regions,"unknown memory argument")
             A,W,b=regions[actual]
             require(ty==f"region[{A},{W}]","action call region shape mismatch")
-            child[n]=b;child_regions[n]=(A,W,b)
+            child[n]=b
             all_wires+=wire(b,env)
         for i,b in enumerate(all_wires):
             for other in all_wires[:i]: require(b.identity!=other.identity or b.offset+b.width<=other.offset or other.offset+other.width<=b.offset,"overlapping action call arguments")
@@ -4464,7 +4508,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
     if fn.kind in ["cc","r"]:
         require(not accuracy and inherited_controls==0,"classical cost request has no accuracy or inherited quantum controls")
         if step_bound is None:
-            p,steps = source.classical(fn,args,token_aliases)
+            p,steps = ClassicalMachine(source,fn,args,token_aliases).run()
         else:
             # A caller-supplied termination assumption is explicit evidence,
             # never a proof that an unbounded classical program terminates.

@@ -108,7 +108,7 @@ paper derivations above, the brute oracle and the executed VM differential.
 
 Classical execution now has explicit `ClassicalMachine` state and arithmetic,
 register, quantum-call and execution methods. Token/register value types live
-at module scope. `Source.classical` initializes and runs that machine;
+at module scope. The estimate entry point initializes and runs that machine;
 `action_nodes` delegates action, oracle and in-place calls to named phases.
 Five red-first phase unit tests pass. No function in the implementation
 exceeds300 lines (the longest is the252-line padded oracle constructor).
@@ -221,11 +221,11 @@ red before adding the one new `gate.toml` check, then passed.
 {"files": {
   "scripts/differential.py": {"cognitive_complexity": 76, "function_lengths": [18, 71], "trivial_wrappers": 0},
   "scripts/measure_coverage.py": {"cognitive_complexity": 2, "function_lengths": [5, 36], "trivial_wrappers": 0},
-  "scripts/phase_snapshot.py": {"cognitive_complexity": 63, "function_lengths": [34], "trivial_wrappers": 0},
+  "scripts/phase_snapshot.py": {"cognitive_complexity": 50, "function_lengths": [33], "trivial_wrappers": 0},
   "scripts/pinned.py": {"cognitive_complexity": 23, "function_lengths": [11, 28], "trivial_wrappers": 0},
   "scripts/quality_ratchet.py": {"cognitive_complexity": 63, "function_lengths": [3, 4, 11, 18, 18, 18, 23], "trivial_wrappers": 0},
   "scripts/record_expectations.py": {"cognitive_complexity": 38, "function_lengths": [4, 10, 11, 17, 58], "trivial_wrappers": 0},
-  "src/estimate.py": {"cognitive_complexity": 7036, "function_lengths": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 15, 15, 15, 15, 16, 16, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 19, 19, 20, 21, 21, 21, 22, 22, 23, 23, 24, 24, 24, 25, 25, 26, 26, 26, 26, 26, 27, 29, 29, 30, 31, 32, 35, 36, 36, 36, 37, 37, 38, 40, 42, 45, 46, 48, 49, 52, 55, 57, 57, 59, 59, 60, 60, 62, 63, 66, 69, 69, 70, 71, 71, 80, 85, 88, 98, 121, 147, 166, 176, 207, 247, 252], "trivial_wrappers": 7},
+  "src/estimate.py": {"cognitive_complexity": 6377, "function_lengths": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 15, 15, 15, 15, 16, 16, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 19, 19, 20, 21, 21, 21, 22, 22, 23, 23, 24, 24, 24, 25, 25, 26, 26, 26, 26, 26, 27, 29, 29, 30, 31, 32, 35, 36, 36, 36, 37, 37, 38, 40, 42, 45, 45, 48, 49, 52, 55, 57, 57, 59, 59, 60, 60, 62, 63, 66, 69, 69, 70, 71, 71, 80, 85, 88, 97, 121, 147, 166, 176, 207, 248, 252], "trivial_wrappers": 6},
   "tests/brute_ledger.py": {"cognitive_complexity": 39, "function_lengths": [2, 5, 5, 6, 7, 17, 32], "trivial_wrappers": 0},
   "tests/run_suite.py": {"cognitive_complexity": 14, "function_lengths": [4, 8, 10], "trivial_wrappers": 0},
   "tests/test_brute_accounting.py": {"cognitive_complexity": 24, "function_lengths": [4, 4, 13, 14, 23], "trivial_wrappers": 0},
@@ -233,10 +233,38 @@ red before adding the one new `gate.toml` check, then passed.
   "tests/test_fail_fast.py": {"cognitive_complexity": 1, "function_lengths": [2, 4, 6, 7, 7, 8], "trivial_wrappers": 0},
   "tests/test_gate.py": {"cognitive_complexity": 8, "function_lengths": [12, 26], "trivial_wrappers": 0},
   "tests/test_output.py": {"cognitive_complexity": 0, "function_lengths": [9, 12], "trivial_wrappers": 0},
-  "tests/test_phases.py": {"cognitive_complexity": 1, "function_lengths": [5, 5, 6, 7, 7, 8, 11], "trivial_wrappers": 0},
+  "tests/test_phases.py": {"cognitive_complexity": 4, "function_lengths": [5, 5, 6, 7, 7, 8, 11, 14], "trivial_wrappers": 0},
   "tests/test_quality.py": {"cognitive_complexity": 9, "function_lengths": [7, 9, 11, 15, 15, 27], "trivial_wrappers": 0},
   "tests/test_quality_ratchet.py": {"cognitive_complexity": 2, "function_lengths": [40], "trivial_wrappers": 0},
   "tests/test_schedule.py": {"cognitive_complexity": 344, "function_lengths": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 17, 17, 17, 18, 19, 19, 19, 19, 19, 19, 20, 20, 21, 23, 23, 24, 24, 25, 26, 29, 31, 31, 32, 38, 40], "trivial_wrappers": 0}
 }, "litter": [], "process_identifiers": []}
 ```
 <!-- /quality-baseline -->
+
+## Continuation cleanup verification
+
+The inherited diff was re-read against COMMON.md's anti-slop rules. Classical
+instruction families are now classified once at construction into an enum,
+and execution matches on that enum. This removes duplicated arithmetic and
+register dispatch predicates. The unused arithmetic/quantum-call locals,
+unused action-call region map, single-use classical forwarding method and
+single-iteration budget/control loops in the snapshot tool were deleted.
+The source wrapper count fell from seven to six; no source function exceeds
+252 lines. The recorded initial baseline above includes this final cleanup
+and its classifier test before review handover.
+
+The classifier test was observed red (missing dispatch-family field), then
+all six phase tests passed; all four fail-fast tests also passed. The final
+before/after snapshot compared 244 requests byte for byte, including result
+documents and failures. Commands:
+
+    timeout 180 python3 -I -B scripts/phase_snapshot.py "$TMPDIR/before_cleanup.py"
+    timeout 180 python3 -I -B scripts/phase_snapshot.py
+    cmp .tmp/quality-estimate/cleanup-before.json .tmp/quality-estimate/cleanup-after.json
+
+The outputs matched; both SHA-256 values are
+`8e9dd95c95a8bc6cce24a50b39292db6dac293197caace983a55e2a1dc14d4f2`.
+The source copy and snapshots remain in the ignored job directory.
+The default test run immediately before deleting the forwarding wrapper passed
+239 Python tests through four Rust wrappers in 72.81 seconds; the final run
+and fresh coverage measurement are recorded below.

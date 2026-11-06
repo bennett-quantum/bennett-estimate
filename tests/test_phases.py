@@ -5,6 +5,21 @@ from test_schedule import ROOT, e, target, make_program
 
 
 class ClassicalPhases(unittest.TestCase):
+    def test_instruction_classifies_classical_dispatch_at_construction(self):
+        families = {
+            "ARITHMETIC": ["const.i8", "add", "sdiv", "icmp.eq", "sext.i64", "inttoptr", "select"],
+            "REGISTER": ["qreg.new", "qreg.free", "qreg.slice", "qreg.from_id"],
+            "QUANTUM": ["action_call", "oracle_call", "adj", "ctl"],
+            "BRANCH": ["br"], "RETURN": ["ret"], "FAULT": ["trap", "fault"],
+            "CALL": ["call"], "UNCALL": ["uncall"], "ALLOCATE": ["alloc"], "FREE": ["free"],
+            "MEMORY": ["load.i64", "store.i8"], "MINT": ["budget.mint"],
+            "MEASURE": ["measure", "measure.i128"], "EFFECT": ["effect"], "OTHER": ["qloop", "hostcall"],
+        }
+        for family, opcodes in families.items():
+            for opcode in opcodes:
+                with self.subTest(opcode=opcode):
+                    self.assertEqual(e.Instruction(opcode, [], []).classical_kind.name, family)
+
     def machine(self):
         obj = e.Object.read((ROOT / "examples/native-pair-program.bisa").read_text())
         t = target()
