@@ -13,8 +13,8 @@ reads a live sibling checkout. The ISA gate pin includes the separately
 adopted K86/K91 contracts; `SPEC_VERSIONS.toml` still declares partial adoption.
 
 `timeout 180 cargo test --offline --locked -j3 -- --test-threads=4` passed
-219 Python tests through four Rust wrappers in **71.99 s** before phase
-refactoring. No tests were removed or excluded. The default is below the
+240 Python tests through four Rust wrappers in **62.78 s** on the final
+implementation. No tests were removed or excluded. The default is below the
 180-second limit without a slow suite. Test debug information uses
 `line-tables-only`.
 
@@ -34,12 +34,12 @@ and the CLI Python source in subprocesses, combines their data and writes
 point for the Rust launcher; the default Cargo run separately tests the actual
 packaged launcher.
 
-**Statement coverage:96.20% (4,252 / 4,420 statements)** on the final
-implementation, measured with the command above. Combined statement/branch
-coverage is94.35% (the report displays94%); it uses a different denominator.
-All237 tests passed under instrumentation; the slowest worker took461.882s.
-This instrumented run is separate from the118.72s default Cargo run.
-The same run regenerates the literal inventory from its passing assertions.
+**Statement coverage: 96.20% (4,276 / 4,445 statements)** on the final
+implementation. Combined statement/branch coverage is 94.36% (the report
+displays 94%); it uses a different denominator. All 240 tests passed under
+instrumentation across the four groups. The bounded accounting retry and
+combination commands are recorded below. This measurement is separate from
+the default Cargo run. Its passing assertions regenerate the literal inventory.
 
 The repository has one Python implementation module. The five lowest-covered
 substantial functions are recorded below with their missed-path disposition;
@@ -143,10 +143,12 @@ ignore rules cover bytecode, caches, logs, Dolt LOCK files and `.darc` archives.
 ## Final default validation
 
 `timeout 180 cargo test --offline --locked -j3 -- --test-threads=4` passed
-all237 Python tests (75 objects,123 accounting,16 selectors,23 other),
-through four Rust wrappers. `/usr/bin/time` measured **118.72s wall**,
-including compilation, with123,792KiB peak RSS. Cargo's test interval was
-118.10s. No tests are ignored or skipped.
+all 240 Python tests (75 objects, 123 accounting, 16 selectors, 26 other),
+through four Rust wrappers. `/usr/bin/time` measured **62.78 s wall**,
+including the build check, with 106,216 KiB peak RSS. Cargo's test interval was
+62.64 s. No tests are ignored or skipped. This final run was measured after
+our coverage workers finished; the earlier overlapping timeout is recorded
+below rather than treated as a pass.
 
 `cargo fmt --check`,
 `timeout 60 cargo clippy --offline --locked -j3 --all-targets -- -D warnings`,
@@ -170,10 +172,10 @@ gaps, not missing implementation declarations.
 | `Source.lower_action_call` | 86.49% | Positive callee binding/expansion phase test and existing nested-call tests. Additional memory-interface forwarding combinations remain part of full linked-source coverage. |
 | `Catalog.safe_index_fold` | 87.30% | New malformed-node propagation and valid nonlinear-literal tests, plus existing middle-index/control-alias regressions. Remaining declines retain literal validation. |
 | `ClassicalMachine.__init__` | 87.50% | All classical phase tests initialize independent machines; block-image programs exercise persistent device state. Remaining global-image layout variants belong to the existing complete classical-source work. |
-| `ClassicalMachine.arithmetic` | 88.10% | Direct signed-division and zero-divisor unit tests, plus existing resolved arithmetic/opaque-ID programs. Complete per-op boundaries remain useful follow-up coverage. |
+| `ClassicalMachine.arithmetic` | 87.80% | Direct signed-division and zero-divisor unit tests, plus existing resolved arithmetic/opaque-ID programs. Complete per-op boundaries remain useful follow-up coverage. |
 | `Source.lower_qinplace` | 89.47% | Arity phase test and existing positive private-leaf/call-occurrence tests. Extra memory/classical capture combinations remain part of full context coverage. |
 
-The final inventory contains351 literal assertion sites,350 regenerated and
+The final inventory contains 358 literal assertion sites, 357 regenerated and
 one explicitly unexecuted topology-match branch. Every entry includes a hash
 of its test source; all hashes were checked against the final files.
 
@@ -275,3 +277,47 @@ The source copy and snapshots remain in the ignored job directory.
 The default test run immediately before deleting the forwarding wrapper passed
 239 Python tests through four Rust wrappers in 72.81 seconds; the final run
 and fresh coverage measurement are recorded below.
+
+## Current coverage reproduction and runtime limits
+
+The first `timeout 600 .tmp/quality-estimate/venv/bin/python -B
+scripts/measure_coverage.py` run failed loudly at its accounting worker's
+480-second timeout. Objects (75 tests, 450.709 s), selectors (16 tests,
+352.919 s) and the original other group passed. The successful groups were
+retained. The stale accounting JSON was deleted, and all 123 accounting tests
+were rerun successfully in 395.017 s (400.54 s including tracing teardown).
+The other group was rerun after adding the hygiene regression: 26 tests,
+3.775 s. Estimator source and the existing test sources did not change between
+these measurements. The final inventory has 358 assertion sites, 357
+regenerated and one explicitly unexecuted topology-match branch; all recorded
+source hashes match the final files.
+
+After the initial measurement, reproduce the bounded group retry and combine
+with the same headless environment and job-local coverage.py installation:
+
+```sh
+evidence="$PWD/.tmp/quality-estimate/coverage"
+export COVERAGE_FILE="$evidence/data" PYTHONDONTWRITEBYTECODE=1
+export BENNETT_ESTIMATE_BIN="$evidence/estimate-covered"
+python=.tmp/quality-estimate/venv/bin/python
+rm -f "$evidence/accounting.json"
+timeout 900 "$python" -m coverage run --parallel-mode --branch --source=src \
+  scripts/record_expectations.py accounting "$evidence/accounting.json"
+timeout 60 "$python" -m coverage run --parallel-mode --branch --source=src \
+  scripts/record_expectations.py other "$evidence/other.json"
+"$python" -I -B scripts/record_expectations.py --combine "$evidence"
+"$python" -m coverage combine "$evidence"
+"$python" -m coverage json -o "$evidence/report.json"
+```
+
+An overlapping final-source default run also reached its 180-second limit
+with no assertion failure before termination. That is a timeout, not a green
+run. The final default timing below is measured after coverage workers finish.
+Neither test selection nor the default 180-second limit was changed.
+
+Final checkpoint: the unchanged default command passed all 240 Python tests
+and four Rust wrappers in 62.78 s wall (62.64 s test interval, 106,216 KiB
+peak RSS). The standalone quality check, formatting, strict Clippy and shell
+syntax checks passed. All four gate pins, both adopted feature document hashes,
+vendored catalog bytes and all literal-inventory source hashes were verified.
+No full push gate or consumer gate ran; those remain merge-time work.

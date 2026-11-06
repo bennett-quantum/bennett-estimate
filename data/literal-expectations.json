@@ -1265,7 +1265,7 @@
     {
       "file": "tests/test_gate.py",
       "line": 16,
-      "source_sha256": "74bda433813b1ae2283b13d40684a485191794d37ceffd738bd3730fc2466ee4",
+      "source_sha256": "21cb4d38099ed428796e82f791cc07a58c4bd96af125628ee3ce85a139fb190e",
       "assertion": "self.assertEqual(config[\"schema\"],1)",
       "expected": "1",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1280,22 +1280,22 @@
     {
       "file": "tests/test_gate.py",
       "line": 18,
-      "source_sha256": "74bda433813b1ae2283b13d40684a485191794d37ceffd738bd3730fc2466ee4",
-      "assertion": "self.assertEqual(config[\"check\"],[{\"name\":\"scripts/check\",\"argv\":[\"scripts/check\"]}])",
-      "expected": "[{'name': 'scripts/check', 'argv': ['scripts/check']}]",
+      "source_sha256": "21cb4d38099ed428796e82f791cc07a58c4bd96af125628ee3ce85a139fb190e",
+      "assertion": "self.assertEqual(config[\"check\"],[{\"name\":\"quality baseline\",\"argv\":[\"python3\",\"-I\",\"-B\",\"scripts/quality_ratchet.py\"]},\n                                          {\"name\":\"scripts/check\",\"argv\":[\"scripts/check\"]}])",
+      "expected": "[{'name': 'quality baseline', 'argv': ['python3', '-I', '-B', 'scripts/quality_ratchet.py']}, {'name': 'scripts/check', 'argv': ['scripts/check']}]",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
       "observations": 1,
       "tests": [
         "test_gate.Hook.test_pinned_sibling_hook_configuration_and_git_free_working_tree"
       ],
       "observed_values": [
-        "[{'name': 'scripts/check', 'argv': ['scripts/check']}]"
+        "[{'name': 'quality baseline', 'argv': ['python3', '-I', '-B', 'scripts/quality_ratchet.py']}, {'name': 'scripts/check', 'argv': ['scripts/check']}]"
       ]
     },
     {
       "file": "tests/test_gate.py",
-      "line": 19,
-      "source_sha256": "74bda433813b1ae2283b13d40684a485191794d37ceffd738bd3730fc2466ee4",
+      "line": 20,
+      "source_sha256": "21cb4d38099ed428796e82f791cc07a58c4bd96af125628ee3ce85a139fb190e",
       "assertion": "self.assertEqual(set(config[\"siblings\"]),{\"bennett-isa-spec\",\"bennett-targets\",\"bennett-conformance\",\"bennett-vm\"})",
       "expected": "{'bennett-conformance', 'bennett-isa-spec', 'bennett-vm', 'bennett-targets'}",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1304,13 +1304,13 @@
         "test_gate.Hook.test_pinned_sibling_hook_configuration_and_git_free_working_tree"
       ],
       "observed_values": [
-        "{'bennett-conformance', 'bennett-vm', 'bennett-isa-spec', 'bennett-targets'}"
+        "{'bennett-targets', 'bennett-isa-spec', 'bennett-vm', 'bennett-conformance'}"
       ]
     },
     {
       "file": "tests/test_gate.py",
-      "line": 21,
-      "source_sha256": "74bda433813b1ae2283b13d40684a485191794d37ceffd738bd3730fc2466ee4",
+      "line": 22,
+      "source_sha256": "21cb4d38099ed428796e82f791cc07a58c4bd96af125628ee3ce85a139fb190e",
       "assertion": "self.assertEqual(config[\"env\"][\"BENNETT_VM_BIN\"],\"{sibling:bennett-vm}/target/debug/bennett-vm\")",
       "expected": "'{sibling:bennett-vm}/target/debug/bennett-vm'",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1324,8 +1324,8 @@
     },
     {
       "file": "tests/test_gate.py",
-      "line": 36,
-      "source_sha256": "74bda433813b1ae2283b13d40684a485191794d37ceffd738bd3730fc2466ee4",
+      "line": 37,
+      "source_sha256": "21cb4d38099ed428796e82f791cc07a58c4bd96af125628ee3ce85a139fb190e",
       "assertion": "self.assertEqual(marker.read_text(),\"checked\")",
       "expected": "'checked'",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1340,8 +1340,8 @@
     },
     {
       "file": "tests/test_gate.py",
-      "line": 38,
-      "source_sha256": "74bda433813b1ae2283b13d40684a485191794d37ceffd738bd3730fc2466ee4",
+      "line": 39,
+      "source_sha256": "21cb4d38099ed428796e82f791cc07a58c4bd96af125628ee3ce85a139fb190e",
       "assertion": "self.assertEqual(subprocess.run([str(hook),\"--working-tree\"],env=env,capture_output=True,timeout=10).returncode,7)",
       "expected": "7",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1355,8 +1355,8 @@
     },
     {
       "file": "tests/test_gate.py",
-      "line": 51,
-      "source_sha256": "74bda433813b1ae2283b13d40684a485191794d37ceffd738bd3730fc2466ee4",
+      "line": 52,
+      "source_sha256": "21cb4d38099ed428796e82f791cc07a58c4bd96af125628ee3ce85a139fb190e",
       "assertion": "self.assertEqual(runner.group(recursive),'selectors')",
       "expected": "'selectors'",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1388,7 +1388,7 @@
       "line": 18,
       "source_sha256": "2e62396db020b06a69cbf4cf7c1cdc2250b52c3892d64234ee642bff67cdd82c",
       "assertion": "self.assertEqual(set(report[\"pending\"][0]), {\"code\", \"reason\"})",
-      "expected": "{'code', 'reason'}",
+      "expected": "{'reason', 'code'}",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
       "observations": 1,
       "tests": [
@@ -1445,8 +1445,8 @@
     },
     {
       "file": "tests/test_phases.py",
-      "line": 18,
-      "source_sha256": "0e860ca8a69ef045d110389b9b63e9ce52c2668d8d15c3569ced1794d718dd67",
+      "line": 33,
+      "source_sha256": "08c36257f282c0c90071cc40c129197da4a92b3d6f5e6f576011aa12f01b6151",
       "assertion": "self.assertEqual((result, failed), ((253, 8), False))",
       "expected": "((253, 8), False)",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1460,8 +1460,8 @@
     },
     {
       "file": "tests/test_phases.py",
-      "line": 20,
-      "source_sha256": "0e860ca8a69ef045d110389b9b63e9ce52c2668d8d15c3569ced1794d718dd67",
+      "line": 35,
+      "source_sha256": "08c36257f282c0c90071cc40c129197da4a92b3d6f5e6f576011aa12f01b6151",
       "assertion": "self.assertEqual((result, failed), (None, True))",
       "expected": "(None, True)",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1475,8 +1475,8 @@
     },
     {
       "file": "tests/test_phases.py",
-      "line": 28,
-      "source_sha256": "0e860ca8a69ef045d110389b9b63e9ce52c2668d8d15c3569ced1794d718dd67",
+      "line": 43,
+      "source_sha256": "08c36257f282c0c90071cc40c129197da4a92b3d6f5e6f576011aa12f01b6151",
       "assertion": "self.assertEqual(p.delta[(\"data\", \"clean\")], 3)",
       "expected": "3",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1490,8 +1490,8 @@
     },
     {
       "file": "tests/test_phases.py",
-      "line": 29,
-      "source_sha256": "0e860ca8a69ef045d110389b9b63e9ce52c2668d8d15c3569ced1794d718dd67",
+      "line": 44,
+      "source_sha256": "08c36257f282c0c90071cc40c129197da4a92b3d6f5e6f576011aa12f01b6151",
       "assertion": "self.assertEqual(machine.register_width(machine.registers[result[0].identity]), 3)",
       "expected": "3",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1505,8 +1505,8 @@
     },
     {
       "file": "tests/test_phases.py",
-      "line": 31,
-      "source_sha256": "0e860ca8a69ef045d110389b9b63e9ce52c2668d8d15c3569ced1794d718dd67",
+      "line": 46,
+      "source_sha256": "08c36257f282c0c90071cc40c129197da4a92b3d6f5e6f576011aa12f01b6151",
       "assertion": "self.assertEqual(restored.delta[(\"data\", \"clean\")], -3)",
       "expected": "-3",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1520,8 +1520,8 @@
     },
     {
       "file": "tests/test_phases.py",
-      "line": 32,
-      "source_sha256": "0e860ca8a69ef045d110389b9b63e9ce52c2668d8d15c3569ced1794d718dd67",
+      "line": 47,
+      "source_sha256": "08c36257f282c0c90071cc40c129197da4a92b3d6f5e6f576011aa12f01b6151",
       "assertion": "self.assertEqual(machine.physical, {})",
       "expected": "{}",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1535,8 +1535,8 @@
     },
     {
       "file": "tests/test_phases.py",
-      "line": 38,
-      "source_sha256": "0e860ca8a69ef045d110389b9b63e9ce52c2668d8d15c3569ced1794d718dd67",
+      "line": 53,
+      "source_sha256": "08c36257f282c0c90071cc40c129197da4a92b3d6f5e6f576011aa12f01b6151",
       "assertion": "self.assertEqual(calls.call_count, 1)",
       "expected": "1",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1550,8 +1550,8 @@
     },
     {
       "file": "tests/test_phases.py",
-      "line": 39,
-      "source_sha256": "0e860ca8a69ef045d110389b9b63e9ce52c2668d8d15c3569ced1794d718dd67",
+      "line": 54,
+      "source_sha256": "08c36257f282c0c90071cc40c129197da4a92b3d6f5e6f576011aa12f01b6151",
       "assertion": "self.assertEqual((steps, machine.source.classical_status), (7, \"COMPLETED\"))",
       "expected": "(7, 'COMPLETED')",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1565,8 +1565,8 @@
     },
     {
       "file": "tests/test_phases.py",
-      "line": 40,
-      "source_sha256": "0e860ca8a69ef045d110389b9b63e9ce52c2668d8d15c3569ced1794d718dd67",
+      "line": 55,
+      "source_sha256": "08c36257f282c0c90071cc40c129197da4a92b3d6f5e6f576011aa12f01b6151",
       "assertion": "self.assertEqual(profile.resources(machine.source.target),\n                         {\"gate_count\": 8, \"time\": 25, \"peak_qubits[data]\": 4, \"qubit_second[data]\": 84})",
       "expected": "{'gate_count': 8, 'time': 25, 'peak_qubits[data]': 4, 'qubit_second[data]': 84}",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1580,8 +1580,8 @@
     },
     {
       "file": "tests/test_phases.py",
-      "line": 56,
-      "source_sha256": "0e860ca8a69ef045d110389b9b63e9ce52c2668d8d15c3569ced1794d718dd67",
+      "line": 71,
+      "source_sha256": "08c36257f282c0c90071cc40c129197da4a92b3d6f5e6f576011aa12f01b6151",
       "assertion": "self.assertEqual(source.catalog.body([node], env).resources(source.target, {\"data\": 1}),\n                         {\"gate_count\": 1, \"time\": 1, \"peak_qubits[data]\": 1, \"qubit_second[data]\": 1})",
       "expected": "{'gate_count': 1, 'time': 1, 'peak_qubits[data]': 1, 'qubit_second[data]': 1}",
       "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
@@ -1666,6 +1666,111 @@
       ],
       "observed_values": [
         "[{'gate_entry': 0, 'version': 'bennett.native-model/1', 'status': 'unchecked'}]"
+      ]
+    },
+    {
+      "file": "tests/test_quality_ratchet.py",
+      "line": 34,
+      "source_sha256": "e0b3a21b550c80252e11be9b185b7c7d599b0449e324fbe2d483eb9ccce5f645",
+      "assertion": "self.assertEqual(recorded.returncode, 0, recorded.stderr)",
+      "expected": "0",
+      "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
+      "observations": 1,
+      "tests": [
+        "test_quality_ratchet.QualityRatchet.test_recorded_baseline_accepts_unchanged_code_and_rejects_regressions"
+      ],
+      "observed_values": [
+        "0"
+      ]
+    },
+    {
+      "file": "tests/test_quality_ratchet.py",
+      "line": 36,
+      "source_sha256": "e0b3a21b550c80252e11be9b185b7c7d599b0449e324fbe2d483eb9ccce5f645",
+      "assertion": "self.assertEqual(baseline[\"files\"][\"src/calculation.py\"],\n                             {\"function_lengths\": [3], \"cognitive_complexity\": 0, \"trivial_wrappers\": 0})",
+      "expected": "{'function_lengths': [3], 'cognitive_complexity': 0, 'trivial_wrappers': 0}",
+      "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
+      "observations": 1,
+      "tests": [
+        "test_quality_ratchet.QualityRatchet.test_recorded_baseline_accepts_unchanged_code_and_rejects_regressions"
+      ],
+      "observed_values": [
+        "{'cognitive_complexity': 0, 'function_lengths': [3], 'trivial_wrappers': 0}"
+      ]
+    },
+    {
+      "file": "tests/test_quality_ratchet.py",
+      "line": 41,
+      "source_sha256": "e0b3a21b550c80252e11be9b185b7c7d599b0449e324fbe2d483eb9ccce5f645",
+      "assertion": "self.assertEqual(unchanged.returncode, 0, unchanged.stderr)",
+      "expected": "0",
+      "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
+      "observations": 1,
+      "tests": [
+        "test_quality_ratchet.QualityRatchet.test_recorded_baseline_accepts_unchanged_code_and_rejects_regressions"
+      ],
+      "observed_values": [
+        "0"
+      ]
+    },
+    {
+      "file": "tests/test_quality_ratchet.py",
+      "line": 46,
+      "source_sha256": "e0b3a21b550c80252e11be9b185b7c7d599b0449e324fbe2d483eb9ccce5f645",
+      "assertion": "self.assertEqual(result.returncode, 1, result.stderr)",
+      "expected": "1",
+      "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
+      "observations": 4,
+      "tests": [
+        "test_quality_ratchet.QualityRatchet.test_recorded_baseline_accepts_unchanged_code_and_rejects_regressions"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_quality_ratchet.py",
+      "line": 53,
+      "source_sha256": "e0b3a21b550c80252e11be9b185b7c7d599b0449e324fbe2d483eb9ccce5f645",
+      "assertion": "self.assertEqual(result.returncode, 1, result.stderr)",
+      "expected": "1",
+      "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
+      "observations": 1,
+      "tests": [
+        "test_quality_ratchet.QualityRatchet.test_recorded_baseline_accepts_unchanged_code_and_rejects_regressions"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_quality_ratchet_hygiene.py",
+      "line": 28,
+      "source_sha256": "ab069801f2276ee498423fcc01cbd6699ed67aa0204a4be21c6ca3ab99d3db7b",
+      "assertion": "self.assertEqual(result.returncode, 1, result.stderr)",
+      "expected": "1",
+      "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
+      "observations": 1,
+      "tests": [
+        "test_quality_ratchet_hygiene.Hygiene.test_upstream_identifier_and_suffixed_lock_each_fail_the_gate"
+      ],
+      "observed_values": [
+        "1"
+      ]
+    },
+    {
+      "file": "tests/test_quality_ratchet_hygiene.py",
+      "line": 34,
+      "source_sha256": "ab069801f2276ee498423fcc01cbd6699ed67aa0204a4be21c6ca3ab99d3db7b",
+      "assertion": "self.assertEqual(result.returncode, 1, result.stderr)",
+      "expected": "1",
+      "provenance": "regenerated passing-test baseline; no independent derivation claimed by this record",
+      "observations": 1,
+      "tests": [
+        "test_quality_ratchet_hygiene.Hygiene.test_upstream_identifier_and_suffixed_lock_each_fail_the_gate"
+      ],
+      "observed_values": [
+        "1"
       ]
     },
     {
@@ -3960,7 +4065,7 @@
         "test_schedule.Accounting.test_procedure_activation_rows_share_root_dispatch_and_ordered_locations"
       ],
       "observed_values": [
-        "{(1, (), 1, 'rev'), (1, (), 1, 'fwd')}"
+        "{(1, (), 1, 'fwd'), (1, (), 1, 'rev')}"
       ]
     },
     {
@@ -5268,5 +5373,6 @@
         "1"
       ]
     }
-  ]
+  ],
+  "measurement": "Coverage groups, bounded accounting retry and final other group; exact commands and timeout evidence are recorded in docs/quality.md."
 }
