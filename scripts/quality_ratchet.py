@@ -9,8 +9,13 @@ import re
 import subprocess
 import sys
 
-LITTER = re.compile(r"(?:^|/)(?:__pycache__|\.darc)(?:/|$)|\.(?:pyc|log|darc|lock)$|(?:^|/)(?:LOCK|LAST-RUN[^/]*|PROGRESS[^/]*)$", re.I)
-PROCESS = re.compile(r"\b(?:bennett(?:-[a-z]+)?-[a-z0-9]{3}(?:\.\d+)*|(?:quality|sol)-estimate|shift[ -]+\d+|review[ -]+round[ -]+\d+)\b(?![\w-])", re.I)
+LITTER = re.compile(
+    r"(?:^|/)(?:__pycache__|[^/]*\.darc)(?:/|$)|\.(?:pyc|log|lock(?:\.[^/]*)?)$|"
+    r"(?:^|/)(?:LOCK|LAST-RUN[^/]*|PROGRESS[^/]*)$", re.I)
+PROCESS = re.compile(
+    r"\b(?:(?:bennett(?:-[a-z]+)?|b-isa-spec|brt|bp)-[a-z0-9]{3}(?:\.\d+)*|"
+    r"(?:quality|sol)-(?!baseline\b)[a-z]+|shift[ -]+\d+|review[ -]+round[ -]+\d+|"
+    r"session[ -]+\d{4}-\d{2}-\d{2})\b(?![\w-])", re.I)
 BASELINE = re.compile(r"<!-- quality-baseline -->\s*```json\n(.*?)\n```\s*<!-- /quality-baseline -->", re.S)
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 

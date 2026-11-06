@@ -216,6 +216,12 @@ the source tree. `timeout 30 python3 -I -B -m unittest discover -s tests -p
 test_quality_ratchet.py -v` passed. The hook-configuration test was also seen
 red before adding the one new `gate.toml` check, then passed.
 
+Two further scratch probes initially returned exit 0 for an upstream tracker
+identifier and a suffixed runtime lock. The grep now recognises the ecosystem's
+upstream prefixes, job/shift/review/session labels and suffixed lock files.
+Both probes now return exit 1; `test_quality_ratchet_hygiene.py` independently
+checks each case. Both quality-check test methods pass.
+
 <!-- quality-baseline -->
 ```json
 {"files": {
@@ -236,6 +242,7 @@ red before adding the one new `gate.toml` check, then passed.
   "tests/test_phases.py": {"cognitive_complexity": 4, "function_lengths": [5, 5, 6, 7, 7, 8, 11, 14], "trivial_wrappers": 0},
   "tests/test_quality.py": {"cognitive_complexity": 9, "function_lengths": [7, 9, 11, 15, 15, 27], "trivial_wrappers": 0},
   "tests/test_quality_ratchet.py": {"cognitive_complexity": 2, "function_lengths": [40], "trivial_wrappers": 0},
+  "tests/test_quality_ratchet_hygiene.py": {"cognitive_complexity": 1, "function_lengths": [23], "trivial_wrappers": 0},
   "tests/test_schedule.py": {"cognitive_complexity": 344, "function_lengths": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 17, 17, 17, 18, 19, 19, 19, 19, 19, 19, 20, 20, 21, 23, 23, 24, 24, 25, 26, 29, 31, 31, 32, 38, 40], "trivial_wrappers": 0}
 }, "litter": [], "process_identifiers": []}
 ```
