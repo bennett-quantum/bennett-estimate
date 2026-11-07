@@ -3439,22 +3439,11 @@ class Source:
                     if row is None or not overlap(row["outputs"],b):continue
                     if row["match"] is None:break
                     if prior not in owned:inverse.append(prior)
-                inverse.sort();computation=sorted({events[i]["match"] for i in inverse})
-                targets={part.identity for i in computation for part in events[i]["outputs"]}|{b.identity}
-                local=all(identity in allocations and identity in versions.ranges for identity in targets)
-                clean=all(value for identity,lo,hi,version,value in versions.capture([b]))
-                early=not computation or local and all(allocations[identity]["index"]<computation[0] for identity in targets)
-                produced=set();entry_clean=True
-                for i in computation:
-                    row=events[i]
-                    for identity,lo,hi,version,value in row["before"]+row["inputs"]:
-                        if identity in targets and not value and version not in produced:entry_clean=False
-                    produced.add(row["version"])
-                target_specs=sorted((allocations[identity] for identity in targets),key=lambda t:t["index"]) if local else []
                 point=(inst.block,inst.ordinal)
-                plan={"point":point,"symbol":self.obj.symbol(fn.name)["interface_hash"],"function":fn.name,"release":name,"compute":[fn.code[i] for i in computation],"targets":target_specs,"available":local and clean and early and entry_clean,"owned_points":[f"{fn.code[i].block}:{fn.code[i].ordinal}" for i in inverse]+[f"{inst.block}:{inst.ordinal}"],"choices":{},"recomputations":{}}
+                plan=self.primitive_cleanup_plan(fn,events,allocations,versions,b,index,inverse)
                 plans[point]=plan
                 for i in inverse:owners[(fn.code[i].block,fn.code[i].ordinal)]=plan;owned.add(i)
+                events[index]={"outputs":[],"reads":parts,"match":None}
                 del versions.ranges[b.identity];del scope[name]
                 continue
             if op in ["qxor","qexch"]:
@@ -3478,8 +3467,44 @@ class Source:
             else:
                 serial+=1;versions.assign(outputs,serial,False)
                 history[(key,inputs,versions.capture(outputs))]=index
-            events[index]={"outputs":outputs,"before":before,"inputs":inputs,"match":match,"version":serial}
+            events[index]={"outputs":outputs,"reads":reads,"before":before,"inputs":inputs,"match":match,"version":serial}
         return plans,owners
+
+    def primitive_cleanup_plan(self,fn,events,allocations,versions,b,index,inverse):
+        inverse.sort();computation=sorted({events[i]["match"] for i in inverse})
+        targets={part.identity for i in computation for part in events[i]["outputs"]}|{b.identity}
+        local=all(identity in allocations and identity in versions.ranges for identity in targets)
+        clean=all(value for identity,lo,hi,version,value in versions.capture([b]))
+        early=not computation or local and all(allocations[identity]["index"]<computation[0] for identity in targets)
+        produced=set();entry_clean=True
+        for i in computation:
+            row=events[i]
+            for identity,lo,hi,version,value in row["before"]+row["inputs"]:
+                if identity in targets and not value and version not in produced:entry_clean=False
+            produced.add(row["version"])
+        target_specs=sorted((allocations[identity] for identity in targets),key=lambda t:t["index"]) if local else []
+        obstruction=self.primitive_recompute_obstruction(fn,events,inverse,computation,index,b)
+        inst=fn.code[index]
+        return {"point":(inst.block,inst.ordinal),"symbol":self.obj.symbol(fn.name)["interface_hash"],"function":fn.name,"release":inst.args[0],"compute":[fn.code[i] for i in computation],"targets":target_specs,"available":local and clean and early and entry_clean,"obstruction":obstruction,"owned_points":[f"{fn.code[i].block}:{fn.code[i].ordinal}" for i in inverse]+[f"{inst.block}:{inst.ordinal}"],"choices":{},"recomputations":{}}
+
+    @staticmethod
+    def primitive_recompute_obstruction(fn,events,inverse,computation,release,carrier):
+        """K81: moving inverses to release may cross only disjoint rows."""
+        if not inverse:return None
+        outputs=[carrier]+[b for i in computation for b in events[i]["outputs"]]
+        inputs=[b for i in computation for b in events[i]["reads"]]
+        def overlaps(left,right):
+            return any(a.identity==b.identity and a.offset<b.offset+b.width and b.offset<a.offset+a.width for a in left for b in right)
+        for i in range(inverse[0],release):
+            if i in inverse:continue
+            row=events.get(i)
+            if row is None:continue
+            touches_carrier=overlaps(row["reads"]+row["outputs"],outputs)
+            changes_input=overlaps(row["outputs"],inputs)
+            if touches_carrier or changes_input:
+                inst=fn.code[i]
+                return f"{inst.block}:{inst.ordinal} ({inst.op})"
+        return None
 
     def cleanup_choice(self,plan):
         ledger=self.catalog.ledger
@@ -3488,6 +3513,7 @@ class Source:
             address={"chain":metadata_counts([*self.catalog.call_edges,point]),"ordinal":0,"step":self.catalog.root_step,"phase":self.catalog.root_phase}
             choice=(ledger.schedule.pick("cleanup",**address) if ledger is not None else None) or {"realisation":"reverse"}
             if ledger is not None:ledger.cleanup_decisions.append({**address,**choice,"owned_points":plan["owned_points"]})
+            require(choice["realisation"]!="recompute" or plan["obstruction"] is None,f"source cleanup-pair recompute crosses non-disjoint row {plan['obstruction']}")
             require(choice["realisation"]!="recompute" or plan["available"],"source cleanup-pair recompute binding remains pending for this carrier")
             plan["choices"][ledger]=choice["realisation"]
         return plan["choices"][ledger]
