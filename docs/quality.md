@@ -3,6 +3,50 @@
 The estimator is Python; Cargo packages its stdlib-only interpreter and catalog.
 Coverage of the Rust launcher alone does not measure estimator semantics.
 
+## Restored terminal cleanup inputs
+
+Implementation `916931a` recognizes a permutation input write followed by
+its matched undo. The single `primitive_recompute_obstruction` predicate
+implements K81's restored entry versions under §6.2: between the write and
+undo, no row may read the changed input or modify the computation's inputs
+or targets. Carrier reads/writes, input releases and writes without a
+matched undo still obstruct recompute. Diagnostics retain the originating
+input-write coordinate. The original contiguous and independent
+interleavings remain supported.
+
+The three review source programs were committed verbatim in `eeefd06`
+before production changes. At `ed5b9df`,
+`timeout 60 python3 -B -m unittest discover -s tests -p test_schedule.py -k test_review_ -v`
+passed the independent-row and carrier-read witnesses and failed the
+restored-input witness at `entry:4 (x)`. All three pass after the repair.
+The restored witness has two original CXs and two input Xs with three live
+wires, then five replacement CXs with four: gates/time 9, peak 4, area
+`4*3+5*4=32`.
+
+The generated family has 144 programs: X or controlled-X input changes,
+with or without undo, interleaved with the remaining inverse and an
+independent X, input read, carrier read or another input write. A separate
+scalar interpreter enumerates all eight input assignments. Its oracle
+compares source and proposed recompute outputs, verifies clean scratch and
+restored inputs, and observes input values at reads. It imports no estimator
+version or obstruction logic. It classifies 26 programs as admissible and
+118 as unsafe. Every case is checked in forward and raw-inverse traversal
+(288 subcases); accepted cases also replay actual Ledger operands and
+controls and assert every scratch release is zero. In-memory mutation of
+only the predicate makes the final generated test fail 52 positive subcases
+with the baseline guard, and 118 negative subcases with the guard removed.
+
+Verification at that implementation, in the headless environment below:
+
+- `timeout 900 cargo test -j3 -- --test-threads=4`: 245 Python tests (75 object, 128 accounting, 16 selector, 26 other) and four Rust wrappers passed, no skips; 44.66 s wall, 122,096 KiB peak RSS.
+- `BENNETT_ESTIMATE_BIN=$CARGO_TARGET_DIR/debug/bennett-estimate timeout 900 python3 -B -m unittest discover -s tests -v`: all 245 passed in 80.363 s, no skips. Both full runs include the existing ten complete-program resource comparisons against the gate-pinned VM; no topology agreement is claimed.
+- `timeout 90 python3 -B -m unittest discover -s tests -p test_schedule.py -k cleanup -v`: 12 passed; `timeout 60 python3 -B -m unittest discover -s tests -p test_schedule.py -k test_k8 -v`: two passed, all 16 fixture/direction subcases.
+- `timeout 30 python3 -I -B scripts/quality_ratchet.py`: unchanged baseline passes. Source/test cognitive mass is 6,361/342 against 6,377/344; maximum lengths remain 252/40 and wrappers 6/0. Function distributions pass; litter and process identifiers are empty. Operand-effect parsing, scalar execution and existing budget/ordinal assertions were separated into named phases without removing assertions.
+- `cargo fmt --check`, `timeout 60 cargo clippy --offline --locked -j3 --all-targets -- -D warnings`, `bash -n scripts/pre-push scripts/check scripts/install-hooks.sh`, and `git diff --check ed5b9df..HEAD`: passed.
+
+The full gate remains the orchestrator's responsibility. Earlier coverage
+and literal-inventory measurements below retain their original scope.
+
 ## Terminal cleanup dependency safety
 
 Verified on 2026-11-07 at implementation `9a4e7a8`, after the dependency
@@ -11,10 +55,10 @@ repair `ecc38f7`. ISA 0.9 §6.2/§6.4 and §11 K80/K81 at gate pin
 past disjoint rows. Checking only writes to the carrier had also admitted
 rows reading its partly restored value or changing a replay input.
 
-Terminal plans now retain complete read/write ranges. Recompute checks every
-non-owned row from the first replaced inverse to the release: it must neither
-read nor write the carrier or computed targets, nor write a computation
-input. Releasing an input changes its lifetime and also blocks replay.
+That implementation retained complete read/write ranges and rejected every
+non-owned row that read or wrote a carrier/target or wrote a computation
+input. The restored-history repair above replaces the blanket input-write
+ban; releasing an input still changes its lifetime and blocks replay.
 Explicit recompute fails before suppressing any inverse and names the
 non-disjoint source row; reverse remains available. The contiguous and both
 independent X placements retain their counts and source positions.
