@@ -5,13 +5,13 @@ from pathlib import Path
 import subprocess
 from decimal import Decimal
 from fractions import Fraction
+from pinned import sibling
 
 
 def run(root, estimator):
-    workspace=root.parent
-    vm=Path(os.environ.get("BENNETT_VM_BIN",workspace/"bennett-vm/target/debug/bennett-vm"))
+    vm=sibling(root,"bennett-vm")/"target/debug/bennett-vm"
     if not vm.is_file(): raise RuntimeError(f"required differential VM binary missing: {vm}")
-    fixture=workspace/"bennett-conformance/ladder/rung-3/fixtures/executor-control.bisa"
+    fixture=sibling(root,"bennett-conformance")/"ladder/rung-3/fixtures/executor-control.bisa"
     rows=[]
     for n in [0,1,3,7,255]:
         vm_result=subprocess.run([str(vm),"run-cc",str(fixture),"sum","--args",str(n)],capture_output=True,text=True,timeout=30,check=True)
@@ -29,7 +29,7 @@ def run(root, estimator):
             raise AssertionError(f"rung-3 failed-prefix step/time differential mismatch: {name}")
         (history if name in ["nested","impure"] else faults).append({"region":name,"status":actual["status"],"fault":actual["fault"],"steps":actual["steps"],"estimate_time":predicted["resources"]["time"],"match":True})
     native_fixture=root/"examples/native-pair-program.bisa"
-    target_path=workspace/"bennett-targets/targets/ideal-all-to-all.json"
+    target_path=sibling(root,"bennett-targets")/"targets/ideal-all-to-all.json"
     admitted=json.loads(subprocess.run([str(vm),"check",str(native_fixture)],capture_output=True,text=True,timeout=30,check=True).stdout)
     actual=json.loads(subprocess.run([str(vm),"run-program",str(native_fixture),"main","--target",str(target_path)],capture_output=True,text=True,timeout=30,check=True).stdout)
     predicted=json.loads(subprocess.run([str(estimator),str(native_fixture),"--target",str(target_path),"--region","pair"],capture_output=True,text=True,timeout=30,check=True).stdout)
@@ -74,11 +74,11 @@ def run(root, estimator):
         topology={"status":"unavailable","reason":probe.stderr.strip(),"forecasts":[program(name,status,topology_path,compare=False) for name,status in cases]}
     else:
         topology={"status":"matched","forecasts":[program(name,status,topology_path,actual=json.loads(probe.stdout) if i==0 else None) for i,(name,status) in enumerate(cases)]}
-    rung2=workspace/"bennett-conformance/ladder/rung-2"
+    rung2=sibling(root,"bennett-conformance")/"ladder/rung-2"
     if not (rung2/"fixtures/hashtable.c").is_file(): raise RuntimeError("rung-2 data corpus missing")
     objects=sorted([*rung2.rglob("*.bisa"),*rung2.rglob("*.bennett")])
     return {"native_action":native,"native_programs":programs,"topology":topology,"rung3":{"status":"matched","scope":"VM forward source instruction counts, including failed prefixes; nested time includes five source-derived reversed frames, not reported by run-cc steps; complete-program target ledger differentials are separate","rows":rows,"fault_rows":faults,"history_rows":history},
-            "rung2":{"status":"objects_available" if objects else "unavailable","objects":[str(p.relative_to(workspace)) for p in objects],"reason":"rung-2 currently publishes C/LLVM and blocked pipeline reports; no ISA object or gate/step count is present" if not objects else "new ISA artifacts require differential admission"}}
+            "rung2":{"status":"objects_available" if objects else "unavailable","objects":[str(p.relative_to(sibling(root,"bennett-conformance"))) for p in objects],"reason":"rung-2 currently publishes C/LLVM and blocked pipeline reports; no ISA object or gate/step count is present" if not objects else "new ISA artifacts require differential admission"}}
 
 
 if __name__=="__main__":

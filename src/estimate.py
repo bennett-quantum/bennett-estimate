@@ -11,6 +11,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from decimal import Decimal
+from enum import Enum, auto
 from fractions import Fraction as F
 from functools import lru_cache
 from pathlib import Path
@@ -22,6 +23,14 @@ if hasattr(sys,"set_int_max_str_digits"):
 
 class ContractError(ValueError):
     pass
+
+
+class BudgetConstraintError(ContractError):
+    """A well-formed tuple exceeds the reversible machine's budget bounds."""
+
+
+class _IndexFoldDeclined(Exception):
+    """A valid construction needs literal traversal instead of index folding."""
 
 
 def require(condition, message):
@@ -351,7 +360,16 @@ class Target:
             require(isinstance(values, list), "table must be array")
             for n in values: require(cls.number(n) >= 0, "negative table value")
         for gate in d["gates"]:
-            keys(gate, ["op", "classes", "controls", "epsilon", "cost"], ["params"], "gate")
+            keys(gate, ["op", "classes", "controls", "epsilon", "cost"], ["params", "realisation_model"], "gate")
+            if "realisation_model" in gate:
+                model = gate["realisation_model"]
+                require(isinstance(model, dict) and isinstance(model.get("version"), str), "K86: native model needs a version")
+                if model["version"] == "bennett.native-model/1":
+                    keys(model, ["version", "kind", "arity", "basis", "parameter_bindings", "control_models", "data", "operand_map"], context="native model")
+                    require(model["kind"] == "unitary", "K86: native model must identify a phase-bearing unitary")
+                # Model bytes bind target_hash. Resource estimation consumes
+                # costs, not matrices; numerical model obligations belong to
+                # the independent checker and are never claimed here.
             require(gate["op"] in GATES or gate["op"] == "mcx", "unknown gate")
             require(gate.get("params", []) == (["theta"] if gate["op"] in ["rx", "ry", "rz"] else []), "gate parameter arity")
             require(gate["classes"] and all(c == "*" or c in d["classes"] for c in gate["classes"]), "unknown gate class")
@@ -439,6 +457,12 @@ class Target:
     def epsilon_dependent(expr):
         if not isinstance(expr, dict): return False
         return expr.get("var") == "eps" or expr.get("op") == "log2inv_eps" or expr.get("index") == "eps_decade" or any(Target.epsilon_dependent(x) for x in expr.get("args", []))
+
+    def native_model_obligations(self):
+        """Cost reconstruction never establishes a realised-unitary claim."""
+        return [{"gate_entry": index, "version": gate["realisation_model"]["version"],
+                 "status": "unchecked" if gate["realisation_model"]["version"] == "bennett.native-model/1" else "unsupported-model"}
+                for index, gate in enumerate(self.doc["gates"]) if "realisation_model" in gate]
 
     @staticmethod
     def validate_expr(expr, bound, tables):
@@ -1063,16 +1087,16 @@ class Catalog:
             if isinstance(expr,str):
                 if expr==variable: return 1,0
                 if expr in env and isinstance(env[expr],int): return 0,env[expr]
-                raise ValueError("unknown affine parameter")
+                raise _IndexFoldDeclined("unknown affine parameter")
             op,*args=expr
-            if len(args)!=2: raise ValueError("arity")
+            if len(args)!=2: raise _IndexFoldDeclined("arity")
             a,b=affine(args[0]),affine(args[1])
             if op=="+": return a[0]+b[0],a[1]+b[1]
             if op=="-": return a[0]-b[0],a[1]-b[1]
             if op=="*" and not a[0]: return b[0]*a[1],b[1]*a[1]
             if op=="*" and not b[0]: return a[0]*b[1],a[1]*b[1]
             if a[0]==b[0]==0: return 0,scalar(expr,env)
-            raise ValueError("non-affine index")
+            raise _IndexFoldDeclined("non-affine index")
         def mentions(x):
             if isinstance(x,str): return x==variable or '"'+variable+'"' in x
             if isinstance(x,list): return any(mentions(v) for v in x)
@@ -1082,24 +1106,24 @@ class Catalog:
         def descriptors(actual):
             if isinstance(actual,list): return [v for a in actual for v in descriptors(a)]
             if isinstance(actual,Bundle):
-                if actual.width!=1: raise ValueError("bundle operand")
+                if actual.width!=1: raise _IndexFoldDeclined("bundle operand")
                 return [(actual.identity,0,actual.offset)]
-            if not isinstance(actual,str): raise ValueError("complex wire")
+            if not isinstance(actual,str): raise _IndexFoldDeclined("complex wire")
             m=re.fullmatch(r"([^\[]+)\[(.*)\]",actual)
             if not m:
                 bundles=wire(actual,env)
-                if sum(b.width for b in bundles)>3: raise ValueError("wide control bundle")
+                if sum(b.width for b in bundles)>3: raise _IndexFoldDeclined("wide control bundle")
                 return [(b.identity,0,b.offset+i) for b in bundles for i in range(b.width)]
             coefficient,constant=affine(loads(m[2]))
             if m[1] not in env:
-                if coefficient: raise ValueError("local indexed width")
+                if coefficient: raise _IndexFoldDeclined("local indexed width")
                 return [("local:"+m[1],0,constant)]
             bundles=wire(m[1],env)
-            if len(bundles)!=1: raise ValueError("nonhomogeneous bundle")
+            if len(bundles)!=1: raise _IndexFoldDeclined("nonhomogeneous bundle")
             b=bundles[0]
             low,high=sorted([coefficient*lo+constant,coefficient*(hi-1)+constant])
-            if not 0<=low<=high<b.width: raise ValueError("index range")
-            if coefficient and b.identity in control_ids: raise ValueError("control intersection varies")
+            if not 0<=low<=high<b.width: raise _IndexFoldDeclined("index range")
+            if coefficient and b.identity in control_ids: raise _IndexFoldDeclined("control intersection varies")
             return [(b.identity,coefficient,constant+b.offset)]
         def visit(x):
             if isinstance(x,list): return all(visit(n) for n in x)
@@ -1119,7 +1143,7 @@ class Catalog:
             return all(visit(v) for k,v in x.items() if k!="wires")
         try:
             return visit(nodes)
-        except (ValueError,TypeError,KeyError,ContractError):
+        except _IndexFoldDeclined:
             return False
 
     def leaf_address(self,carrier=False):
@@ -1415,6 +1439,41 @@ def known_opcode(op):
     return op in binary|predicates|classical|registers|action|lifted|GATES.keys()|{"qjump","qbranch","qjumpr"} or bool(re.fullmatch(r"(?:lift\.)?(?:const|zext|sext|trunc|load|store)\.i[1-9][0-9]*",op)) or bool(re.fullmatch(r"(?:ptrtoint|measure)\.i[1-9][0-9]*",op))
 
 
+class ClassicalKind(Enum):
+    ARITHMETIC = auto()
+    REGISTER = auto()
+    QUANTUM = auto()
+    BRANCH = auto()
+    RETURN = auto()
+    FAULT = auto()
+    CALL = auto()
+    UNCALL = auto()
+    ALLOCATE = auto()
+    FREE = auto()
+    MEMORY = auto()
+    MINT = auto()
+    MEASURE = auto()
+    EFFECT = auto()
+    OTHER = auto()
+
+
+# ISA §3.3/§7 classical operation families. Widths remain in the raw opcode;
+# source construction and canonical object hashes retain the original spelling.
+CLASSICAL_KINDS = {
+    **dict.fromkeys(["add", "sub", "mul", "and", "or", "xor", "shl", "lshr", "ashr",
+                     "udiv", "urem", "sdiv", "srem", "inttoptr", "select"], ClassicalKind.ARITHMETIC),
+    **dict.fromkeys(["qreg.new", "qreg.free", "qreg.slice", "qreg.concat", "qreg.width",
+                     "qreg.id", "qreg.from_id"], ClassicalKind.REGISTER),
+    **dict.fromkeys(["action_call", "oracle_call", "adj", "ctl"], ClassicalKind.QUANTUM),
+    "br": ClassicalKind.BRANCH, "ret": ClassicalKind.RETURN,
+    "trap": ClassicalKind.FAULT, "fault": ClassicalKind.FAULT,
+    "call": ClassicalKind.CALL, "uncall": ClassicalKind.UNCALL,
+    "alloc": ClassicalKind.ALLOCATE, "free": ClassicalKind.FREE,
+    "budget.mint": ClassicalKind.MINT, "measure": ClassicalKind.MEASURE,
+    "effect": ClassicalKind.EFFECT,
+}
+
+
 @dataclass
 class Instruction:
     op: str
@@ -1424,6 +1483,19 @@ class Instruction:
     otherwise: list = field(default_factory=list)
     block: str = ""
     ordinal: int = 0
+    classical_kind: ClassicalKind = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self.op.startswith(("const.i", "icmp.", "zext.i", "sext.i", "trunc.i", "ptrtoint.i")):
+            self.classical_kind = ClassicalKind.ARITHMETIC
+        elif self.op.startswith(("load.i", "store.i")):
+            self.classical_kind = ClassicalKind.MEMORY
+        elif self.op.startswith("measure.i"):
+            self.classical_kind = ClassicalKind.MEASURE
+        else:
+            # OTHER is still a source opcode; the classical executor rejects it
+            # explicitly if it is reached, rather than emitting an exact cost.
+            self.classical_kind = CLASSICAL_KINDS.get(self.op, ClassicalKind.OTHER)
 
 
 @dataclass
@@ -1975,9 +2047,11 @@ def validate_budget(budget, obj):
     require(all(v<1<<64 for v in values),"§5.4/§10: budget component exceeds uint64")
     layout = obj.sections.get("layout")
     if layout is None:
-        require(values[1:] == [0,0,0], "§5.4: memoryless budget requires heap=stack=depth=0")
+        if values[1:] != [0,0,0]:
+            raise BudgetConstraintError("§5.4: memoryless budget requires heap=stack=depth=0")
     else:
-        require(values[1] <= integer(layout["heap_limit_max"],0) and values[2] <= 1 << integer(layout["S_cells"],0), "§5.4: budget exceeds layout")
+        if not (values[1] <= integer(layout["heap_limit_max"],0) and values[2] <= 1 << integer(layout["S_cells"],0)):
+            raise BudgetConstraintError("§5.4: budget exceeds layout")
         # Dc is derived from depth_limit, not from S_cells (§3.7).
     return values
 
@@ -2535,6 +2609,657 @@ class Admission:
     def interface(self,slot,b,vertices=None):pass
 
 
+@dataclass(frozen=True)
+class MintedToken:
+    identity: int
+    budget: tuple
+
+@dataclass(frozen=True)
+class HostToken:
+    identity: int
+    budget: tuple
+
+@dataclass(frozen=True)
+class RegisterRef:
+    identity: int
+
+@dataclass(frozen=True)
+class RegisterId:
+    identity: int
+
+class ClassicalMachine:
+    """Resolved classical execution with explicit lifetime and history state."""
+
+    def __init__(self, source, fn, args, token_aliases=None):
+        self.source = source
+        self.function = fn
+        parsed = resolved_arguments([ty for n, ty, r in fn.groups[0]], args, self.source.obj)
+        self.token_types = (MintedToken, HostToken)
+        self.registers = {}
+        self.physical = {}
+        self.placements = {}
+        self.register_states = WireVersions()
+        self.quantum_occurrences = []
+        self.next_register = 0
+        self.initial = {}
+        labels = iter(token_aliases or [])
+        for (n, ty, r), value in zip(fn.groups[0], parsed):
+            self.initial[n] = (value, type_width(ty, self.source.obj.ptr)) if ty != 'token' else (HostToken(next(labels), tuple(value)) if token_aliases is not None else list(value), 0)
+        self.memory, self.allocations = ({}, {})
+        self.clock = 0
+        self.layout = self.source.obj.sections.get('layout', {})
+        image = bytes.fromhex(self.source.obj.sections.get('data', {}).get(self.layout.get('block_image'), ''))
+        self.blocks = {sector: tuple(image[sector * 512:(sector + 1) * 512]) for sector in range(len(image) // 512)}
+        self.bump = integer(self.layout.get('heap_base', 0), 0)
+        for n, g in self.layout.get('globals', {}).items():
+            base = integer(g['base'], 0)
+            image = bytes.fromhex(self.source.obj.sections['data'][g['image']])
+            self.allocations[base] = (len(image), True)
+            self.memory.update({base + i: b for i, b in enumerate(image)})
+        self.atop = len(self.allocations)
+        self.history = []
+        self.segments = []
+        self.version_serial = 0
+        self.reversed_steps = 0
+        self.fault_reason = None
+
+    def create(self, parts, parent=None):
+        self.next_register += 1
+        self.registers[self.next_register] = {'parts': tuple(parts), 'state': 'live', 'parent': parent}
+        return (RegisterRef(self.next_register), 'qreg')
+
+    def register_snapshot(self):
+        return ({identity: dict(record) for identity, record in self.registers.items()}, dict(self.physical), dict(self.register_states.ranges), dict(self.placements))
+
+    def restore_registers(self, snapshot):
+        old_registers, old_physical, old_states, old_placements = snapshot
+        profile = Profile()
+        for identity in self.physical.keys() - old_physical.keys():
+            b = self.physical[identity]
+            profile = profile.then(space_profile(b.cls, 'clean', -b.width))
+        for identity in old_physical.keys() - self.physical.keys():
+            b = old_physical[identity]
+            profile = profile.then(space_profile(b.cls, 'clean', b.width))
+        self.registers.clear()
+        self.registers.update({identity: dict(record) for identity, record in old_registers.items()})
+        self.physical.clear()
+        self.physical.update(old_physical)
+        self.register_states.ranges.clear()
+        self.register_states.ranges.update(old_states)
+        self.placements.clear()
+        self.placements.update(old_placements)
+        return profile
+
+    def register_width(self, record):
+        return sum((part.width for part in record['parts']))
+
+    def overlaps(self, a, b):
+        return any((x.identity == y.identity and x.offset < y.offset + y.width and (y.offset < x.offset + x.width) for x in a for y in b))
+
+    def transfer(self, ty, value):
+        if ty.startswith('qreg['):
+            if value[1] != 'qreg':
+                return False
+            record = self.registers.get(value[0].identity)
+            if record is None:
+                return False
+            expected = ty[5:-1]
+            return expected == '*' or self.register_width(record) == int(expected)
+        return value[1] != 'qreg'
+
+    def identity_body(self, function):
+        if self.source.empty_cleanups(function) == {(i.block, i.ordinal) for i in function.code}:
+            return True
+        stack = []
+        for row in function.code:
+            op, actual = (row.op, tuple(row.args))
+            inverse = False
+            self_inverse = False
+            if op == 'adj':
+                op, actual = (actual[0], actual[1:])
+                inverse = True
+            if op in GATES and op not in ['rx', 'ry', 'rz']:
+                opposite = ADJOINT.get(op, op)
+                canonical = min(op, opposite)
+                inverse ^= op != canonical
+                self_inverse = op == opposite
+                op = canonical
+            elif op == 'action_call':
+                child = self.source.obj.functions[actual[0].removeprefix('@')]
+                if self.identity_body(child):
+                    continue
+            else:
+                return False
+            key = (op, actual)
+            if stack and stack[-1][0] == key and (self_inverse or stack[-1][1] != inverse):
+                stack.pop()
+            else:
+                stack.append((key, inverse))
+        return not stack
+
+    def equal_values(self, left, right):
+        if len(left) != len(right):
+            return False
+        for (x, wx), (y, wy) in zip(left, right):
+            if wx != wy:
+                return False
+            if wx == 0 and isinstance(x, list) and isinstance(y, list) and (x == y) and (x is not y):
+                raise ContractError('EST-CONTEXT-03: token identity aliasing is absent from tuple-only root arguments; supply token_aliases (K91) or an explicit conditional step bound')
+            if isinstance(x, RegisterId) != isinstance(y, RegisterId):
+                require(x == 0 or y == 0, 'opaque register id boundary comparison needs explicit binding evidence')
+            if x != y:
+                return False
+        return True
+
+    def valid_token(self, value):
+        return not isinstance(value, MintedToken) or self.history[value.identity]['active']
+
+    def quantum_region(self, name, values, budget, bindings, controls, adjoint=False, raw_inverse=False, identities=None):
+        if 'topology' not in self.source.target.doc:
+            return self.source.region(name, values, budget, bindings, controls, adjoint, raw_inverse=raw_inverse, token_context=identities)
+        prior = self.source.catalog
+        catalog = Catalog(prior.text, self.source.target)
+        request = {'closure_hash': self.source.obj.identities(closure=True)[name], 'target_hash': self.source.target.hash, 'region': name, 'variant': 'forward', 'inherited_controls': len(set(((b[0], b[1]) for b in controls))), 'budget': budget, 'params_hash': digest(jcs(values)), 'epsilon': 0, 'expansion': {'name': 'ref', 'version': '0.9', 'hash': catalog.hash}, 'scheduler': {'name': 'bennett-estimate-default', 'version': '0.1.0'}}
+        if identities is not None:
+            request['token_aliases'] = canonical_token_aliases(identities)
+        ledger = Ledger(self.source.target, Schedule({'bindings': request, 'entries': []}, self.source.obj, name))
+        catalog.ledger = ledger
+        catalog.prebound_interfaces = True
+        baseline = {}
+        for b in self.physical.values():
+            ledger._register(b, 0, b.cls, list(self.placements[b.identity]), slot='register:' + b.identity)
+            baseline[b.cls] = baseline.get(b.cls, 0) + b.width
+        self.source.catalog = catalog
+        try:
+            profile = self.source.region(name, values, budget, bindings, controls, adjoint, raw_inverse=raw_inverse, token_context=identities)
+            require(ledger.finish() == profile.resources(self.source.target, baseline), 'CC/R default topology ledger/profile resource mismatch')
+            return profile
+        finally:
+            prior.visits += catalog.visits
+            self.source.catalog = prior
+
+    def execute(self, function, values):
+        env = dict(values)
+        versions = {n: 0 for n in env}
+
+        def put(n, value):
+            self.version_serial += 1
+            env[n] = value
+            versions[n] = self.version_serial
+        block = next(iter(function.blocks))
+        p, steps = (Profile(), 0)
+
+        def get(n):
+            if n in env:
+                return env[n]
+            if re.fullmatch('-?(0|[1-9][0-9]*)', n):
+                return (int(n), self.source.obj.ptr)
+            raise ContractError(f'classical value has no current instance: {n}')
+
+        def register(n, view=False):
+            value = get(n)
+            if value[1] != 'qreg':
+                return None
+            record = self.registers.get(value[0].identity)
+            if record is None:
+                return None
+            if record['state'] != 'live' or (record['parent'] is not None and (not view)):
+                return None
+            return record
+
+        def unsigned64(n, literal_minimum=0):
+            if n.isdigit():
+                return integer(n, literal_minimum)
+            value, w = get(n)
+            require(w == 64, '§3.3: register size/index operand requires i64')
+            return value
+
+        def jump(label):
+            m = re.fullmatch('\\^([^ (]+)\\((.*?)\\)', label)
+            require(m and m[1] in function.blocks, 'invalid branch label')
+            formals = function.blocks[m[1]][0]
+            actuals = m[2].split(', ') if m[2] else []
+            require(len(formals) == len(actuals), 'branch argument arity')
+            resolved = [get(a) for a in actuals]
+            if not all((self.transfer(ty, value) for (n, ty, r), value in zip(formals, resolved))):
+                return None
+            for (n, ty, r), value in zip(formals, resolved):
+                put(n, value)
+            return m[1]
+        while True:
+            code = function.blocks[block][1]
+            jumped = False
+            for inst in code:
+                op, a = (inst.op, inst.args)
+                pure = inst.classical_kind in {ClassicalKind.BRANCH, ClassicalKind.ARITHMETIC} or op in ['qreg.width', 'qreg.id', 'qreg.from_id'] or op.startswith('load.i')
+                frame_index = len(self.history)
+                self.history.append({'active': True, 'pure': pure, 'marker': op == 'uncall'})
+                if op in ['qreg.new', 'qreg.free', 'qreg.slice', 'qreg.concat', 'action_call', 'oracle_call', 'adj', 'ctl']:
+                    self.history[frame_index]['registers'] = self.register_snapshot()
+                p = p.then(Profile(time=rational(self.source.target.doc['capabilities']['classical_step_time'])))
+                steps += 1
+                result = None
+                match inst.classical_kind:
+                    case ClassicalKind.ARITHMETIC:
+                        result, failed = self.arithmetic(inst, get)
+                        if failed:
+                            return (p, steps, [], True)
+                    case ClassicalKind.BRANCH:
+                        block = jump(a[0] if len(a) == 1 else a[1] if get(a[0])[0] else a[2])
+                        jumped = True
+                        break
+                    case ClassicalKind.RETURN:
+                        results = [get(n) for n in a]
+                        if not all((self.transfer(ty, value) for (n, ty, r), value in zip(function.groups[1], results))):
+                            return (p, steps, [], True)
+                        return (p, steps, results, False)
+                    case ClassicalKind.FAULT:
+                        return (p, steps, [], True)
+                    case ClassicalKind.CALL:
+                        callee = self.source.obj.functions[a[0].removeprefix('@')]
+                        params = callee.groups[0]
+                        require(len(params) == len(a) - 1, 'call argument arity')
+                        actuals = [get(actual) for actual in a[1:]]
+                        if not all((self.transfer(ty, value) for (n, ty, r), value in zip(params, actuals))):
+                            return (p, steps, [], True)
+                        before = (dict(self.memory), dict(self.allocations), self.bump, self.clock, self.atop, dict(self.blocks))
+                        before_registers = self.register_snapshot()
+                        previous = {n: (env.get(n), versions.get(n)) for n in inst.lhs}
+                        cp, cs, results, failed = self.execute(callee, {n: value for (n, ty, r), value in zip(params, actuals)})
+                        p = p.then(cp)
+                        steps += cs
+                        if failed:
+                            return (p, steps, [], True)
+                        require(len(results) == len(inst.lhs), 'call result arity')
+                        for n, value in zip(inst.lhs, results):
+                            put(n, value)
+                        self.segments.append({'name': callee.name, 'args': actuals, 'results': results, 'start': frame_index, 'end': len(self.history), 'active': True, 'before': before, 'before_registers': before_registers, 'env': env, 'versions': versions, 'previous': previous, 'produced': {n: versions[n] for n in inst.lhs}})
+                        continue
+                    case ClassicalKind.UNCALL:
+                        require(len(a) == 3, 'uncall needs argument/result lists')
+                        pending = [s for s in self.segments if s['active']]
+                        if not pending:
+                            return (p, steps, [], True)
+                        segment = max(pending, key=lambda s: s['end'])
+                        arguments = [get(n) for n in list_operand(a[1])]
+                        results = [get(n) for n in list_operand(a[2])]
+                        if segment['name'] != a[0].removeprefix('@') or any((f.get('measured', False) for f in self.history[segment['start']:segment['end']])) or any((f['active'] and (not f['pure']) and (not f['marker']) for f in self.history[segment['end']:frame_index])) or (not self.equal_values(segment['args'], arguments)) or (not self.equal_values(segment['results'], results)):
+                            return (p, steps, [], True)
+                        for frame in reversed(self.history[segment['start']:segment['end']]):
+                            if not frame['active'] or frame['marker']:
+                                continue
+                            p = p.then(Profile(time=rational(self.source.target.doc['capabilities']['classical_step_time'])))
+                            self.reversed_steps += 1
+                            if 'inverse' in frame:
+                                p = p.then(frame['inverse']())
+                            if 'registers' in frame:
+                                p = p.then(self.restore_registers(frame['registers']))
+                            frame['active'] = False
+                        p = p.then(self.restore_registers(segment['before_registers']))
+                        old_memory, old_allocations, self.bump, self.clock, self.atop, old_blocks = segment['before']
+                        self.memory.clear()
+                        self.memory.update(old_memory)
+                        self.allocations.clear()
+                        self.allocations.update(old_allocations)
+                        self.blocks.clear()
+                        self.blocks.update(old_blocks)
+                        for n, version in segment['produced'].items():
+                            if segment['versions'].get(n) != version:
+                                continue
+                            value, prior_version = segment['previous'][n]
+                            if prior_version is None:
+                                segment['env'].pop(n, None)
+                                segment['versions'].pop(n, None)
+                            else:
+                                segment['env'][n] = value
+                                segment['versions'][n] = prior_version
+                        for child in self.segments:
+                            if segment['start'] <= child['start'] and child['end'] <= segment['end']:
+                                child['active'] = False
+                    case ClassicalKind.ALLOCATE:
+                        n = get(a[0])[0]
+                        base = self.bump
+                        self.bump += max(1, n)
+                        if self.bump > integer(self.layout.get('heap_base', 0)) + integer(self.layout.get('heap_limit_max', 0)) or self.atop >= 1 << integer(self.layout.get('A_tab', 0)):
+                            return (p, steps, [], True)
+                        self.allocations[base] = (n, False)
+                        self.atop += 1
+                        result = (base, self.source.obj.ptr)
+                    case ClassicalKind.FREE:
+                        base = get(a[0])[0]
+                        if base not in self.allocations or self.allocations[base][1]:
+                            return (p, steps, [], True)
+                        del self.allocations[base]
+                    case ClassicalKind.MEMORY:
+                        width = int(op.split('.i')[-1])
+                        address = get(a[0])[0]
+                        size = width // 8
+                        if not any((base <= address and address + size <= base + n for base, (n, pinned) in self.allocations.items())):
+                            return (p, steps, [], True)
+                        if op.startswith('load'):
+                            require(all((self.memory.get(address + i, 0) is not None for i in range(size))), 'cost control depends on unresolved effect/measurement data; a path bound is required')
+                            content = [self.memory.get(address + i, 0) for i in range(size)]
+                            if any((isinstance(byte, tuple) for byte in content)):
+                                require(size == 8 and all((byte == (content[0][0], i) for i, byte in enumerate(content))) and isinstance(content[0][0], RegisterId), 'opaque register id partial load needs explicit binding evidence')
+                                result = (content[0][0], width)
+                            else:
+                                result = (sum((byte << 8 * i for i, byte in enumerate(content))), width)
+                        else:
+                            value = get(a[1])[0]
+                            if isinstance(value, RegisterId):
+                                require(size == 8, 'opaque register id partial store needs explicit binding evidence')
+                                self.memory.update({address + i: (value, i) for i in range(size)})
+                            else:
+                                self.memory.update({address + i: value >> 8 * i & 255 for i in range(size)})
+                    case ClassicalKind.MINT:
+                        require(len(a) == 5 and a[0].startswith('@'), 'budget.mint needs oracle and four i64 components')
+                        name = a[0][1:]
+                        require(name in self.source.obj.functions and self.source.obj.functions[name].kind == 'oracle', 'budget.mint requires linked oracle')
+                        components = [get(n) for n in a[1:]]
+                        require(all((width == 64 for value, width in components)), 'budget.mint components must be i64')
+                        token = [str(value) for value, width in components]
+                        try:
+                            validate_budget(token, self.source.obj)
+                        except BudgetConstraintError as error:
+                            self.fault_reason = str(error)
+                            return (p, steps, [], True)
+                        result = (MintedToken(frame_index, tuple(token)), 0)
+                    case ClassicalKind.REGISTER:
+                        change, result, failed = self.register_operation(inst, get, register, unsigned64)
+                        p = p.then(change)
+                        if failed:
+                            return (p, steps, [], True)
+                    case ClassicalKind.QUANTUM:
+                        change, failed = self.quantum_call(inst, get, register, frame_index)
+                        p = p.then(change)
+                        if failed:
+                            return (p, steps, [], True)
+                    case ClassicalKind.MEASURE:
+                        record = register(a[0])
+                        if record is None:
+                            return (p, steps, [], True)
+                        width = self.register_width(record)
+                        measured = width if op == 'measure' else integer(op[9:], 1)
+                        require(1 <= measured <= 128, '§3.3: measurement width must be in 1..128')
+                        if measured != width:
+                            return (p, steps, [], True)
+                        require(all((clean for identity, lo, hi, version, clean in self.register_states.capture(record['parts']))), 'measurement-dependent path/cleanliness evidence remains pending; no exact estimate emitted')
+                        for b in record['parts']:
+                            require(b.identity in self.physical, 'measured allocation identity is not live')
+                            del self.physical[b.identity]
+                            del self.register_states.ranges[b.identity]
+                            self.placements.pop(b.identity, None)
+                            p = p.then(space_profile(b.cls, 'clean', -b.width))
+                        record['state'] = 'consumed'
+                        self.history[frame_index]['measured'] = True
+                        result = (0, measured)
+                    case ClassicalKind.EFFECT:
+                        dev = a[0]
+                        if dev not in ['clock.read', 'entropy.read', 'console.write', 'block.read', 'block.write']:
+                            return (p, steps, [], True)
+                        ptr = get(a[2] if dev.startswith('block.') else a[1])[0]
+                        size = 8 if dev == 'clock.read' else get(a[2])[0] if dev in ['entropy.read', 'console.write'] else 512
+                        if not any((base <= ptr and ptr + size <= base + n for base, (n, _) in self.allocations.items())):
+                            return (p, steps, [], True)
+                        if dev == 'console.write':
+                            continue
+                        if dev == 'clock.read':
+                            self.memory.update({ptr + i: self.clock >> 8 * i & 255 for i in range(8)})
+                            self.clock = (self.clock + 1) % (1 << 64)
+                        elif dev in ['block.read', 'block.write']:
+                            sector, sector_width = get(a[1])
+                            require(sector_width == 64, '§7.3: block sector requires i64')
+                            require(isinstance(sector, int), 'opaque register id cannot resolve a block-sector address')
+                            if dev == 'block.read':
+                                self.memory.update({ptr + i: byte for i, byte in enumerate(self.blocks.get(sector, (0,) * 512))})
+                            else:
+                                self.blocks[sector] = tuple((self.memory.get(ptr + i, 0) for i in range(512)))
+                        elif dev == 'entropy.read' and size == 0:
+                            continue
+                        else:
+                            raise ContractError(f'exact classical effect-state binding pending: {dev}; use an explicit conditional step bound')
+                    case _:
+                        raise ContractError(f'classical source binding not implemented: {op}; no exact estimate emitted')
+                if result is not None:
+                    require(len(inst.lhs) == 1, 'classical result arity')
+                    put(inst.lhs[0], result)
+            require(jumped, 'classical block has no terminator')
+            if block is None:
+                return (p, steps, [], True)
+
+    def arithmetic(self, inst, get):
+        op, a = (inst.op, inst.args)
+        result = None
+        if op.startswith('const.i'):
+            width = integer(op[7:], 1)
+            result = (integer(a[0]) % (1 << width), width)
+        elif op in ['add', 'sub', 'mul', 'and', 'or', 'xor', 'shl', 'lshr', 'ashr', 'udiv', 'urem', 'sdiv', 'srem'] or op.startswith('icmp.'):
+            (x, w), (y, v) = (get(a[0]), get(a[1]))
+            require(w == v, 'classical operand width mismatch')
+            if isinstance(x, RegisterId) or isinstance(y, RegisterId):
+                require(op in ['icmp.eq', 'icmp.ne'] and (isinstance(x, RegisterId) and isinstance(y, RegisterId) or x == 0 or y == 0), 'opaque register id bits cannot select an exact classical path')
+                result = (int(x == y if op == 'icmp.eq' else x != y), 1)
+                require(len(inst.lhs) == 1, 'classical result arity')
+                return (result, False)
+
+            def signed(x):
+                return x - (1 << w) if x & 1 << w - 1 else x
+            if op.startswith('icmp.'):
+                pred = op[5:]
+                if pred.startswith('s'):
+                    x, y = (signed(x), signed(y))
+                value = {'eq': lambda: x == y, 'ne': lambda: x != y, 'ult': lambda: x < y, 'ule': lambda: x <= y, 'slt': lambda: x < y, 'sle': lambda: x <= y}[pred]()
+                result = (int(value), 1)
+            else:
+                if op in ['udiv', 'urem', 'sdiv', 'srem'] and (y == 0 or (op.startswith('s') and signed(x) == -(1 << w - 1) and (signed(y) == -1))):
+                    return (None, True)
+                if op in ['sdiv', 'srem']:
+                    sx, sy = (signed(x), signed(y))
+                    q = abs(sx) // abs(sy) * (-1 if (sx < 0) != (sy < 0) else 1)
+                    value = q if op == 'sdiv' else sx - q * sy
+                else:
+                    value = {'add': lambda: x + y, 'sub': lambda: x - y, 'mul': lambda: x * y, 'and': lambda: x & y, 'or': lambda: x | y, 'xor': lambda: x ^ y, 'shl': lambda: x << y if y < w else 0, 'lshr': lambda: x >> y if y < w else 0, 'ashr': lambda: signed(x) >> y if y < w else 0, 'udiv': lambda: x // y, 'urem': lambda: x % y}[op]()
+                result = (value % (1 << w), w)
+        elif op.startswith(('zext.i', 'sext.i', 'trunc.i', 'ptrtoint.i')) or op == 'inttoptr':
+            x, w = get(a[0])
+            width = self.source.obj.ptr if op == 'inttoptr' else int(op.split('.i')[-1])
+            require(not isinstance(x, RegisterId), 'opaque register id bit conversion needs explicit binding evidence')
+            if op.startswith('sext') and x & 1 << w - 1:
+                x -= 1 << w
+            result = (x % (1 << width), width)
+        elif op == 'select':
+            result = get(a[1] if get(a[0])[0] else a[2])
+        else:
+            raise ContractError('unexpected arithmetic opcode: ' + op)
+        return (result, False)
+
+    def register_operation(self, inst, get, register, unsigned64):
+        op, a = (inst.op, inst.args)
+        result = None
+        p = Profile()
+        if op == 'qreg.new':
+            cls, n = a
+            size = unsigned64(n, 1)
+            choices = sorted(self.source.target.doc['classes'], key=lambda name: name.encode('utf-16-be')) if cls == 'any' else [cls]
+            require(all((c in self.source.target.doc['classes'] for c in choices)), 'unknown register class')
+
+            def available(c):
+                used = sum((b.width for b in self.physical.values() if b.cls == c))
+                capacity = self.source.target.doc['classes'][c]['capacity']
+                if 'topology' in self.source.target.doc:
+                    vertices = sum((v['class'] == c for v in self.source.target.doc['topology']['vertices']))
+                    capacity = vertices if capacity == 'unbounded' else min(capacity, vertices)
+                return capacity == 'unbounded' or used + size <= capacity
+            selected = next((c for c in choices if available(c)), None)
+            if selected is None:
+                return (p, None, True)
+            parts = []
+            if size:
+                b = self.source.fresh('register', size, selected)
+                parts = [b]
+                self.physical[b.identity] = b
+                if 'topology' in self.source.target.doc:
+                    occupied = {v for vertices in self.placements.values() for v in vertices}
+                    self.placements[b.identity] = tuple((i for i, v in enumerate(self.source.target.doc['topology']['vertices']) if v['class'] == selected and i not in occupied))[:size]
+                    require(len(self.placements[b.identity]) == size, 'register topology capacity/placement mismatch')
+                self.register_states.acquire(b)
+                p = p.then(space_profile(selected, 'clean', size))
+            result = self.create(parts)
+        elif op in ['qreg.width', 'qreg.id', 'qreg.free', 'qreg.slice', 'qreg.concat']:
+            record = register(a[0])
+            if record is None:
+                return (p, None, True)
+            if op == 'qreg.width':
+                result = (self.register_width(record), 64)
+            elif op == 'qreg.id':
+                result = (RegisterId(get(a[0])[0].identity), 64)
+            elif op == 'qreg.free':
+                require(all((clean for identity, lo, hi, version, clean in self.register_states.capture(record['parts']))), 'register cleanliness needs source history evidence; no exact estimate emitted')
+                for b in record['parts']:
+                    require(b.identity in self.physical, 'register allocation identity is not live')
+                    del self.physical[b.identity]
+                    self.placements.pop(b.identity, None)
+                    del self.register_states.ranges[b.identity]
+                    p = p.then(space_profile(b.cls, 'clean', -b.width))
+                record['state'] = 'consumed'
+            elif op == 'qreg.slice':
+                lo, length = (unsigned64(a[1]), unsigned64(a[2], 1))
+                if lo + length > self.register_width(record):
+                    return (p, None, True)
+                parts = []
+                offset = 0
+                for b in record['parts']:
+                    begin, end = (max(lo, offset), min(lo + length, offset + b.width))
+                    if begin < end:
+                        parts.append(Bundle(b.identity, end - begin, b.cls, b.offset + begin - offset, b.state))
+                    offset += b.width
+                result = self.create(parts, get(a[0])[0].identity)
+                record['state'] = 'viewed'
+            else:
+                other = register(a[1])
+                if other is None or other is record:
+                    return (p, None, True)
+                result = self.create(record['parts'] + other['parts'])
+                record['state'] = other['state'] = 'consumed'
+        elif op == 'qreg.from_id':
+            identity, w = get(a[0])
+            require(w == 64, 'qreg.from_id requires i64')
+            require(isinstance(identity, RegisterId) or identity == 0, 'opaque register id lookup needs explicit binding evidence')
+            identity = identity.identity if isinstance(identity, RegisterId) else 0
+            record = self.registers.get(identity)
+            if record is None or record['state'] != 'live' or record['parent'] is not None:
+                return (p, None, True)
+            result = (RegisterRef(identity), 'qreg')
+        else:
+            raise ContractError('unexpected register_operation opcode: ' + op)
+        return (p, result, False)
+
+    def quantum_call(self, inst, get, register, frame_index):
+        op, a = (inst.op, inst.args)
+        p = Profile()
+        if op in ['action_call', 'oracle_call', 'adj', 'ctl']:
+            call_op, actual = (op, list(a))
+            controlled = []
+            control_records = []
+            source_adjoint = False
+            while call_op in ['ctl', 'adj']:
+                index = 1 if call_op == 'ctl' else 0
+                if index:
+                    control = register(actual[0], True)
+                    if control is None or self.register_width(control) != 1:
+                        return (p, True)
+                    controlled += control['parts']
+                    control_records.append((control, True))
+                else:
+                    source_adjoint = not source_adjoint
+                call_op, actual = (actual[index], actual[index + 1:])
+            require(call_op in ['action_call', 'oracle_call'], 'invalid CC/R region call')
+            child = self.source.obj.functions[actual[0].removeprefix('@')]
+            if call_op == 'action_call':
+                actual_groups = [list_operand(x) for x in actual[1:]]
+                tuple_ = ['0'] * 4
+            else:
+                token, token_width = get(actual[1])
+                require(token_width == 0, 'oracle invocation requires token')
+                if not self.valid_token(token):
+                    return (p, True)
+                tuple_ = list(token.budget) if isinstance(token, self.token_types) else list(token)
+                actual_groups = [list_operand(actual[2]), [actual[3]], [actual[4]], list_operand(actual[5]), list_operand(actual[6])]
+            groups = child.groups[:5] if child.kind == 'oracle' else child.groups[:4]
+            require(all((len(g) == len(v) for g, v in zip(groups, actual_groups))), 'region call argument arity')
+            interface = {}
+            records = list(control_records)
+            slots = []
+            encoded = []
+            for index, (group, actuals) in enumerate(zip(groups[:-1], actual_groups[:-1])):
+                group_readonly = index == 0 if child.kind == 'oracle' else index == 1
+                for (name, ty, role), argument in zip(group, actuals):
+                    record = register(argument, True)
+                    if record is None or self.register_width(record) != type_width(ty, self.source.obj.ptr):
+                        return (p, True)
+                    readonly = group_readonly or (ty.startswith('region[') and role == 'in')
+                    parts = record['parts']
+                    if any((self.overlaps(parts, prior) and (not (readonly and read)) for prior, read in slots)) or (not readonly and self.overlaps(parts, controlled)):
+                        return (p, True)
+                    slots.append((parts, readonly))
+                    records.append((record, readonly))
+                    interface[name] = list(parts)
+            for (name, ty, role), argument in zip(groups[-1], actual_groups[-1]):
+                value, w = get(argument)
+                if ty == 'token' and (w != 0 or not self.valid_token(value)):
+                    return (p, True)
+                encoded.append(list(value.budget) if isinstance(value, self.token_types) else value if ty in ['f64', 'token'] else str(value))
+            call_arguments = [get(argument) for argument in actual_groups[-1]]
+            if call_op == 'oracle_call':
+                call_arguments.append((token, token_width))
+            context_tokens = ([token] if call_op == 'oracle_call' else []) + [get(argument)[0] for (n, ty, r), argument in zip(groups[-1], actual_groups[-1]) if ty == 'token']
+            identities = tuple((('host' if isinstance(value, HostToken) else 'mint', value.identity) for value in context_tokens)) if all((isinstance(value, self.token_types) for value in context_tokens)) else None
+            controls = tuple((bit for b in controlled for bit in bits([b])))
+            candidate = self.source.obj.sections.get('schedule', {})
+            if candidate.get('entries') or 'interface_vertices' in candidate:
+                bound = candidate['bindings']
+                known = {'region': child.name, 'target_hash': self.source.target.hash, 'params_hash': digest(jcs(encoded)), 'inherited_controls': len(set(((bit[0], bit[1]) for bit in controls)))}
+                matches = all((integer(bound[key], 0) == value if key == 'inherited_controls' else bound.get(key) == value for key, value in known.items()))
+                matches = matches and [integer(n, 0) for n in bound['budget']] == [integer(n, 0) for n in tuple_] and (decimal_value(bound['epsilon']) == 0)
+                if matches:
+                    matches = bound['closure_hash'] == self.source.obj.identities(closure=True)[child.name]
+                require(not matches, 'CC/R nested quantum schedule replay remains pending for these invocation bindings')
+            cp = self.quantum_region(child.name, encoded, tuple_, interface, controls, source_adjoint, identities=identities)
+            p = p.then(cp)
+
+            def reverse_region(name=child.name, values=list(encoded), budget=list(tuple_), bindings=dict(interface), control_context=controls, adjoint=source_adjoint, identities=identities):
+                return self.quantum_region(name, values, budget, bindings, control_context, adjoint, raw_inverse=True, identities=identities)
+            self.history[frame_index]['inverse'] = reverse_region
+            identity = child.kind in ['action', 'perm_action'] and self.identity_body(child)
+            touched = [b for parts, _ in slots for b in parts] + controlled
+            written = [b for parts, read in slots if not read for b in parts]
+            if touched and (not identity):
+                state = self.register_states.capture(touched)
+                active_versions = {version for name, lo, hi, version, clean in state}
+                key = (call_op, child.name, tuple((tuple(((b.identity, b.offset, b.width) for b in parts)) for parts, _ in slots)), controls)
+                previous = self.quantum_occurrences[next(iter(active_versions)) - 1] if len(active_versions) == 1 and 0 not in active_versions else None
+                if previous is not None and previous['key'] == key and (call_op == 'oracle_call' or previous['adjoint'] != source_adjoint) and self.equal_values(previous['arguments'], call_arguments):
+                    self.register_states.restore(previous['states'])
+                else:
+                    self.quantum_occurrences.append({'key': key, 'arguments': call_arguments, 'adjoint': source_adjoint, 'states': state})
+                    self.register_states.assign(touched, len(self.quantum_occurrences))
+                    self.register_states.assign(written, len(self.quantum_occurrences), False)
+            for record, readonly in records:
+                if record['parent'] is not None:
+                    record['state'] = 'consumed'
+                    self.registers[record['parent']]['state'] = 'live'
+        else:
+            raise ContractError('unexpected quantum_call opcode: ' + op)
+        return (p, False)
+
+    def run(self):
+        p, steps, _, failed = self.execute(self.function, self.initial)
+        self.source.classical_status = 'FAILED' if failed else 'COMPLETED'
+        self.source.reversed_classical_steps = self.reversed_steps
+        self.source.classical_fault_reason = self.fault_reason
+        return (p, steps)
+
+
 class Source:
     def __init__(self, obj, target, catalog):
         self.obj, self.target, self.catalog = obj, target, catalog
@@ -2667,126 +3392,8 @@ class Source:
                 for node in before+after:self.catalog.source_metadata[id(node)]=(node,meta)
             prefix+=before;suffix=after+suffix
         pairs=self.oracle_pairs(fn,env,controls,adjoint)
-        partition=self.primitive_cleanup_partition(fn,env,controls) if not adjoint else None
-        body=self.action_nodes([i for _,code in fn.blocks.values() for i in code],env,regions,controls,adjoint=adjoint,oracle_pairs=pairs,empty_cleanups=self.empty_cleanups(fn),cleanup_partition=partition)
+        body=self.action_nodes([i for _,code in fn.blocks.values() for i in code],env,regions,controls,adjoint=adjoint,oracle_pairs=pairs)
         return prefix+body+suffix
-
-    def primitive_cleanup_partition(self,fn,env,controls):
-        """Flat permutation lifetimes; retain source occurrences, never gates.
-
-        The complete source partition still needs calls, cells, structured
-        visits, borrowed lifetimes and their window/proof obligations.
-        """
-        allowed={"qalloc","qfree","x","cx","ccx","mcx","swap","qxor","qexch"}
-        if fn.groups[2] or not any(i.op=="qfree" for i in fn.code) or not any(i.op not in ["qalloc","qfree"] for i in fn.code):return None
-        if any(i.op not in allowed or i.body or i.otherwise for i in fn.code):return None
-        scope=dict(env);versions=WireVersions();spans={}
-        initial=[b for group in fn.groups[:2] for n,ty,r in group for b in wire(n,scope)]
-        initial += [Bundle(identity,1,cls,index) for identity,index,cls in controls]
-        for b in initial:spans.setdefault(b.identity,[]).append((b.offset,b.offset+b.width))
-        for identity,parts in spans.items():
-            merged=[]
-            for lo,hi in sorted(parts):
-                if merged and lo<=merged[-1][1]:merged[-1]=(merged[-1][0],max(hi,merged[-1][1]))
-                else:merged.append((lo,hi))
-            versions.ranges[identity]=tuple((lo,hi,0,False) for lo,hi in merged)
-        def overlap(parts,b):return any(a.identity==b.identity and a.offset<b.offset+b.width and b.offset<a.offset+a.width for a in parts)
-        def geometry(parts):return tuple((b.identity,b.offset,b.width) for b in parts)
-        events={};history={};allocations={};owned=set();plans={};owners={};serial=0
-        for index,inst in enumerate(fn.code):
-            op,a=inst.op,inst.args
-            if op=="qalloc":
-                require(len(inst.lhs)==1 and len(a)==2,"qalloc result/operand arity")
-                name=inst.lhs[0];n=scope.get(a[1],int(a[1]) if a[1].isdigit() else None)
-                require(isinstance(n,int) and n>0,"invalid allocation width")
-                identity=f"partition:{fn.name}:{index}"
-                while identity in versions.ranges:identity+="!"
-                b=Bundle(identity,n,a[0]);scope[name]=b;versions.acquire(b)
-                allocations[identity]={"name":name,"width":n,"index":index}
-                continue
-            if op=="qfree":
-                require(len(a)==1,"qfree operand arity")
-                name=a[0];parts=wire(name,scope)
-                if len(parts)!=1 or parts[0].identity not in allocations:return None
-                b=parts[0];inverse=[]
-                for prior in range(index-1,allocations[b.identity]["index"],-1):
-                    row=events.get(prior)
-                    if row is None or not overlap(row["outputs"],b):continue
-                    if row["match"] is None:break
-                    if prior not in owned:inverse.append(prior)
-                inverse.sort();computation=sorted({events[i]["match"] for i in inverse})
-                targets={part.identity for i in computation for part in events[i]["outputs"]}|{b.identity}
-                local=all(identity in allocations and identity in versions.ranges for identity in targets)
-                clean=all(value for identity,lo,hi,version,value in versions.capture([b]))
-                contiguous=inverse==list(range(index-len(inverse),index))
-                early=not computation or local and all(allocations[identity]["index"]<computation[0] for identity in targets)
-                produced=set();entry_clean=True
-                for i in computation:
-                    row=events[i]
-                    for identity,lo,hi,version,value in row["before"]+row["inputs"]:
-                        if identity in targets and not value and version not in produced:entry_clean=False
-                    produced.add(row["version"])
-                target_specs=sorted((allocations[identity] for identity in targets),key=lambda t:t["index"]) if local else []
-                point=(inst.block,inst.ordinal)
-                plan={"point":point,"symbol":self.obj.symbol(fn.name)["interface_hash"],"function":fn.name,"release":name,"compute":[fn.code[i] for i in computation],"targets":target_specs,"available":local and clean and contiguous and early and entry_clean,"owned_points":[f"{fn.code[i].block}:{fn.code[i].ordinal}" for i in inverse]+[f"{inst.block}:{inst.ordinal}"],"choices":{},"recomputations":{}}
-                plans[point]=plan
-                for i in inverse:owners[(fn.code[i].block,fn.code[i].ordinal)]=plan;owned.add(i)
-                del versions.ranges[b.identity];del scope[name]
-                continue
-            if op in ["qxor","qexch"]:
-                require(len(a)==2,"wire operation arity")
-                left,right=wire(a[0],scope),wire(a[1],scope)
-                require(sum(b.width for b in left)==sum(b.width for b in right),"wire operation width mismatch")
-                outputs=left+right if op=="qexch" else right;reads=[] if op=="qexch" else left
-            else:
-                ws=wire([list_operand(n) if n.startswith("(") else n for n in a],scope)
-                count=sum(b.width for b in ws)
-                require(count>=1 if op=="mcx" else count==GATES[op],"gate arity/opcode")
-                if op=="swap":outputs=ws;reads=[]
-                else:
-                    outputs=[ws[-1].bit(ws[-1].width-1)]
-                    reads=ws[:-1]+([ws[-1].slice(0,ws[-1].width-1)] if ws[-1].width>1 else [])
-            if any(overlap(reads,b) for b in outputs):return None
-            reads=reads+[Bundle(identity,1,cls,offset) for identity,offset,cls in controls]
-            before=versions.capture(outputs);inputs=versions.capture(reads)
-            key=(op,geometry(outputs),geometry(reads));match=history.get((key,inputs,before))
-            if match is not None:versions.restore(events[match]["before"])
-            else:
-                serial+=1;versions.assign(outputs,serial,False)
-                history[(key,inputs,versions.capture(outputs))]=index
-            events[index]={"outputs":outputs,"before":before,"inputs":inputs,"match":match,"version":serial}
-        return plans,owners
-
-    def cleanup_choice(self,plan):
-        ledger=self.catalog.ledger
-        if ledger not in plan["choices"]:
-            point={"symbol":plan["symbol"],"point":f"{plan['point'][0]}:{plan['point'][1]}","iteration":[],"instance":[]}
-            address={"chain":metadata_counts([*self.catalog.call_edges,point]),"ordinal":0,"step":self.catalog.root_step,"phase":self.catalog.root_phase}
-            choice=(ledger.schedule.pick("cleanup",**address) if ledger is not None else None) or {"realisation":"reverse"}
-            if ledger is not None:ledger.cleanup_decisions.append({**address,**choice,"owned_points":plan["owned_points"]})
-            require(choice["realisation"]!="recompute" or plan["available"],"source cleanup-pair recompute binding remains pending for this carrier")
-            plan["choices"][ledger]=choice["realisation"]
-        return plan["choices"][ledger]
-
-    def primitive_recompute(self,plan,env,regions,controls,meta):
-        ledger=self.catalog.ledger
-        if ledger in plan["recomputations"]:return plan["recomputations"][ledger]
-        local=dict(env);names=[];destinations=[]
-        for target in plan["targets"]:
-            fresh=self.fresh("terminal_recompute",target["width"])
-            name=f"$terminal_fresh:{self.serial}";local[name]=fresh
-            local[target["name"]]=fresh;names.append(name);destinations.append((target,env[target["name"]]))
-        compute=self.action_nodes(plan["compute"],local,regions,controls,function_name=plan["function"])
-        uncompute=self.action_nodes(plan["compute"],local,regions,controls,function_name=plan["function"])
-        for node in compute+uncompute:self.catalog.source_metadata[id(node)]=(node,meta)
-        xor=[]
-        for (target,destination),name in zip(destinations,names):
-            actual=f"$terminal_original:{name}";local[actual]=destination
-            xor.append({"invoke":"bind.qxor","args":[target["width"],name,actual]})
-        release=f"$terminal_release:{self.serial}";local[release]=env[plan["release"]]
-        body=[*({"acquire":name} for name in names),*compute,*xor,{"inverse":True,"body":uncompute},*({"relinquish":name} for name in reversed(names)),{"relinquish":release}]
-        result=Captured(body,local,controls);plan["recomputations"][ledger]=result
-        return result
 
     @staticmethod
     def empty_cleanups(fn):
@@ -3269,468 +3876,6 @@ class Source:
         elif B:add("frames",self.fresh("frames",B*Q))
         return records
 
-    def classical(self, fn, args, token_aliases=None):
-        """Count a resolved classical control path; quantum inputs stay abstract.
-
-        Values are used only for classical control. There is no choice of a
-        quantum basis tuple, and no oracle is executed on such a tuple.
-        """
-        parsed = resolved_arguments([ty for n,ty,r in fn.groups[0]],args,self.obj)
-        @dataclass(frozen=True)
-        class MintedToken:
-            identity:int
-            budget:tuple
-        @dataclass(frozen=True)
-        class HostToken:
-            identity:int
-            budget:tuple
-        token_types=(MintedToken,HostToken)
-        @dataclass(frozen=True)
-        class RegisterRef:
-            identity:int
-        @dataclass(frozen=True)
-        class RegisterId:
-            identity:int
-        registers={};physical={};placements={};register_states=WireVersions();quantum_occurrences=[];next_register=0
-        def create(parts,parent=None):
-            nonlocal next_register
-            next_register+=1
-            registers[next_register]={"parts":tuple(parts),"state":"live","parent":parent}
-            return (RegisterRef(next_register),"qreg")
-        def register_snapshot():
-            return ({identity:dict(record) for identity,record in registers.items()},dict(physical),dict(register_states.ranges),dict(placements))
-        def restore_registers(snapshot):
-            old_registers,old_physical,old_states,old_placements=snapshot
-            profile=Profile()
-            for identity in physical.keys()-old_physical.keys():
-                b=physical[identity];profile=profile.then(space_profile(b.cls,"clean",-b.width))
-            for identity in old_physical.keys()-physical.keys():
-                b=old_physical[identity];profile=profile.then(space_profile(b.cls,"clean",b.width))
-            registers.clear();registers.update({identity:dict(record) for identity,record in old_registers.items()})
-            physical.clear();physical.update(old_physical)
-            register_states.ranges.clear();register_states.ranges.update(old_states)
-            placements.clear();placements.update(old_placements)
-            return profile
-        def register_width(record):return sum(part.width for part in record["parts"])
-        def overlaps(a,b):
-            return any(x.identity==y.identity and x.offset<y.offset+y.width and y.offset<x.offset+x.width for x in a for y in b)
-        def transfer(ty,value):
-            if ty.startswith("qreg["):
-                if value[1]!="qreg":return False
-                record=registers.get(value[0].identity)
-                if record is None:return False
-                expected=ty[5:-1]
-                return expected=="*" or register_width(record)==int(expected)
-            return value[1]!=("qreg")
-        def identity_body(function):
-            # A sufficient source-level identity proof, never a basis run or
-            # expanded gate list. Unrecognised constructions stay unknown.
-            if self.empty_cleanups(function)=={(i.block,i.ordinal) for i in function.code}:return True
-            stack=[]
-            for row in function.code:
-                op,actual=row.op,tuple(row.args)
-                inverse=False;self_inverse=False
-                if op=="adj":op,actual=actual[0],actual[1:];inverse=True
-                if op in GATES and op not in ["rx","ry","rz"]:
-                    opposite=ADJOINT.get(op,op);canonical=min(op,opposite)
-                    inverse^=op!=canonical;self_inverse=op==opposite;op=canonical
-                elif op=="action_call":
-                    child=self.obj.functions[actual[0].removeprefix("@")]
-                    if identity_body(child):continue
-                else:return False
-                key=(op,actual)
-                if stack and stack[-1][0]==key and (self_inverse or stack[-1][1]!=inverse):stack.pop()
-                else:stack.append((key,inverse))
-            return not stack
-        def equal_values(left,right):
-            if len(left)!=len(right):return False
-            for (x,wx),(y,wy) in zip(left,right):
-                if wx!=wy:return False
-                if wx==0 and isinstance(x,list) and isinstance(y,list) and x==y and x is not y:
-                    raise ContractError("EST-CONTEXT-03: token identity aliasing is absent from tuple-only root arguments; supply token_aliases (K91) or an explicit conditional step bound")
-                if isinstance(x,RegisterId) != isinstance(y,RegisterId):
-                    require(x==0 or y==0,"opaque register id boundary comparison needs explicit binding evidence")
-                if x!=y:return False
-            return True
-        initial={};labels=iter(token_aliases or [])
-        for (n,ty,r),value in zip(fn.groups[0],parsed):
-            initial[n]=(value,type_width(ty,self.obj.ptr)) if ty!="token" else (HostToken(next(labels),tuple(value)) if token_aliases is not None else list(value),0)
-        memory, allocations = {}, {}
-        clock=0
-        layout = self.obj.sections.get("layout",{})
-        image=bytes.fromhex(self.obj.sections.get("data",{}).get(layout.get("block_image"),""))
-        blocks={sector:tuple(image[sector*512:(sector+1)*512]) for sector in range(len(image)//512)}
-        bump = integer(layout.get("heap_base",0),0)
-        for n,g in layout.get("globals",{}).items():
-            base = integer(g["base"],0)
-            image = bytes.fromhex(self.obj.sections["data"][g["image"]])
-            allocations[base] = (len(image),True)
-            memory.update({base+i:b for i,b in enumerate(image)})
-        atop=len(allocations);history=[];segments=[];version_serial=0;reversed_steps=0
-        def valid_token(value):
-            return not isinstance(value,MintedToken) or history[value.identity]["active"]
-        def quantum_region(name,values,budget,bindings,controls,adjoint=False,raw_inverse=False,identities=None):
-            if "topology" not in self.target.doc:
-                return self.region(name,values,budget,bindings,controls,adjoint,raw_inverse=raw_inverse,token_context=identities)
-            prior=self.catalog
-            catalog=Catalog(prior.text,self.target)
-            request={"closure_hash":self.obj.identities(closure=True)[name],"target_hash":self.target.hash,"region":name,"variant":"forward","inherited_controls":len(set((b[0],b[1]) for b in controls)),"budget":budget,"params_hash":digest(jcs(values)),"epsilon":0,"expansion":{"name":"ref","version":"0.9","hash":catalog.hash},"scheduler":{"name":"bennett-estimate-default","version":"0.1.0"}}
-            if identities is not None:request["token_aliases"]=canonical_token_aliases(identities)
-            ledger=Ledger(self.target,Schedule({"bindings":request,"entries":[]},self.obj,name))
-            catalog.ledger=ledger;catalog.prebound_interfaces=True
-            baseline={}
-            # Reserve every live physical register, including registers that
-            # are not callee operands. Views refer to these same allocations.
-            for b in physical.values():
-                ledger._register(b,0,b.cls,list(placements[b.identity]),slot="register:"+b.identity)
-                baseline[b.cls]=baseline.get(b.cls,0)+b.width
-            self.catalog=catalog
-            try:
-                profile=self.region(name,values,budget,bindings,controls,adjoint,raw_inverse=raw_inverse,token_context=identities)
-                require(ledger.finish()==profile.resources(self.target,baseline),"CC/R default topology ledger/profile resource mismatch")
-                return profile
-            finally:
-                prior.visits+=catalog.visits
-                self.catalog=prior
-        def execute(function, values):
-            nonlocal bump,clock,atop,version_serial,reversed_steps
-            env = dict(values)
-            versions={n:0 for n in env}
-            def put(n,value):
-                nonlocal version_serial
-                version_serial+=1;env[n]=value;versions[n]=version_serial
-            block = next(iter(function.blocks))
-            p,steps = Profile(),0
-            def get(n):
-                if n in env: return env[n]
-                if re.fullmatch(r"-?(0|[1-9][0-9]*)",n): return (int(n),self.obj.ptr)
-                raise ContractError(f"classical value has no current instance: {n}")
-            def register(n,view=False):
-                value=get(n)
-                if value[1]!="qreg":return None
-                record=registers.get(value[0].identity)
-                if record is None:return None
-                if record["state"]!="live" or record["parent"] is not None and not view:return None
-                return record
-            def unsigned64(n,literal_minimum=0):
-                if n.isdigit():return integer(n,literal_minimum)
-                value,w=get(n)
-                require(w==64,"§3.3: register size/index operand requires i64")
-                return value
-            def jump(label):
-                m = re.fullmatch(r"\^([^ (]+)\((.*?)\)",label)
-                require(m and m[1] in function.blocks,"invalid branch label")
-                formals = function.blocks[m[1]][0]
-                actuals = m[2].split(", ") if m[2] else []
-                require(len(formals)==len(actuals),"branch argument arity")
-                resolved = [get(a) for a in actuals]
-                if not all(transfer(ty,value) for (n,ty,r),value in zip(formals,resolved)):return None
-                for (n,ty,r),value in zip(formals,resolved):put(n,value)
-                return m[1]
-            while True:
-                code = function.blocks[block][1]
-                jumped = False
-                for inst in code:
-                    op,a = inst.op,inst.args
-                    pure=op in ["br","add","sub","mul","and","or","xor","shl","lshr","ashr","udiv","urem","sdiv","srem","select","inttoptr","qreg.width","qreg.id","qreg.from_id"] or op.startswith(("const.i","icmp.","load.i","zext.i","sext.i","trunc.i","ptrtoint.i"))
-                    frame_index=len(history);history.append({"active":True,"pure":pure,"marker":op=="uncall"})
-                    if op in ["qreg.new","qreg.free","qreg.slice","qreg.concat","action_call","oracle_call","adj","ctl"]:history[frame_index]["registers"]=register_snapshot()
-                    p = p.then(Profile(time=rational(self.target.doc["capabilities"]["classical_step_time"])))
-                    steps += 1
-                    result = None
-                    if op.startswith("const.i"):
-                        width=integer(op[7:],1); result=(integer(a[0]) % (1<<width),width)
-                    elif op in ["add","sub","mul","and","or","xor","shl","lshr","ashr","udiv","urem","sdiv","srem"] or op.startswith("icmp."):
-                        (x,w),(y,v) = get(a[0]),get(a[1]); require(w==v,"classical operand width mismatch")
-                        if isinstance(x,RegisterId) or isinstance(y,RegisterId):
-                            require(op in ["icmp.eq","icmp.ne"] and (isinstance(x,RegisterId) and isinstance(y,RegisterId) or x==0 or y==0),"opaque register id bits cannot select an exact classical path")
-                            result=(int((x==y) if op=="icmp.eq" else (x!=y)),1)
-                            require(len(inst.lhs)==1,"classical result arity")
-                            put(inst.lhs[0],result);continue
-                        def signed(x): return x-(1<<w) if x & (1<<(w-1)) else x
-                        if op.startswith("icmp."):
-                            pred=op[5:]
-                            if pred.startswith("s"): x,y=signed(x),signed(y)
-                            value={"eq":lambda:x==y,"ne":lambda:x!=y,"ult":lambda:x<y,"ule":lambda:x<=y,"slt":lambda:x<y,"sle":lambda:x<=y}[pred]()
-                            result=(int(value),1)
-                        else:
-                            if op in ["udiv","urem","sdiv","srem"] and (y==0 or op.startswith("s") and signed(x)==-(1<<(w-1)) and signed(y)==-1): return p,steps,[],True
-                            if op in ["sdiv","srem"]:
-                                sx,sy=signed(x),signed(y)
-                                q=(abs(sx)//abs(sy))*(-1 if (sx<0)!=(sy<0) else 1)
-                                value=q if op=="sdiv" else sx-q*sy
-                            else:
-                                value={"add":lambda:x+y,"sub":lambda:x-y,"mul":lambda:x*y,"and":lambda:x&y,"or":lambda:x|y,"xor":lambda:x^y,
-                                       "shl":lambda:x<<y if y<w else 0,"lshr":lambda:x>>y if y<w else 0,"ashr":lambda:signed(x)>>y if y<w else 0,
-                                       "udiv":lambda:x//y,"urem":lambda:x%y}[op]()
-                            result=(value % (1<<w),w)
-                    elif op.startswith(("zext.i","sext.i","trunc.i","ptrtoint.i")) or op=="inttoptr":
-                        x,w=get(a[0]); width=self.obj.ptr if op=="inttoptr" else int(op.split(".i")[-1])
-                        require(not isinstance(x,RegisterId),"opaque register id bit conversion needs explicit binding evidence")
-                        if op.startswith("sext") and x & (1<<(w-1)): x-=1<<w
-                        result=(x % (1<<width),width)
-                    elif op=="select": result=get(a[1] if get(a[0])[0] else a[2])
-                    elif op=="br":
-                        block=jump(a[0] if len(a)==1 else a[1] if get(a[0])[0] else a[2]); jumped=True;break
-                    elif op=="ret":
-                        results=[get(n) for n in a]
-                        if not all(transfer(ty,value) for (n,ty,r),value in zip(function.groups[1],results)):return p,steps,[],True
-                        return p,steps,results,False
-                    elif op in ["trap","fault"]: return p,steps,[],True
-                    elif op=="call":
-                        callee=self.obj.functions[a[0].removeprefix("@")]
-                        params=callee.groups[0]
-                        require(len(params)==len(a)-1,"call argument arity")
-                        actuals=[get(actual) for actual in a[1:]]
-                        if not all(transfer(ty,value) for (n,ty,r),value in zip(params,actuals)):return p,steps,[],True
-                        before=(dict(memory),dict(allocations),bump,clock,atop,dict(blocks))
-                        before_registers=register_snapshot()
-                        previous={n:(env.get(n),versions.get(n)) for n in inst.lhs}
-                        cp,cs,results,failed=execute(callee,{n:value for (n,ty,r),value in zip(params,actuals)})
-                        p=p.then(cp);steps+=cs
-                        if failed: return p,steps,[],True
-                        require(len(results)==len(inst.lhs),"call result arity")
-                        for n,value in zip(inst.lhs,results):put(n,value)
-                        segments.append({"name":callee.name,"args":actuals,"results":results,"start":frame_index,"end":len(history),"active":True,"before":before,"before_registers":before_registers,"env":env,"versions":versions,"previous":previous,"produced":{n:versions[n] for n in inst.lhs}})
-                        continue
-                    elif op=="uncall":
-                        require(len(a)==3,"uncall needs argument/result lists")
-                        pending=[s for s in segments if s["active"]]
-                        if not pending:return p,steps,[],True
-                        segment=max(pending,key=lambda s:s["end"])
-                        arguments=[get(n) for n in list_operand(a[1])];results=[get(n) for n in list_operand(a[2])]
-                        if segment["name"]!=a[0].removeprefix("@") or any(f.get("measured",False) for f in history[segment["start"]:segment["end"]]) or any(f["active"] and not f["pure"] and not f["marker"] for f in history[segment["end"]:frame_index]) or not equal_values(segment["args"],arguments) or not equal_values(segment["results"],results):return p,steps,[],True
-                        for frame in reversed(history[segment["start"]:segment["end"]]):
-                            if not frame["active"] or frame["marker"]:continue
-                            p=p.then(Profile(time=rational(self.target.doc["capabilities"]["classical_step_time"])));reversed_steps+=1
-                            if "inverse" in frame:p=p.then(frame["inverse"]())
-                            if "registers" in frame:p=p.then(restore_registers(frame["registers"]))
-                            frame["active"]=False
-                        p=p.then(restore_registers(segment["before_registers"]))
-                        old_memory,old_allocations,bump,clock,atop,old_blocks=segment["before"]
-                        memory.clear();memory.update(old_memory);allocations.clear();allocations.update(old_allocations)
-                        blocks.clear();blocks.update(old_blocks)
-                        for n,version in segment["produced"].items():
-                            if segment["versions"].get(n)!=version:continue
-                            value,prior_version=segment["previous"][n]
-                            if prior_version is None:segment["env"].pop(n,None);segment["versions"].pop(n,None)
-                            else:segment["env"][n]=value;segment["versions"][n]=prior_version
-                        for child in segments:
-                            if segment["start"]<=child["start"] and child["end"]<=segment["end"]:child["active"]=False
-                    elif op=="alloc":
-                        n=get(a[0])[0];base=bump;bump+=max(1,n)
-                        if bump > integer(layout.get("heap_base",0))+integer(layout.get("heap_limit_max",0)) or atop>=(1<<integer(layout.get("A_tab",0))): return p,steps,[],True
-                        allocations[base]=(n,False);atop+=1;result=(base,self.obj.ptr)
-                    elif op=="free":
-                        base=get(a[0])[0]
-                        if base not in allocations or allocations[base][1]: return p,steps,[],True
-                        del allocations[base]
-                    elif op.startswith(("load.i","store.i")):
-                        width=int(op.split(".i")[-1]);address=get(a[0])[0];size=width//8
-                        if not any(base<=address and address+size<=base+n for base,(n,pinned) in allocations.items()): return p,steps,[],True
-                        if op.startswith("load"):
-                            require(all(memory.get(address+i,0) is not None for i in range(size)),"cost control depends on unresolved effect/measurement data; a path bound is required")
-                            content=[memory.get(address+i,0) for i in range(size)]
-                            if any(isinstance(byte,tuple) for byte in content):
-                                require(size==8 and all(byte==(content[0][0],i) for i,byte in enumerate(content)) and isinstance(content[0][0],RegisterId),"opaque register id partial load needs explicit binding evidence")
-                                result=(content[0][0],width)
-                            else:result=(sum(byte<<(8*i) for i,byte in enumerate(content)),width)
-                        else:
-                            value=get(a[1])[0]
-                            if isinstance(value,RegisterId):
-                                require(size==8,"opaque register id partial store needs explicit binding evidence")
-                                memory.update({address+i:(value,i) for i in range(size)})
-                            else:memory.update({address+i:(value>>(8*i))&255 for i in range(size)})
-                    elif op=="budget.mint":
-                        require(len(a)==5 and a[0].startswith("@"),"budget.mint needs oracle and four i64 components")
-                        name=a[0][1:]
-                        require(name in self.obj.functions and self.obj.functions[name].kind=="oracle","budget.mint requires linked oracle")
-                        components=[get(n) for n in a[1:]]
-                        require(all(width==64 for value,width in components),"budget.mint components must be i64")
-                        token=[str(value) for value,width in components]
-                        try:validate_budget(token,self.obj)
-                        except ContractError:return p,steps,[],True
-                        result=(MintedToken(frame_index,tuple(token)),0)
-                    elif op=="qreg.new":
-                        cls,n=a;size=unsigned64(n,1)
-                        choices=sorted(self.target.doc["classes"],key=lambda name:name.encode("utf-16-be")) if cls=="any" else [cls]
-                        require(all(c in self.target.doc["classes"] for c in choices),"unknown register class")
-                        def available(c):
-                            used=sum(b.width for b in physical.values() if b.cls==c)
-                            capacity=self.target.doc["classes"][c]["capacity"]
-                            if "topology" in self.target.doc:
-                                vertices=sum(v["class"]==c for v in self.target.doc["topology"]["vertices"])
-                                capacity=vertices if capacity=="unbounded" else min(capacity,vertices)
-                            return capacity=="unbounded" or used+size<=capacity
-                        selected=next((c for c in choices if available(c)),None)
-                        if selected is None:return p,steps,[],True
-                        parts=[]
-                        if size:
-                            b=self.fresh("register",size,selected);parts=[b]
-                            physical[b.identity]=b
-                            if "topology" in self.target.doc:
-                                occupied={v for vertices in placements.values() for v in vertices}
-                                placements[b.identity]=tuple(i for i,v in enumerate(self.target.doc["topology"]["vertices"]) if v["class"]==selected and i not in occupied)[:size]
-                                require(len(placements[b.identity])==size,"register topology capacity/placement mismatch")
-                            register_states.acquire(b)
-                            p=p.then(space_profile(selected,"clean",size))
-                        result=create(parts)
-                    elif op in ["qreg.width","qreg.id","qreg.free","qreg.slice","qreg.concat"]:
-                        record=register(a[0])
-                        if record is None:return p,steps,[],True
-                        if op=="qreg.width":result=(register_width(record),64)
-                        elif op=="qreg.id":result=(RegisterId(get(a[0])[0].identity),64)
-                        elif op=="qreg.free":
-                            require(all(clean for identity,lo,hi,version,clean in register_states.capture(record["parts"])),"register cleanliness needs source history evidence; no exact estimate emitted")
-                            for b in record["parts"]:
-                                # Concatenation preserves the original physical
-                                # allocations; a slice can never be freed.
-                                require(b.identity in physical,"register allocation identity is not live")
-                                del physical[b.identity]
-                                placements.pop(b.identity,None)
-                                del register_states.ranges[b.identity]
-                                p=p.then(space_profile(b.cls,"clean",-b.width))
-                            record["state"]="consumed"
-                        elif op=="qreg.slice":
-                            lo,length=unsigned64(a[1]),unsigned64(a[2],1)
-                            if lo+length>register_width(record):return p,steps,[],True
-                            parts=[];offset=0
-                            for b in record["parts"]:
-                                begin,end=max(lo,offset),min(lo+length,offset+b.width)
-                                if begin<end:parts.append(Bundle(b.identity,end-begin,b.cls,b.offset+begin-offset,b.state))
-                                offset+=b.width
-                            result=create(parts,get(a[0])[0].identity);record["state"]="viewed"
-                        else:
-                            other=register(a[1])
-                            if other is None or other is record:return p,steps,[],True
-                            result=create(record["parts"]+other["parts"])
-                            record["state"]=other["state"]="consumed"
-                    elif op=="qreg.from_id":
-                        identity,w=get(a[0]);require(w==64,"qreg.from_id requires i64")
-                        require(isinstance(identity,RegisterId) or identity==0,"opaque register id lookup needs explicit binding evidence")
-                        identity=identity.identity if isinstance(identity,RegisterId) else 0
-                        record=registers.get(identity)
-                        if record is None or record["state"]!="live" or record["parent"] is not None:return p,steps,[],True
-                        result=(RegisterRef(identity),"qreg")
-                    elif op in ["action_call","oracle_call","adj","ctl"]:
-                        call_op,actual=op,list(a);controlled=[];control_records=[];source_adjoint=False
-                        while call_op in ["ctl","adj"]:
-                            index=1 if call_op=="ctl" else 0
-                            if index:
-                                control=register(actual[0],True)
-                                if control is None or register_width(control)!=1:return p,steps,[],True
-                                controlled+=control["parts"];control_records.append((control,True))
-                            else:source_adjoint=not source_adjoint
-                            call_op,actual=actual[index],actual[index+1:]
-                        require(call_op in ["action_call","oracle_call"],"invalid CC/R region call")
-                        child=self.obj.functions[actual[0].removeprefix("@")]
-                        if call_op=="action_call":actual_groups=[list_operand(x) for x in actual[1:]];tuple_=["0"]*4
-                        else:
-                            token,token_width=get(actual[1]);require(token_width==0,"oracle invocation requires token")
-                            if not valid_token(token):return p,steps,[],True
-                            tuple_=list(token.budget) if isinstance(token,token_types) else list(token)
-                            actual_groups=[list_operand(actual[2]),[actual[3]],[actual[4]],list_operand(actual[5]),list_operand(actual[6])]
-                        groups=child.groups[:5] if child.kind=="oracle" else child.groups[:4]
-                        require(all(len(g)==len(v) for g,v in zip(groups,actual_groups)),"region call argument arity")
-                        interface={};records=list(control_records);slots=[];encoded=[]
-                        for index,(group,actuals) in enumerate(zip(groups[:-1],actual_groups[:-1])):
-                            group_readonly=index==0 if child.kind=="oracle" else index==1
-                            for (name,ty,role),argument in zip(group,actuals):
-                                record=register(argument,True)
-                                if record is None or register_width(record)!=type_width(ty,self.obj.ptr):return p,steps,[],True
-                                readonly=group_readonly or ty.startswith("region[") and role=="in"
-                                parts=record["parts"]
-                                if any(overlaps(parts,prior) and not (readonly and read) for prior,read in slots) or not readonly and overlaps(parts,controlled):return p,steps,[],True
-                                slots.append((parts,readonly));records.append((record,readonly));interface[name]=list(parts)
-                        for (name,ty,role),argument in zip(groups[-1],actual_groups[-1]):
-                            value,w=get(argument)
-                            if ty=="token" and (w!=0 or not valid_token(value)):return p,steps,[],True
-                            encoded.append(list(value.budget) if isinstance(value,token_types) else value if ty in ["f64","token"] else str(value))
-                        call_arguments=[get(argument) for argument in actual_groups[-1]]
-                        if call_op=="oracle_call":call_arguments.append((token,token_width))
-                        context_tokens=([token] if call_op=="oracle_call" else [])+[get(argument)[0] for (n,ty,r),argument in zip(groups[-1],actual_groups[-1]) if ty=="token"]
-                        identities=tuple(("host" if isinstance(value,HostToken) else "mint",value.identity) for value in context_tokens) if all(isinstance(value,token_types) for value in context_tokens) else None
-                        controls=tuple(bit for b in controlled for bit in bits([b]))
-                        candidate=self.obj.sections.get("schedule",{})
-                        if candidate.get("entries") or "interface_vertices" in candidate:
-                            bound=candidate["bindings"]
-                            known={"region":child.name,"target_hash":self.target.hash,"params_hash":digest(jcs(encoded)),"inherited_controls":len(set((bit[0],bit[1]) for bit in controls))}
-                            matches=all(integer(bound[key],0)==value if key=="inherited_controls" else bound.get(key)==value for key,value in known.items())
-                            matches=matches and [integer(n,0) for n in bound["budget"]]==[integer(n,0) for n in tuple_] and decimal_value(bound["epsilon"])==0
-                            if matches:matches=bound["closure_hash"]==self.obj.identities(closure=True)[child.name]
-                            require(not matches,"CC/R nested quantum schedule replay remains pending for these invocation bindings")
-                        cp=quantum_region(child.name,encoded,tuple_,interface,controls,source_adjoint,identities=identities)
-                        p=p.then(cp)
-                        def reverse_region(name=child.name,values=list(encoded),budget=list(tuple_),bindings=dict(interface),control_context=controls,adjoint=source_adjoint,identities=identities):
-                            return quantum_region(name,values,budget,bindings,control_context,adjoint,raw_inverse=True,identities=identities)
-                        history[frame_index]["inverse"]=reverse_region
-                        identity=child.kind in ["action","perm_action"] and identity_body(child)
-                        # Source-call occurrences retain joint entry versions.
-                        # Only a matching inverse on every touched allocation
-                        # restores them; no gate or quantum-state list is kept.
-                        touched=[b for parts,_ in slots for b in parts]+controlled
-                        written=[b for parts,read in slots if not read for b in parts]
-                        if touched and not identity:
-                            state=register_states.capture(touched)
-                            active_versions={version for name,lo,hi,version,clean in state}
-                            key=(call_op,child.name,tuple(tuple((b.identity,b.offset,b.width) for b in parts) for parts,_ in slots),controls)
-                            previous=quantum_occurrences[next(iter(active_versions))-1] if len(active_versions)==1 and 0 not in active_versions else None
-                            if previous is not None and previous["key"]==key and (call_op=="oracle_call" or previous["adjoint"]!=source_adjoint) and equal_values(previous["arguments"],call_arguments):register_states.restore(previous["states"])
-                            else:
-                                quantum_occurrences.append({"key":key,"arguments":call_arguments,"adjoint":source_adjoint,"states":state})
-                                register_states.assign(touched,len(quantum_occurrences))
-                                register_states.assign(written,len(quantum_occurrences),False)
-                        for record,readonly in records:
-                            if record["parent"] is not None:
-                                record["state"]="consumed";registers[record["parent"]]["state"]="live"
-                    elif op=="measure" or op.startswith("measure.i"):
-                        record=register(a[0])
-                        if record is None:return p,steps,[],True
-                        width=register_width(record)
-                        measured=width if op=="measure" else integer(op[9:],1)
-                        require(1<=measured<=128,"§3.3: measurement width must be in 1..128")
-                        if measured!=width:return p,steps,[],True
-                        require(all(clean for identity,lo,hi,version,clean in register_states.capture(record["parts"])),"measurement-dependent path/cleanliness evidence remains pending; no exact estimate emitted")
-                        # The source history proves this register is |0...0>.
-                        # No amplitudes, basis simulation or measurement draw
-                        # are needed to determine its sole possible outcome.
-                        for b in record["parts"]:
-                            require(b.identity in physical,"measured allocation identity is not live")
-                            del physical[b.identity];del register_states.ranges[b.identity]
-                            placements.pop(b.identity,None)
-                            p=p.then(space_profile(b.cls,"clean",-b.width))
-                        record["state"]="consumed";history[frame_index]["measured"]=True
-                        result=(0,measured)
-                    elif op=="effect":
-                        dev=a[0]
-                        if dev not in ["clock.read","entropy.read","console.write","block.read","block.write"]: return p,steps,[],True
-                        ptr=get(a[2] if dev.startswith("block.") else a[1])[0]
-                        size=8 if dev=="clock.read" else get(a[2])[0] if dev in ["entropy.read","console.write"] else 512
-                        if not any(base<=ptr and ptr+size<=base+n for base,(n,_) in allocations.items()): return p,steps,[],True
-                        if dev=="console.write": continue
-                        if dev=="clock.read":
-                            memory.update({ptr+i:(clock>>(8*i))&255 for i in range(8)})
-                            clock=(clock+1)%(1<<64)
-                        elif dev in ["block.read","block.write"]:
-                            sector,sector_width=get(a[1])
-                            require(sector_width==64,"§7.3: block sector requires i64")
-                            require(isinstance(sector,int),"opaque register id cannot resolve a block-sector address")
-                            if dev=="block.read":memory.update({ptr+i:byte for i,byte in enumerate(blocks.get(sector,(0,)*512))})
-                            else:blocks[sector]=tuple(memory.get(ptr+i,0) for i in range(512))
-                        elif dev=="entropy.read" and size==0:continue
-                        else:
-                            raise ContractError(f"exact classical effect-state binding pending: {dev}; use an explicit conditional step bound")
-                    else: raise ContractError(f"classical source binding not implemented: {op}; no exact estimate emitted")
-                    if result is not None:
-                        require(len(inst.lhs)==1,"classical result arity")
-                        put(inst.lhs[0],result)
-                require(jumped,"classical block has no terminator")
-                if block is None:return p,steps,[],True
-        p,steps,_,failed=execute(fn,initial)
-        self.classical_status="FAILED" if failed else "COMPLETED"
-        self.reversed_classical_steps=reversed_steps
-        return p,steps
-
     @staticmethod
     def binding_types(env,regions):
         inactive=env.get(_SOURCE_INACTIVE,())
@@ -3861,7 +4006,116 @@ class Source:
             return self.catalog.body(nodes,local,joined,inverse)
         return Captured([],{},controls,builder=expand)
 
-    def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False,function_name=None,oracle_pairs=None,empty_cleanups=(),cleanup_partition=None):
+    def lower_action_call(self,inst,env,regions,controls,adjoint):
+        a=inst.args
+        require(len(a)==5,"action_call requires four complete argument groups")
+        name=a[0].removeprefix("@")
+        require(name in self.obj.functions and name not in self.calls,"unknown/cyclic action call")
+        fn=self.obj.functions[name]
+        require(fn.kind in ["action","perm_action"],"action_call requires action")
+        actual_groups=[list_operand(x) for x in a[1:]]
+        require(all(len(g)==len(v) for g,v in zip(fn.groups[:4],actual_groups)),"action call argument arity")
+        child={}
+        all_wires=[]
+        for group,actuals in zip(fn.groups[:2],actual_groups[:2]):
+            for (n,ty,role),actual in zip(group,actuals):
+                ws=wire(actual,env)
+                require(sum(b.width for b in ws)==type_width(ty,self.obj.ptr),"action call wire width mismatch")
+                child[n]=ws;all_wires+=ws
+        for (n,ty,role),actual in zip(fn.groups[2],actual_groups[2]):
+            require(actual in regions,"unknown memory argument")
+            A,W,b=regions[actual]
+            require(ty==f"region[{A},{W}]","action call region shape mismatch")
+            child[n]=b
+            all_wires+=wire(b,env)
+        for i,b in enumerate(all_wires):
+            for other in all_wires[:i]: require(b.identity!=other.identity or b.offset+b.width<=other.offset or other.offset+other.width<=b.offset,"overlapping action call arguments")
+        caller=self.obj.functions[self.calls[-1]]
+        caller_types={n:ty for n,ty,r in (caller.groups[4] if caller.kind=="oracle" else caller.groups[2]+caller.groups[3] if caller.kind=="lproc" else caller.groups[3])}
+        for (n,ty,r),actual in zip(fn.groups[3],actual_groups[3]):
+            require(caller_types.get(actual)==ty,"action call classical argument type mismatch")
+            child[n]=env[actual]
+        arguments=[child[n] if ty in ["token","f64"] else str(child[n]) for n,ty,r in fn.groups[3]]
+        identities=self.token_context(env,[actual for (n,ty,r),actual in zip(fn.groups[3],actual_groups[3]) if ty=="token"])
+        def invoke_action(joined,inverse,call_env,name=name,values=arguments,tuple_=list(self.budgets[-1]),interface=dict(child),source_adjoint=adjoint,identities=identities):
+            return self.region(name,values,tuple_,interface,joined,source_adjoint,raw_inverse=inverse,token_context=identities)
+        self.serial+=1
+        capture=f"$call:{self.serial}"
+        env[capture]=Captured([],{},controls,builder=invoke_action)
+        return {"splice":capture}
+
+    def lower_oracle_call(self,inst,env,regions,controls,function):
+        a=inst.args
+        require(len(a)==7,"oracle_call needs token, inputs, target, fault, memory and argument groups")
+        callee=a[0].removeprefix("@")
+        require(callee in self.obj.functions and self.obj.functions[callee].kind=="oracle","oracle_call requires linked oracle")
+        fn=self.obj.functions[callee]
+        token=env.get(a[1]);validate_budget(token,self.obj)
+        actual_groups=[list_operand(a[2]),[a[3]],[a[4]],list_operand(a[5]),list_operand(a[6])]
+        require(all(len(g)==len(v) for g,v in zip(fn.groups,actual_groups)),"oracle call argument arity")
+        child={};wires=[]
+        for group,actuals in zip(fn.groups[:4],actual_groups[:4]):
+            for (n,ty,role),actual in zip(group,actuals):
+                ws=wire(actual,env)
+                require(sum(b.width for b in ws)==type_width(ty,self.obj.ptr),"oracle call interface width mismatch")
+                if ty.startswith("region["):
+                    require(actual in regions and ty==f"region[{regions[actual][0]},{regions[actual][1]}]","oracle call memory shape mismatch")
+                child[n]=ws;wires+=ws
+        for i,b in enumerate(wires):
+            for other in wires[:i]:require(b.identity!=other.identity or b.offset+b.width<=other.offset or other.offset+other.width<=b.offset,"overlapping oracle call arguments")
+        caller=self.obj.functions[function]
+        caller_types={n:ty for n,ty,r in (caller.groups[4] if caller.kind=="oracle" else caller.groups[2]+caller.groups[3] if caller.kind=="lproc" else caller.groups[3])}
+        arguments=[]
+        for (n,ty,r),actual in zip(fn.groups[4],actual_groups[4]):
+            require(caller_types.get(actual)==ty,"oracle call classical argument type mismatch")
+            arguments.append(env[actual] if ty in ["token","f64"] else str(env[actual]))
+        identities=self.token_context(env,[a[1]]+[actual for (n,ty,r),actual in zip(fn.groups[4],actual_groups[4]) if ty=="token"])
+        def invoke_oracle(joined,inverse,call_env,name=callee,values=arguments,tuple_=list(token),interface=dict(child),identities=identities):
+            return self.region(name,values,tuple_,interface,joined,raw_inverse=inverse,token_context=identities)
+        self.serial+=1;capture=f"$oracle:{self.serial}"
+        env[capture]=Captured([],{},controls,builder=invoke_oracle)
+        return {"splice":capture}
+
+    def lower_qinplace(self,inst,env,regions,controls,adjoint,function,meta):
+        a=inst.args
+        require(len(a) in [4,7],"qinplace needs two oracles, token, target and complete optional groups")
+        names=[n.removeprefix("@") for n in a[:2]]
+        if adjoint:names.reverse()
+        require(all(n in self.obj.functions and self.obj.functions[n].kind=="oracle" for n in names),"qinplace requires linked oracle pair")
+        signatures=[self.obj.symbol(n)["signature"] for n in names]
+        require(signatures[0]==signatures[1],"qinplace pair signature mismatch")
+        sig=signatures[0];N=sum(b.width for b in wire(a[3],env));Fwidth=integer(sig["fault"],4)
+        require(sig["in"] and integer(sig["in"][0],1)==N==integer(sig["tgt"],1),"qinplace target/first input width mismatch")
+        token=env.get(a[2]);validate_budget(token,self.obj)
+        ins,mem,args=[list_operand(x) for x in a[4:]] if len(a)==7 else [[],[],[]]
+        require([len(ins),len(mem),len(args)]==[len(sig["in"])-1,len(sig["mem"]),len(sig["args"])],"qinplace argument arity")
+        extra=[wire(value,env) for value in ins]
+        require([sum(b.width for b in ws) for ws in extra]==[integer(w,1) for w in sig["in"][1:]],"qinplace input width mismatch")
+        caller_types={n:ty for n,ty,r in self.obj.functions[function].groups[3]}
+        values=[]
+        for ty,value in zip(sig["args"],args):
+            require(caller_types.get(value)==ty,"qinplace classical argument type mismatch")
+            values.append(env[value] if ty in ["token","f64"] else str(env[value]))
+        memory=[]
+        for desc,value in zip(sig["mem"],mem):
+            require(value in regions and list(regions[value][:2])==[integer(desc["A"],0),integer(desc["W"],1)],"qinplace memory shape mismatch")
+            memory.append(regions[value][2])
+        templates=[]
+        identities=self.token_context(env,[a[2]]+[actual for ty,actual in zip(sig["args"],args) if ty=="token"])
+        for call_index,name_ in enumerate(names):
+            fn=self.obj.functions[name_]
+            def invoke_pair(joined,inverse,call_env,name=name_,fn=fn,values=list(values),tuple_=list(token),inputs=extra,memories=memory,identities=identities):
+                child={fn.groups[0][0][0]:wire("x",call_env),fn.groups[1][0][0]:wire("t",call_env),fn.groups[2][0][0]:wire("f",call_env)}
+                child.update({n:ws for (n,ty,role),ws in zip(fn.groups[0][1:],inputs)})
+                child.update({n:b for (n,ty,role),b in zip(fn.groups[3],memories)})
+                return self.region(name,values,tuple_,child,joined,raw_inverse=inverse,token_context=identities)
+            self.serial+=1;capture=f"$qinplace:{self.serial}";env[capture]=Captured([],{},controls,builder=invoke_pair)
+            node={"splice":capture}
+            if self.catalog.ledger is not None:self.catalog.source_metadata[id(node)]=(node,{**meta,"call":True,"oracle_call":True,"call_index":call_index})
+            templates.append([{"parameters":[{"name":"x","type":"wire","width":N},{"name":"t","type":"wire","width":N},{"name":"f","type":"wire","width":Fwidth}],"body":[node]}])
+        return {"invoke":"qinplace","args":[N,Fwidth,a[3],*templates,[]]}
+
+    def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False,function_name=None,oracle_pairs=None):
         out,fragments = [],[]
         inactive=env.setdefault(_SOURCE_INACTIVE,set())
         lifetimes=env.setdefault(_SOURCE_LIFETIMES,{})
@@ -4004,127 +4258,15 @@ class Source:
                 env[capture]=Captured(body,dict(env),controls)
                 emit({"splice":capture})
             elif op=="action_call":
-                require(len(a)==5,"action_call requires four complete argument groups")
-                name=a[0].removeprefix("@")
-                require(name in self.obj.functions and name not in self.calls,"unknown/cyclic action call")
-                fn=self.obj.functions[name]
-                require(fn.kind in ["action","perm_action"],"action_call requires action")
-                actual_groups=[list_operand(x) for x in a[1:]]
-                require(all(len(g)==len(v) for g,v in zip(fn.groups[:4],actual_groups)),"action call argument arity")
-                child,child_regions={},{}
-                all_wires=[]
-                for group,actuals in zip(fn.groups[:2],actual_groups[:2]):
-                    for (n,ty,role),actual in zip(group,actuals):
-                        ws=wire(actual,env)
-                        require(sum(b.width for b in ws)==type_width(ty,self.obj.ptr),"action call wire width mismatch")
-                        child[n]=ws;all_wires+=ws
-                for (n,ty,role),actual in zip(fn.groups[2],actual_groups[2]):
-                    require(actual in regions,"unknown memory argument")
-                    A,W,b=regions[actual]
-                    require(ty==f"region[{A},{W}]","action call region shape mismatch")
-                    child[n]=b;child_regions[n]=(A,W,b)
-                    all_wires+=wire(b,env)
-                for i,b in enumerate(all_wires):
-                    for other in all_wires[:i]: require(b.identity!=other.identity or b.offset+b.width<=other.offset or other.offset+other.width<=b.offset,"overlapping action call arguments")
-                caller=self.obj.functions[self.calls[-1]]
-                caller_types={n:ty for n,ty,r in (caller.groups[4] if caller.kind=="oracle" else caller.groups[2]+caller.groups[3] if caller.kind=="lproc" else caller.groups[3])}
-                for (n,ty,r),actual in zip(fn.groups[3],actual_groups[3]):
-                    require(caller_types.get(actual)==ty,"action call classical argument type mismatch")
-                    child[n]=env[actual]
-                arguments=[child[n] if ty in ["token","f64"] else str(child[n]) for n,ty,r in fn.groups[3]]
-                identities=self.token_context(env,[actual for (n,ty,r),actual in zip(fn.groups[3],actual_groups[3]) if ty=="token"])
-                def invoke_action(joined,inverse,call_env,name=name,values=arguments,tuple_=list(self.budgets[-1]),interface=dict(child),source_adjoint=adjoint,identities=identities):
-                    return self.region(name,values,tuple_,interface,joined,source_adjoint,raw_inverse=inverse,token_context=identities)
-                self.serial+=1
-                capture=f"$call:{self.serial}"
-                env[capture]=Captured([],{},controls,builder=invoke_action)
-                emit({"splice":capture})
+                emit(self.lower_action_call(inst,env,regions,controls,adjoint))
             elif op=="oracle_call":
-                require(len(a)==7,"oracle_call needs token, inputs, target, fault, memory and argument groups")
-                callee=a[0].removeprefix("@")
-                require(callee in self.obj.functions and self.obj.functions[callee].kind=="oracle","oracle_call requires linked oracle")
-                fn=self.obj.functions[callee]
-                token=env.get(a[1]);validate_budget(token,self.obj)
-                actual_groups=[list_operand(a[2]),[a[3]],[a[4]],list_operand(a[5]),list_operand(a[6])]
-                require(all(len(g)==len(v) for g,v in zip(fn.groups,actual_groups)),"oracle call argument arity")
-                child={};wires=[]
-                for group,actuals in zip(fn.groups[:4],actual_groups[:4]):
-                    for (n,ty,role),actual in zip(group,actuals):
-                        ws=wire(actual,env)
-                        require(sum(b.width for b in ws)==type_width(ty,self.obj.ptr),"oracle call interface width mismatch")
-                        if ty.startswith("region["):
-                            require(actual in regions and ty==f"region[{regions[actual][0]},{regions[actual][1]}]","oracle call memory shape mismatch")
-                        child[n]=ws;wires+=ws
-                for i,b in enumerate(wires):
-                    for other in wires[:i]:require(b.identity!=other.identity or b.offset+b.width<=other.offset or other.offset+other.width<=b.offset,"overlapping oracle call arguments")
-                caller=self.obj.functions[function]
-                caller_types={n:ty for n,ty,r in (caller.groups[4] if caller.kind=="oracle" else caller.groups[2]+caller.groups[3] if caller.kind=="lproc" else caller.groups[3])}
-                arguments=[]
-                for (n,ty,r),actual in zip(fn.groups[4],actual_groups[4]):
-                    require(caller_types.get(actual)==ty,"oracle call classical argument type mismatch")
-                    arguments.append(env[actual] if ty in ["token","f64"] else str(env[actual]))
-                identities=self.token_context(env,[a[1]]+[actual for (n,ty,r),actual in zip(fn.groups[4],actual_groups[4]) if ty=="token"])
-                def invoke_oracle(joined,inverse,call_env,name=callee,values=arguments,tuple_=list(token),interface=dict(child),identities=identities):
-                    return self.region(name,values,tuple_,interface,joined,raw_inverse=inverse,token_context=identities)
-                self.serial+=1;capture=f"$oracle:{self.serial}"
-                env[capture]=Captured([],{},controls,builder=invoke_oracle)
-                emit({"splice":capture})
+                emit(self.lower_oracle_call(inst,env,regions,controls,function))
             elif op=="qinplace":
-                require(len(a) in [4,7],"qinplace needs two oracles, token, target and complete optional groups")
-                names=[n.removeprefix("@") for n in a[:2]]
-                if adjoint:names.reverse()
-                require(all(n in self.obj.functions and self.obj.functions[n].kind=="oracle" for n in names),"qinplace requires linked oracle pair")
-                signatures=[self.obj.symbol(n)["signature"] for n in names]
-                require(signatures[0]==signatures[1],"qinplace pair signature mismatch")
-                sig=signatures[0];N=sum(b.width for b in wire(a[3],env));Fwidth=integer(sig["fault"],4)
-                require(sig["in"] and integer(sig["in"][0],1)==N==integer(sig["tgt"],1),"qinplace target/first input width mismatch")
-                token=env.get(a[2]);validate_budget(token,self.obj)
-                ins,mem,args=[list_operand(x) for x in a[4:]] if len(a)==7 else [[],[],[]]
-                require([len(ins),len(mem),len(args)]==[len(sig["in"])-1,len(sig["mem"]),len(sig["args"])],"qinplace argument arity")
-                extra=[wire(value,env) for value in ins]
-                require([sum(b.width for b in ws) for ws in extra]==[integer(w,1) for w in sig["in"][1:]],"qinplace input width mismatch")
-                caller_types={n:ty for n,ty,r in self.obj.functions[function].groups[3]}
-                values=[]
-                for ty,value in zip(sig["args"],args):
-                    require(caller_types.get(value)==ty,"qinplace classical argument type mismatch")
-                    values.append(env[value] if ty in ["token","f64"] else str(env[value]))
-                memory=[]
-                for desc,value in zip(sig["mem"],mem):
-                    require(value in regions and list(regions[value][:2])==[integer(desc["A"],0),integer(desc["W"],1)],"qinplace memory shape mismatch")
-                    memory.append(regions[value][2])
-                templates=[]
-                identities=self.token_context(env,[a[2]]+[actual for ty,actual in zip(sig["args"],args) if ty=="token"])
-                for call_index,name_ in enumerate(names):
-                    fn=self.obj.functions[name_]
-                    def invoke_pair(joined,inverse,call_env,name=name_,fn=fn,values=list(values),tuple_=list(token),inputs=extra,memories=memory,identities=identities):
-                        child={fn.groups[0][0][0]:wire("x",call_env),fn.groups[1][0][0]:wire("t",call_env),fn.groups[2][0][0]:wire("f",call_env)}
-                        child.update({n:ws for (n,ty,role),ws in zip(fn.groups[0][1:],inputs)})
-                        child.update({n:b for (n,ty,role),b in zip(fn.groups[3],memories)})
-                        return self.region(name,values,tuple_,child,joined,raw_inverse=inverse,token_context=identities)
-                    self.serial+=1;capture=f"$qinplace:{self.serial}";env[capture]=Captured([],{},controls,builder=invoke_pair)
-                    node={"splice":capture}
-                    if self.catalog.ledger is not None:self.catalog.source_metadata[id(node)]=(node,{**meta,"call":True,"oracle_call":True,"call_index":call_index})
-                    templates.append([{"parameters":[{"name":"x","type":"wire","width":N},{"name":"t","type":"wire","width":N},{"name":"f","type":"wire","width":Fwidth}],"body":[node]}])
-                emit({"invoke":"qinplace","args":[N,Fwidth,a[3],*templates,[]]})
+                emit(self.lower_qinplace(inst,env,regions,controls,adjoint,function,meta))
             elif op == "qregion": pass
             else:
                 raise ContractError(f"source binding not implemented: {op}; no estimate or exactness claim emitted")
             fragment=out[beginning:]
-            point=(inst.block,inst.ordinal)
-            release_plan=cleanup_partition[0].get(point) if cleanup_partition else None
-            inverse_plan=cleanup_partition[1].get(point) if cleanup_partition else None
-            if release_plan is not None or inverse_plan is not None:
-                def cleanup_part(joined,inverse,call_env,plan=release_plan or inverse_plan,is_release=release_plan is not None,nodes=fragment,values=dict(env),meta=meta):
-                    choice=self.cleanup_choice(plan)
-                    if choice=="reverse":return self.catalog.body(nodes,values,joined,inverse)
-                    if not is_release:return Profile()
-                    replacement=self.primitive_recompute(plan,values,regions,joined,meta)
-                    return self.catalog.body(replacement.body,replacement.env,joined,inverse)
-                capture=f"$terminal_cleanup:{self.serial}";self.serial+=1
-                env[capture]=Captured([],{},controls,builder=cleanup_part)
-                wrapper={"splice":capture}
-                if self.catalog.ledger is not None:self.catalog.source_metadata[id(wrapper)]=(wrapper,meta)
-                fragment=[wrapper];out[beginning:]=fragment
             if op=="oracle_call" and oracle_pairs and (inst.block,inst.ordinal) in oracle_pairs:
                 recompute=self.oracle_recompute(inst,env,regions,controls,meta,function)
                 capture=f"$oracle_cleanup:{self.serial}";self.serial+=1
@@ -4136,8 +4278,7 @@ class Source:
                 replacement={"inverse":True,"body":fragment}
                 if self.catalog.ledger is not None:self.catalog.source_metadata[id(replacement)]=(replacement,meta)
                 fragment=[replacement]
-            empty=(inst.block,inst.ordinal) in empty_cleanups
-            if release_plan is None and (not adjoint and op in ["quncopy","qunload","qfree","qreturn"] or adjoint and op in ["qalloc","qborrow","qcopy","qload"]):
+            if not adjoint and op in ["quncopy","qunload","qfree","qreturn"]:
                 recompute=None
                 if op in ["quncopy","qunload"]:
                     fresh=self.fresh("recompute",b.width)
@@ -4150,12 +4291,6 @@ class Source:
                     quantum=[compute,{"invoke":"bind.qxor","args":[b.width,fresh_name,name]},{"inverse":True,"body":[compute]}]
                     if predicates:quantum=[{"under":list(predicates),"body":quantum}]
                     replacement=[{"acquire":fresh_name},*quantum,{"relinquish":fresh_name},{"relinquish":name}]
-                    recompute=Captured(replacement,local,controls)
-                elif empty and op in ["qalloc","qfree"]:
-                    fresh=self.fresh("empty_recompute",b.width)
-                    fresh_name=f"$empty_fresh:{self.serial}"
-                    local=dict(env);local[fresh_name]=fresh
-                    replacement=[{"acquire":fresh_name},{"invoke":"bind.qxor","args":[b.width,fresh_name,name]},{"relinquish":fresh_name},{"relinquish":name}]
                     recompute=Captured(replacement,local,controls)
                 capture=f"$cleanup:{self.serial}";self.serial+=1
                 env[capture]=Captured(fragment,dict(env),controls,cleanup=True,recompute=recompute)
@@ -4233,7 +4368,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
     if fn.kind in ["cc","r"]:
         require(not accuracy and inherited_controls==0,"classical cost request has no accuracy or inherited quantum controls")
         if step_bound is None:
-            p,steps = source.classical(fn,args,token_aliases)
+            p,steps = ClassicalMachine(source,fn,args,token_aliases).run()
         else:
             # A caller-supplied termination assumption is explicit evidence,
             # never a proof that an unbounded classical program terminates.
@@ -4313,6 +4448,8 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
             "exact_resources":{n:{"numerator":str(q.numerator),"denominator":str(q.denominator)} for n,q in rows.items()},
             "gates":{n:str(v) for n,v in sorted(ledger.gates.items() if ledger is not None else p.gates.items())},"classical_steps":str(steps) if steps is not None else None,
             "error_bound":str(ledger.error if ledger is not None else p.error),"summary_operations":catalog.visits}
+    obligations=target.native_model_obligations()
+    if obligations:result["native_model_obligations"]=obligations
     if token_aliases is not None:result["invocation"]["token_aliases"]=token_aliases
     if step_bound is not None:
         result["bound_assumptions"]=[f"classical execution terminates within {steps} source instructions, including callees"]
@@ -4321,6 +4458,7 @@ def estimate(obj,target,region,args,budget,variant="forward",inherited_controls=
     elif fn.kind in ["cc","r"]:
         result["classical_status"]=source.classical_status
         result["reversed_classical_steps"]=str(source.reversed_classical_steps)
+        if source.classical_fault_reason is not None:result["classical_fault_reason"]=source.classical_fault_reason
     if fn.kind=="oracle":result["padded_steps"]={"forward":budget[0],"inverse":budget[0]}
     if ledger is not None:
         result["resolved_default_epsilon_share"]={"numerator":str(ledger.default_share.numerator),"denominator":str(ledger.default_share.denominator)}
@@ -4688,7 +4826,7 @@ def main(argv=None):
     parser.add_argument("--region",help="required for objects with multiple executable definitions")
     parser.add_argument("--params",default="[]",help="complete K13 JSON array, or @file")
     parser.add_argument("--token-aliases",help="canonical K91 token equality partition as a JSON array, or @file")
-    parser.add_argument("--budget",default="0,0,0,0",help="B,heap,stack,depth (default is the explicit zero tuple)")
+    parser.add_argument("--budget",help="B,heap,stack,depth; required for oracle/token-taking entries, including an explicit zero tuple")
     parser.add_argument("--variant",default="forward")
     parser.add_argument("--inherited-controls",type=int,default=0)
     parser.add_argument("--epsilon",default="0",help="exact decimal requested accuracy (default 0)")
@@ -4705,12 +4843,17 @@ def main(argv=None):
         candidates=[f.name for f in obj.functions.values() if f.kind!="lproc"]
         region=a.region or (candidates[0] if len(candidates)==1 else None)
         require(region is not None,"multiple entry regions: supply --region")
+        require(region in obj.functions,"unknown entry region")
+        fn=obj.functions[region]
+        groups=fn.groups[0] if fn.kind in ["cc","r"] else fn.groups[4] if fn.kind=="oracle" else fn.groups[3]
+        require(a.budget is not None or fn.kind!="oracle" and all(ty!="token" for n,ty,r in groups),
+                "E_ARG: oracle/token-taking entry requires --budget B,heap,stack,depth (use --budget 0,0,0,0 for zero)")
         params=loads(Path(a.params[1:]).read_text() if a.params.startswith("@") else a.params)
         aliases=None
         if a.token_aliases is not None:
             aliases=loads(Path(a.token_aliases[1:]).read_text() if a.token_aliases.startswith("@") else a.token_aliases)
             require(isinstance(aliases,list),"E_ARG: token_aliases must be a JSON array")
-        budget=a.budget.split(",")
+        budget=a.budget.split(",") if a.budget is not None else ["0"]*4
         result=estimate(obj,target,region,params,budget,a.variant,a.inherited_controls,a.classical_step_bound,a.epsilon,a.include_frame or a.certificate is not None or a.certificate_template is not None,aliases)
         if a.certificate:
             result["certificate_status"]=Certificate.read(a.certificate.read_text()).check_resource_rows(result)
@@ -4731,7 +4874,7 @@ def main(argv=None):
                      "region":region,"variant":a.variant,"inherited_controls":a.inherited_controls,
                      "invocation":{"args":params,"budget":budget},"params_hash":digest(jcs(params)),
                      "epsilon":exact_decimal(decimal_value(a.epsilon)),
-                     "pending":[{"code":code,"reason":str(ex).split(":",1)[1].strip(),"bead":{"EST-CONTEXT-03":"bennett-estimate-bph.5","EST-SOURCE-03":"bennett-estimate-bph.6","EST-SOURCE-04":"bennett-estimate-bph.7"}.get(code,"bennett-estimate-bph.4")}]}
+                     "pending":[{"code":code,"reason":str(ex).split(":",1)[1].strip()}]}
             if aliases is not None:pending["invocation"]["token_aliases"]=aliases
             print(jcs(pending))
             return 3

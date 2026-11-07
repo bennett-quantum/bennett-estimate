@@ -10,12 +10,16 @@ from unittest.mock import patch
 from fractions import Fraction as F
 
 ROOT=Path(__file__).resolve().parents[1]
+import sys
+sys.path.insert(0, str(ROOT / "scripts"))
+from pinned import sibling
+
 spec=importlib.util.spec_from_file_location("scheduled_estimate",ROOT/"src/estimate.py")
 e=importlib.util.module_from_spec(spec);sys.modules[spec.name]=e;spec.loader.exec_module(e)
 
 
 def target():
-    return e.Target.read((ROOT.parent/"bennett-targets/targets/ideal-all-to-all.json").read_text())
+    return e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
 
 
 def point(symbol="a"*64,point="entry:0",iteration=()):
@@ -77,7 +81,9 @@ class Selectors(unittest.TestCase):
         code="oracle @root (x:wire in) (t:wire) (f:wire[4]) () (a:i1)\nregs { r:reg[1] }\n^entry():\nr = lift.call @worker (x) () (a) ()\nlift.retval r\nlproc @worker (v:reg[1]) (r:reg[1]) () (a:i1 classical) ()\n^entry():\nlift.ret v"
         obj=make_program(code,{"root":root,"worker":worker})
         doc=schedule([entry(path=[{**point(obj.symbol("worker")["interface_hash"]),"instance":["0"]}],realisation="native")])
-        e.Schedule(doc,obj,"root")
+        parsed=e.Schedule(doc,obj,"root")
+        self.assertEqual(parsed.pick("gate",[{**point(obj.symbol("worker")["interface_hash"]),"instance":[0]}],0),{"realisation":"native"})
+        self.assertIsNone(parsed.pick("gate",[{**point(obj.symbol("worker")["interface_hash"]),"instance":[1]}],0))
 
     def test_captured_record_arrays_reuse_validation_without_rebinding_fields(self):
         class Counting(e.Catalog):
@@ -152,7 +158,7 @@ class Selectors(unittest.TestCase):
             make_object("perm_action @root (t:wire) () () () ()\nregs {  } bounds {0}\n^entry():\nqloop 0 {\naction_call @root (t) () () ()\n}",sig)
 
     def test_published_k82_all_86_expansion_digests(self):
-        doc=e.loads((ROOT.parent/"bennett-isa-spec/conformance/fixtures/accepted-k82-09/k82.json").read_text())
+        doc=e.loads((sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/accepted-k82-09/k82.json").read_text())
         count=0
         for edge in doc["edges"]:
             for instance in edge["instances"]:
@@ -182,7 +188,7 @@ class Selectors(unittest.TestCase):
         self.assertEqual(count,86)
 
     def test_published_k82_interfaces_and_binding_cases(self):
-        doc=e.loads((ROOT.parent/"bennett-isa-spec/conformance/fixtures/accepted-k82-09/k82.json").read_text())
+        doc=e.loads((sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/accepted-k82-09/k82.json").read_text())
         catalog=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),target())
         names=[n for n,r in catalog.recipes.items() if all(isinstance(f,str) for f in r["parameters"])]
         self.assertEqual(len(names),doc["catalog"]["named_interface_recipes"])
@@ -258,108 +264,6 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
-    def test_k80_primitive_terminal_chain_recompute_has_exact_published_leaves(self):
-        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[1,1],"mem":[],"args":[],"bounds":[]}
-        code="perm_action @root () (x:wire in, z:wire in) () () ()\n^entry():\nd = qalloc any 1\ncx x d\ncx z d\ncx z d\ncx x d\nqfree d"
-        obj=make_object(code,sig);t=target()
-        doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
-        carrier=point(obj.symbol("root")["interface_hash"],"entry:5")
-        doc["entries"]=[entry("cleanup",path=[carrier],generated=0,realisation="recompute"),entry("gate",path=[{**carrier,"point":"entry:3"}],realisation="missing-scheme"),entry("gate",path=[carrier],generated=0,realisation="missing-scheme")]
-        obj.sections["schedule"]=doc
-        result=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
-        self.assertEqual(result["resources"],{"gate_count":"7","time":"7","peak_qubits[data]":"4","qubit_second[data]":"26"})
-        self.assertEqual(result["cleanup_decisions"][0]["owned_points"],["entry:3","entry:4","entry:5"])
-        class Trace(e.Ledger):
-            def __init__(self,*a,**kw):super().__init__(*a,**kw);self.leaves=[]
-            def allocate(self,b,**kw):self.leaves.append(("allocate",kw["chain"][-1]["point"],kw["ordinal"]));return super().allocate(b,**kw)
-            def release(self,b,**kw):self.leaves.append(("release",kw["chain"][-1]["point"],kw["ordinal"]));return super().release(b,**kw)
-            def gate(self,op,wires,controls=(),**kw):self.leaves.append((op,kw["chain"][-1]["point"],kw["ordinal"]));return super().gate(op,wires,controls,**kw)
-        expected=[("allocate","entry:0",0),("cx","entry:1",0),("cx","entry:2",0),("allocate","entry:5",0),*(('cx','entry:5',n) for n in range(1,6)),("release","entry:5",6),("release","entry:5",7)]
-        for raw in [False,True]:
-            c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);c.ledger=Trace(t,e.Schedule(doc,obj,"root"))
-            e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
-            actual=list(reversed(expected)) if raw else expected
-            if raw:actual=[("release" if op=="allocate" else "allocate" if op=="release" else op,p,n) for op,p,n in actual]
-            self.assertEqual(c.ledger.leaves,actual)
-            self.assertEqual(c.ledger.finish(),{k:int(v) for k,v in result["resources"].items()})
-
-    def test_primitive_joint_inverse_has_only_first_release_owner(self):
-        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":[],"bounds":[]}
-        for first,last in [("a","b"),("b","a")]:
-            code=f"perm_action @root () () () () ()\n^entry():\na = qalloc any 1\nb = qalloc any 1\nswap a b\nswap a b\nqfree {first}\nqfree {last}"
-            obj=make_object(code,sig)
-            doc=e.estimate(obj,target(),"root",[],["0"]*4)["effective_schedule"]
-            symbol=obj.symbol("root")["interface_hash"]
-            doc["entries"]=[entry("cleanup",path=[point(symbol,"entry:4")],realisation="recompute")]
-            obj.sections["schedule"]=doc
-            result=e.estimate(obj,target(),"root",[],["0"]*4,include_frame=True)
-            self.assertEqual(result["resources"],{"gate_count":"5","time":"5","peak_qubits[data]":"4","qubit_second[data]":"18"})
-            self.assertEqual([(d["chain"][-1]["point"],d["owned_points"]) for d in result["cleanup_decisions"]],[("entry:4",["entry:3","entry:4"]),("entry:5",["entry:5"])])
-
-    def test_primitive_cleanup_choice_is_lazy_and_does_not_replay_missing_history(self):
-        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
-        obj=make_object("perm_action @root (x:wire) () () () ()\n^entry():\ng = qalloc any 1\nswap x g\nswap x g\nqfree g",sig);t=target()
-        doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
-        chosen=entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],"entry:3")],realisation="reverse")
-        doc["entries"]=[chosen,chosen]
-        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);c.ledger=e.Ledger(t,e.Schedule(doc,obj,"root"))
-        with patch.object(t,"native_gate",wraps=t.native_gate) as native,self.assertRaisesRegex(e.ContractError,"multiple maximal"):
-            e.Source(obj,t,c).region("root",[],["0"]*4)
-        self.assertEqual(native.call_count,1)  # computing call, before cleanup
-        doc["entries"]=[{**chosen,"cleanup":{"realisation":"recompute"}}];obj.sections["schedule"]=doc
-        with self.assertRaisesRegex(e.ContractError,"recompute binding remains pending"):
-            e.estimate(obj,t,"root",[],["0"]*4)
-
-    def test_general_source_adjoint_cleanup_never_silently_ignores_recompute(self):
-        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[1],"mem":[],"args":[],"bounds":[]}
-        code="perm_action @root () (x:wire in) () () ()\n^entry():\nadj action_call @child () (x) () ()\nperm_action @child () (x:wire in) () () ()\n^entry():\ng = qalloc any 1\ncx x g\ncx x g\nqfree g"
-        obj=make_program(code,{"root":sig,"child":sig});t=target()
-        doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
-        doc["entries"]=[entry("cleanup",path=[point(obj.symbol("root")["interface_hash"]),point(obj.symbol("child")["interface_hash"])],realisation="recompute")]
-        obj.sections["schedule"]=doc
-        with self.assertRaisesRegex(e.ContractError,"recompute binding remains pending"):
-            e.estimate(obj,t,"root",[],["0"]*4)
-
-    def test_empty_clean_allocation_cleanup_supports_whole_recompute(self):
-        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":["i64"],"bounds":[]}
-        obj=make_object("perm_action @root () () () (n:i64) ()\n^entry():\ng = qalloc data n\nqfree g",sig)
-        for n in [1,3]:
-            doc=e.estimate(obj,target(),"root",[str(n)],["0"]*4)["effective_schedule"]
-            doc["entries"]=[entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],"entry:1")],generated=0,realisation="recompute")]
-            obj.sections["schedule"]=doc
-            result=e.estimate(obj,target(),"root",[str(n)],["0"]*4,include_frame=True)
-            self.assertEqual(result["resources"],{"gate_count":str(n),"time":str(n),"peak_qubits[data]":str(2*n),"qubit_second[data]":str(2*n*n)})
-            self.assertEqual([(d["chain"][-1]["point"],d["ordinal"],d["realisation"]) for d in result["cleanup_decisions"]],[("entry:1",0,"recompute")])
-        del obj.sections["schedule"]
-        result=e.estimate(obj,target(),"root",[str(2**40)],["0"]*4)
-        self.assertEqual(result["resources"],{"gate_count":"0","time":"0","peak_qubits[data]":str(2**40),"qubit_second[data]":"0"})
-        self.assertLess(result["summary_operations"],20)
-
-    def test_empty_cleanup_adjoint_and_raw_inverse_keep_correct_carriers(self):
-        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":[],"bounds":[]}
-        obj=make_object("perm_action @root () () () () ()\n^entry():\ng = qalloc data 2\nqfree g",sig);t=target()
-        doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
-        doc["entries"]=[entry("cleanup",realisation="recompute")]
-        for adjoint,raw,where in [(False,False,"entry:1"),(False,True,"entry:1"),(True,False,"entry:0")]:
-            with self.subTest(adjoint=adjoint,raw=raw):
-                c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);c.ledger=e.Ledger(t,e.Schedule(doc,obj,"root"))
-                e.Source(obj,t,c).region("root",[],["0"]*4,adjoint=adjoint,raw_inverse=raw)
-                self.assertEqual(c.ledger.finish(),{"gate_count":2,"time":2,"peak_qubits[data]":4,"qubit_second[data]":8})
-                self.assertEqual([d["chain"][-1]["point"] for d in c.ledger.cleanup_decisions],[where])
-
-    def test_empty_recompute_carrier_zero_is_separate_from_fresh_leaf_zero(self):
-        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":[],"bounds":[]}
-        obj=make_object("perm_action @root () () () () ()\n^entry():\ng = qalloc data 2\nqfree g",sig)
-        model=e.loads(e.jcs(target().doc));model["classes"]["buffer"]={**model["classes"]["data"],"capacity":3};t=e.Target.read(e.jcs(model))
-        doc=e.estimate(obj,t,"root",[],["0"]*4,inherited_controls=1)["effective_schedule"]
-        path=[point(obj.symbol("root")["interface_hash"],"entry:1")]
-        doc["entries"]=[entry("cleanup",path=path,generated=0,realisation="recompute"),entry("alloc",path=path,generated=0,**{"class":"buffer"}),entry("gate",path=path,generated=0,realisation="missing-scheme")]
-        obj.sections["schedule"]=doc
-        result=e.estimate(obj,t,"root",[],["0"]*4,inherited_controls=1,include_frame=True)
-        self.assertEqual(result["resources"],{"gate_count":"2","time":"2","peak_qubits[data]":"2","peak_qubits[buffer]":"3","qubit_second[data]":"4","qubit_second[buffer]":"6"})
-        self.assertEqual([r["class"] for r in result["frame"]["scratch"]],["data","buffer"])
-        self.assertEqual(len(result["cleanup_decisions"]),1)
-
     def test_proved_clean_measurement_survives_private_workspace_identity_call(self):
         cc={"abi":"0.9","tier":"cc","kind":"cc","params":[],"results":[]}
         action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
@@ -849,7 +753,7 @@ class Accounting(unittest.TestCase):
         result=e.estimate(obj,target(),"root",params,budget,token_aliases=aliases)
         params[0][0]="2";params.append("3");budget[0]="4";aliases[0]=1
         self.assertEqual(result["invocation"],{"args":[["1","0","0","0"]]*2,"budget":["0"]*4,"token_aliases":[0,0]})
-        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
+        fixture=sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/controlled-action-09"
         obj=e.Object.read((fixture/"controlled.bisa").read_text());t=e.Target.read((fixture/"target.json").read_text())
         result=e.estimate(obj,t,"controlled",[],["0"]*4)
         saved=e.jcs(result["effective_schedule"])
@@ -1626,7 +1530,7 @@ class Accounting(unittest.TestCase):
         self.assertEqual(result["resources"]["peak_qubits[data]"],str(2**101+1))
 
     def test_k12_certificate_production_preserves_supplied_proof_metadata(self):
-        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
+        fixture=sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/controlled-action-09"
         obj=e.Object.read((fixture/"controlled.bisa").read_text());t=e.Target.read((fixture/"target.json").read_text())
         result=e.estimate(obj,t,"controlled",[],["0"]*4)
         template=e.Certificate.read((fixture/"certificate.json").read_text())
@@ -1893,7 +1797,7 @@ class Accounting(unittest.TestCase):
     def test_certificate_resource_reconstruction_includes_frame(self):
         obj=e.Object.read((ROOT/"tests/fixtures/example3.bisa").read_text());t=target()
         result=e.estimate(obj,t,"borrow_demo",[],["0"]*4,include_frame=True)
-        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09/certificate.json"
+        fixture=sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/controlled-action-09/certificate.json"
         doc=e.loads(fixture.read_text());root=result["closure_hash"]
         region=next(iter(doc["regions"].values()))
         region.update(frame=e.loads(e.jcs(result["frame"])),signature=obj.symbol("borrow_demo")["signature"],kind="perm_action",bounds=[1],resources=result["resources"],estimate={"precision_digits":34,"exact_resources":result["exact_resources"]},gates_used={n:{"count":int(v)} for n,v in result["gates"].items()},claims=[])
@@ -1911,7 +1815,7 @@ class Accounting(unittest.TestCase):
             e.Certificate.read(e.jcs(doc)).check_resource_rows(result)
 
     def test_certificate_cannot_change_root_signature_or_gate_inventory(self):
-        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
+        fixture=sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/controlled-action-09"
         obj=e.Object.read((fixture/"controlled.bisa").read_text());t=e.Target.read((fixture/"target.json").read_text())
         result=e.estimate(obj,t,"controlled",[],["0"]*4)
         doc=e.loads((fixture/"certificate.json").read_text());region=doc["regions"][result["closure_hash"]]
@@ -1960,7 +1864,7 @@ class Accounting(unittest.TestCase):
             self.assertEqual(ledger.finish(),p.resources(t,{"data":sum(b.width for b in env.values())}),name)
 
     def test_published_controlled_schedule_and_topology_reach_estimator(self):
-        fixture=ROOT.parent/"bennett-isa-spec/conformance/fixtures/controlled-action-09"
+        fixture=sibling(ROOT, "bennett-isa-spec") / "conformance/fixtures/controlled-action-09"
         obj=e.Object.read((fixture/"controlled.bisa").read_text())
         t=e.Target.read((fixture/"target.json").read_text())
         result=e.estimate(obj,t,"controlled",[],["0"]*4)

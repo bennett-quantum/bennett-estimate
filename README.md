@@ -3,30 +3,34 @@
 Resource estimation from ISA objects, certificates and target descriptions, without materialising gates.
 
 Partial independent implementation of published ISA 0.9. See [requirements and
-coverage](docs/PLAN.md) and [handoff](HANDOFF.md) before relying on an estimate.
+coverage](docs/PLAN.md) before relying on an estimate.
+Current ecosystem handoff: [bennett/HANDOFF.md](../bennett/HANDOFF.md).
 The remaining source, scheduling and verification work is tracked in Beads
 under `bennett-estimate-bph`; the complete requested estimator is not yet delivered.
 
 Build with Rust and Python 3.11 or newer (standard library only):
 
 ```sh
-cargo build --offline --locked -j4
+cargo build --offline --locked -j3
+target_data=.tmp/gate/cache/bennett-targets@4a74c6275592/bennett-targets/targets/ideal-all-to-all.json
 target/debug/bennett-estimate tests/fixtures/example3.bisa \
-  --target ../bennett-targets/targets/ideal-all-to-all.json
+  --target "$target_data"
 target/debug/bennett-estimate tests/fixtures/example1.bisa \
-  --target ../bennett-targets/targets/ideal-all-to-all.json \
+  --target "$target_data" \
   --region inc8 --budget 1048576,0,0,0 --params '[]'
 ```
 
 The CLI writes one deterministic JSON object. Invalid input produces a
 diagnostic on stderr, nonzero exit status and empty stdout. A request affected
 by a filed contract gap instead emits a `pending evidence` JSON report with
-its request bindings and issue code, no resource rows, and exit status 3. `--params` is the complete K13 argument
+its request bindings and contract code, no resource rows, and exit status 3. `--params` is the complete K13 argument
 array, inline or `@file`. Integer arguments are unsigned decimal **strings**,
 f64 arguments are binary64 hex bit patterns, and tokens are four-string tuples.
 No missing argument becomes zero. `--region` is required for multiple entries.
-The CLI's explicit default budget is `0,0,0,0`; its variant is `forward` and
-inherited control count is zero. Those values appear in the result.
+Oracle and token-taking entries require `--budget B,heap,stack,depth`,
+including `--budget 0,0,0,0` when zero is intended. Token-free action and CC/R
+entries retain a zero invocation tuple. The variant defaults to `forward` and
+inherited control count to zero. All bindings appear in the result.
 
 `--token-aliases '[0,0]'` supplies the published K91 equality partition.
 Oracle contexts list their primary token followed by token arguments; actions
@@ -51,6 +55,12 @@ program correctness, optimality, or structure recovery. A
 `--classical-step-bound N` report instead labels a **conditional** upper bound
 and states the termination assumption. It contains `rational_upper_bounds`,
 never a fabricated exact cost. This option applies to purely classical objects.
+
+K86 `gates[].realisation_model` metadata is accepted and included in the
+target hash. The estimator reconstructs costs; it does not check phase,
+unitarity or accuracy of those models. Supplied models are listed in
+`native_model_obligations` as `unchecked`, or `unsupported-model` for an
+unknown version. Neither status establishes a numerical certificate claim.
 
 Raw reversal of an expanded call retains its forward ordinals and support
 points; source action adjoints are formed separately before expansion.
@@ -105,12 +115,6 @@ including nonzero caller targets. Fresh calls have separate occurrence indices;
 source adjoints form new pairs while raw inverse retains forward paths. General
 release-ended chains, action-call histories and cleanup window validation remain
 required; this family does not complete K81.
-
-Actions containing only clean allocations and frees also support whole-cleanup
-recompute, including an empty computing sequence. The fresh allocation, XOR
-and releases have ordinary leaf ordinals; the cleanup carrier adds no charge.
-Raw inverse keeps the forward carrier, while a source adjoint has its replacement
-release point. General inverse chains remain required.
 
 Default CC/R topology replay reserves vertices for all live registers, checks
 native adjacency and scratch capacity, and restores placements during uncall.
@@ -176,19 +180,21 @@ reference/proof metadata and rejects changed object, target, schedule or argumen
 The output does not assert a correctness verdict; claims remain unchecked.
 Certificate bytes are JCS and deterministic.
 
-Run the local checks headlessly:
+Run the default tests headlessly (create the two job directories first):
 
 ```sh
 env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u BROWSER \
-  TMPDIR="$PWD/.tmp/sol-estimate/tmp" \
-  CARGO_TARGET_DIR="$PWD/.tmp/sol-estimate/target" \
-  scripts/pre-push --working-tree
+  TMPDIR="$PWD/.tmp/quality-estimate/tmp" \
+  CARGO_TARGET_DIR="$PWD/.tmp/quality-estimate/target" \
+  timeout 180 cargo test --offline --locked -j3 -- --test-threads=4
 ```
 
-The tests require the sibling published target/conformance data and the VM
-binary at `../bennett-vm/target/debug/bennett-vm` (override with
-`BENNETT_VM_BIN`). They never import sibling implementation code. The ordinary
-pre-push hook uses the public gate tool pinned in gate.toml. It tests each pushed
-SHA in a clean worktree with sibling data and the VM binary at their pinned
-commits; the job runner owns git operations. The working-tree form performs no git
-operation and is for development, not evidence about a pushed SHA.
+Tests and the differential resolve published target/spec/conformance data and
+VM binaries only from the `gate.toml` revisions in the immutable gate cache.
+The cache must be populated by the pinned gate tool; missing or mismatched
+pins fail with the required commit. No live sibling checkout or arbitrary VM
+binary override supplies test evidence. The ordinary pre-push hook tests the
+pushed SHA in a clean worktree; the orchestrator owns that merge-time gate.
+
+See [quality evidence](docs/quality.md) for default runtime, Python coverage,
+independent brute-force accounting, literal provenance and phase equivalence.
