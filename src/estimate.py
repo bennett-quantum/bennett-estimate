@@ -3260,12 +3260,6 @@ class ClassicalMachine:
         return (p, steps)
 
 
-def source_occurrence(inst):return inst.block,inst.ordinal
-
-
-def source_point(inst):return f"{inst.block}:{inst.ordinal}"
-
-
 class Source:
     def __init__(self, obj, target, catalog):
         self.obj, self.target, self.catalog = obj, target, catalog
@@ -3393,7 +3387,7 @@ class Source:
                 env[f"$image:{n}"]=data
                 before.append({"image":f"$image:{n}","wires":n})
                 after.insert(0,{"inverse":True,"body":[{"image":f"$image:{n}","wires":n}]})
-            meta={"symbol":self.obj.symbol(fn.name)["interface_hash"],"point":source_point(inst),"depth":0,"kind":"qregion","exact":fn.kind=="perm_action"}
+            meta={"symbol":self.obj.symbol(fn.name)["interface_hash"],"point":f"{inst.block}:{inst.ordinal}","depth":0,"kind":"qregion","exact":fn.kind=="perm_action"}
             if self.catalog.ledger is not None:
                 for node in before+after:self.catalog.source_metadata[id(node)]=(node,meta)
             prefix+=before;suffix=after+suffix
@@ -3445,11 +3439,11 @@ class Source:
                     if row is None or not overlap(row["outputs"],b):continue
                     if row["match"] is None:break
                     if prior not in owned:inverse.append(prior)
-                point=source_occurrence(inst)
+                point=(inst.block,inst.ordinal)
                 plan=self.primitive_cleanup_plan(fn,events,allocations,versions,b,index,inverse)
                 plans[point]=plan
                 for i in inverse:owners[(fn.code[i].block,fn.code[i].ordinal)]=plan;owned.add(i)
-                events[index]={"outputs":parts,"reads":parts,"match":None}
+                events[index]={"outputs":[],"reads":parts,"match":None}
                 del versions.ranges[b.identity];del scope[name]
                 continue
             if op in ["qxor","qexch"]:
@@ -3491,7 +3485,7 @@ class Source:
         target_specs=sorted((allocations[identity] for identity in targets),key=lambda t:t["index"]) if local else []
         obstruction=self.primitive_recompute_obstruction(fn,events,inverse,computation,index,b)
         inst=fn.code[index]
-        return {"point":source_occurrence(inst),"symbol":self.obj.symbol(fn.name)["interface_hash"],"function":fn.name,"release":inst.args[0],"compute":[fn.code[i] for i in computation],"targets":target_specs,"available":local and clean and early and entry_clean,"obstruction":obstruction,"owned_points":[source_point(fn.code[i]) for i in inverse]+[source_point(inst)],"choices":{},"recomputations":{}}
+        return {"point":(inst.block,inst.ordinal),"symbol":self.obj.symbol(fn.name)["interface_hash"],"function":fn.name,"release":inst.args[0],"compute":[fn.code[i] for i in computation],"targets":target_specs,"available":local and clean and early and entry_clean,"obstruction":obstruction,"owned_points":[f"{fn.code[i].block}:{fn.code[i].ordinal}" for i in inverse]+[f"{inst.block}:{inst.ordinal}"],"choices":{},"recomputations":{}}
 
     @staticmethod
     def primitive_recompute_obstruction(fn,events,inverse,computation,release,carrier):
@@ -3499,10 +3493,18 @@ class Source:
         if not inverse:return None
         outputs=[carrier]+[b for i in computation for b in events[i]["outputs"]]
         inputs=[b for i in computation for b in events[i]["reads"]]
-        def overlaps(left,right):return any(a.identity==b.identity and a.offset<b.offset+b.width and b.offset<a.offset+a.width for a in left for b in right)
-        intervening=((i,row) for i,row in events.items() if inverse[0]<i<release and i not in inverse)
-        obstruction=next((fn.code[i] for i,row in intervening if overlaps(row["reads"]+row["outputs"],outputs) or overlaps(row["outputs"],inputs)),None)
-        return f"{source_point(obstruction)} ({obstruction.op})" if obstruction is not None else None
+        def overlaps(left,right):
+            return any(a.identity==b.identity and a.offset<b.offset+b.width and b.offset<a.offset+a.width for a in left for b in right)
+        for i in range(inverse[0],release):
+            if i in inverse:continue
+            row=events.get(i)
+            if row is None:continue
+            touches_carrier=overlaps(row["reads"]+row["outputs"],outputs)
+            changes_input=overlaps(row["outputs"],inputs)
+            if touches_carrier or changes_input:
+                inst=fn.code[i]
+                return f"{inst.block}:{inst.ordinal} ({inst.op})"
+        return None
 
     def cleanup_choice(self,plan):
         ledger=self.catalog.ledger
@@ -3511,7 +3513,8 @@ class Source:
             address={"chain":metadata_counts([*self.catalog.call_edges,point]),"ordinal":0,"step":self.catalog.root_step,"phase":self.catalog.root_phase}
             choice=(ledger.schedule.pick("cleanup",**address) if ledger is not None else None) or {"realisation":"reverse"}
             if ledger is not None:ledger.cleanup_decisions.append({**address,**choice,"owned_points":plan["owned_points"]})
-            require(choice["realisation"]!="recompute" or plan["available"] and plan["obstruction"] is None,f"source cleanup-pair recompute crosses non-disjoint row {plan['obstruction']}" if plan["obstruction"] is not None else "source cleanup-pair recompute binding remains pending for this carrier")
+            require(choice["realisation"]!="recompute" or plan["obstruction"] is None,f"source cleanup-pair recompute crosses non-disjoint row {plan['obstruction']}")
+            require(choice["realisation"]!="recompute" or plan["available"],"source cleanup-pair recompute binding remains pending for this carrier")
             plan["choices"][ledger]=choice["realisation"]
         return plan["choices"][ledger]
 
@@ -3543,11 +3546,11 @@ class Source:
         for inst in fn.code:
             if inst.op=="qalloc":
                 require(len(inst.lhs)==1,"missing allocation result")
-                live[inst.lhs[0]]=source_occurrence(inst)
+                live[inst.lhs[0]]=(inst.block,inst.ordinal)
             else:
                 require(len(inst.args)==1,"qfree operand arity")
                 previous=live.pop(inst.args[0],None)
-                if previous is not None:points.update([previous,source_occurrence(inst)])
+                if previous is not None:points.update([previous,(inst.block,inst.ordinal)])
         return points
 
     def oracle_pairs(self,fn,env,controls,adjoint=False):
@@ -3608,7 +3611,7 @@ class Source:
             entry=history.get((key,inputs,before))
             if entry is not None:
                 versions.restore(entry)
-                if op=="oracle_call":pairs.add(source_occurrence(inst))
+                if op=="oracle_call":pairs.add((inst.block,inst.ordinal))
             else:
                 serial+=1;versions.assign(outputs,serial,False)
                 history[(key,inputs,versions.capture(outputs))]=before
@@ -4269,7 +4272,7 @@ class Source:
             beginning=len(out)
             op,a = inst.op,inst.args
             function=function_name or self.calls[-1]
-            meta={"symbol":self.obj.symbol(function)["interface_hash"],"point":source_point(inst),"depth":depth,"kind":op,"call":op in ["action_call","oracle_call"],"oracle_call":op=="oracle_call","exact":self.obj.functions[function].kind=="perm_action"}
+            meta={"symbol":self.obj.symbol(function)["interface_hash"],"point":f"{inst.block}:{inst.ordinal}","depth":depth,"kind":op,"call":op in ["action_call","oracle_call"],"oracle_call":op=="oracle_call","exact":self.obj.functions[function].kind=="perm_action"}
             if op in GATES or op == "mcx":
                 require(not any(self.obj.functions[n].kind in ["oracle","perm_action"] for n in self.calls) or op in ["x","cx","ccx","mcx","swap"],"§5.3: non-permutation source gate in permutation action")
                 params = []
@@ -4407,7 +4410,7 @@ class Source:
             else:
                 raise ContractError(f"source binding not implemented: {op}; no estimate or exactness claim emitted")
             fragment=out[beginning:]
-            point=source_occurrence(inst)
+            point=(inst.block,inst.ordinal)
             release_plan=cleanup_partition[0].get(point) if cleanup_partition else None
             inverse_plan=cleanup_partition[1].get(point) if cleanup_partition else None
             if release_plan is not None or inverse_plan is not None:
@@ -4422,7 +4425,7 @@ class Source:
                 wrapper={"splice":capture}
                 if self.catalog.ledger is not None:self.catalog.source_metadata[id(wrapper)]=(wrapper,meta)
                 fragment=[wrapper];out[beginning:]=fragment
-            if op=="oracle_call" and oracle_pairs and source_occurrence(inst) in oracle_pairs:
+            if op=="oracle_call" and oracle_pairs and (inst.block,inst.ordinal) in oracle_pairs:
                 recompute=self.oracle_recompute(inst,env,regions,controls,meta,function)
                 capture=f"$oracle_cleanup:{self.serial}";self.serial+=1
                 env[capture]=Captured(fragment,dict(env),controls,cleanup=True,recompute=recompute)
@@ -4433,7 +4436,7 @@ class Source:
                 replacement={"inverse":True,"body":fragment}
                 if self.catalog.ledger is not None:self.catalog.source_metadata[id(replacement)]=(replacement,meta)
                 fragment=[replacement]
-            empty=source_occurrence(inst) in empty_cleanups
+            empty=(inst.block,inst.ordinal) in empty_cleanups
             if release_plan is None and (not adjoint and op in ["quncopy","qunload","qfree","qreturn"] or adjoint and op in ["qalloc","qborrow","qcopy","qload"]):
                 recompute=None
                 if op in ["quncopy","qunload"]:
