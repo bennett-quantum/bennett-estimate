@@ -3,6 +3,7 @@ import importlib.util
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import unittest
@@ -51,37 +52,25 @@ def make_program(text,signatures,data=None,layout=None,ptr=32,devices=None):
     return e.Object.read(document())
 
 
+def wire_key(bundle):return bundle.identity,bundle.offset
+
+
+def basis_outputs(ledger):return {slot:ledger.values[key] for slot,key in ledger.slots.items()}
+
+
 class BasisLedger(e.Ledger):
     """One bit per basis assignment, using only the emitted wire operands."""
-    def __init__(self,*args,basis,mask,**kw):
-        super().__init__(*args,**kw)
-        self.basis,self.mask=basis,mask
-        self.values={};self.slots={};self.leaves=[];self.operands=[]
-
-    def interface(self,slot,b,vertices=None):
-        assert b.width==1
-        self.slots[slot]=(b.identity,b.offset)
-        self.values[self.slots[slot]]=self.basis[slot]
-        return super().interface(slot,b,vertices)
-
-    def allocate(self,b,**kw):
-        assert b.width==1
-        self.values[b.identity,b.offset]=0
-        self.leaves.append(("allocate",kw["chain"][-1]["point"],kw["ordinal"]))
-        return super().allocate(b,**kw)
-
-    def release(self,b,**kw):
-        assert self.values.pop((b.identity,b.offset))==0,"dirty release on at least one basis input"
-        self.leaves.append(("release",kw["chain"][-1]["point"],kw["ordinal"]))
-        return super().release(b,**kw)
+    def __init__(self,*args,basis,mask,**kw):super().__init__(*args,**kw);self.basis,self.mask=basis,mask;self.values={};self.slots={};self.leaves=[]
+    def interface(self,slot,b,vertices=None):assert b.width==1;self.slots[slot]=wire_key(b);self.values[self.slots[slot]]=self.basis[slot];return super().interface(slot,b,vertices)
+    def allocate(self,b,**kw):assert b.width==1;self.values[wire_key(b)]=0;self.leaves.append(("allocate",kw["chain"][-1]["point"],kw["ordinal"]));return super().allocate(b,**kw)
+    def release(self,b,**kw):assert self.values.pop(wire_key(b))==0,"dirty release on at least one basis input";self.leaves.append(("release",kw["chain"][-1]["point"],kw["ordinal"]));return super().release(b,**kw)
 
     def gate(self,op,wires,controls=(),**kw):
-        assert op in {"x","cx"} and all(b.width==1 for b in wires)
-        operands=tuple((b.identity,b.offset) for b in wires)
+        assert len(wires)=={"x":1,"cx":2}[op]
+        operands=tuple(map(wire_key,wires))
         predicates=operands[:-1]+tuple((identity,offset) for identity,offset,cls in controls)
         self.values[operands[-1]]^=reduce(and_,(self.values[key] for key in predicates),self.mask)
-        self.leaves.append((op,kw["chain"][-1]["point"],kw["ordinal"]))
-        self.operands.append((op,tuple((identity.rsplit(":",1)[-1],offset) for identity,offset in operands),tuple(controls)))
+        self.leaves.append((op,kw["chain"][-1]["point"],kw["ordinal"],tuple((identity.rsplit(":",1)[-1],offset) for identity,offset in operands),tuple(controls)))
         return super().gate(op,wires,controls,**kw)
 
 
@@ -314,8 +303,15 @@ class Accounting(unittest.TestCase):
         ({**terminal_signature,"mut":[1]},disjoint_source.replace("qfree d", "x y\nqfree d"),"entry:6",["entry:3","entry:4","entry:6"],[("x","entry:5",0)],{"gate_count":"8","time":"8","peak_qubits[data]":"5","qubit_second[data]":"37"}),
     ]
 
+    terminal_inputs=[{"in:0":0xC,"in:1":0xA},{"mut:0":0xAA,"in:0":0xF0,"in:1":0xCC},{"mut:0":0xAA,"in:0":0xF0,"in:1":0xCC}]
+    terminal_outputs=[terminal_inputs[0],{**terminal_inputs[1],"mut:0":0x55},{**terminal_inputs[2],"mut:0":0x55}]
+    terminal_gates=[("cx",(("x",0),("d",0)),()),("cx",(("z",0),("d",0)),())]
+    terminal_replay=[("cx",((a,0),(b,0)),()) for a,b in [("x","terminal_recompute"),("z","terminal_recompute"),("terminal_recompute","d"),("z","terminal_recompute"),("x","terminal_recompute")]]
+    terminal_gate_cases=[terminal_gates+terminal_replay,terminal_gates+[("x",(("y",0),),())]+terminal_replay,terminal_gates+[("x",(("y",0),),())]+terminal_replay]
+    terminal_fixtures=list(zip(terminal_cases,terminal_inputs,terminal_outputs,[0xF,0xFF,0xFF],terminal_gate_cases))
+
     def test_k80_primitive_terminal_chain_recompute_has_exact_published_leaves(self):
-        for (sig,code,release,owned,disjoint,resources),raw in product(self.terminal_cases,[False,True]):
+        for ((sig,code,release,owned,disjoint,resources),basis,expected_basis,mask,gates),raw in product(self.terminal_fixtures,[False,True]):
             with self.subTest(disjoint=disjoint,raw_inverse=raw):
                 obj=make_object(code,sig);t=target()
                 doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
@@ -326,42 +322,37 @@ class Accounting(unittest.TestCase):
                 self.assertEqual(result["resources"],resources)
                 self.assertEqual(result["cleanup_decisions"][0]["owned_points"],owned)
                 expected=[("allocate","entry:0",0),("cx","entry:1",0),("cx","entry:2",0),*disjoint,("allocate",release,0),*(("cx",release,n) for n in range(1,6)),("release",release,6),("release",release,7)]
-                c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);basis={"in:0":0xC,"in:1":0xA} if not disjoint else {"mut:0":0xAA,"in:0":0xF0,"in:1":0xCC}
-                mask=0xF if not disjoint else 0xFF
-                expected_basis={**basis,**({"mut:0":basis["mut:0"]^mask} if disjoint else {})}
-                initial=expected_basis if raw else basis
-                c.ledger=BasisLedger(t,e.Schedule(doc,obj,"root"),basis=initial,mask=mask)
+                c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t)
+                c.ledger=BasisLedger(t,e.Schedule(doc,obj,"root"),basis=(basis,expected_basis)[raw],mask=mask)
                 e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
-                self.assertEqual({slot:c.ledger.values[key] for slot,key in c.ledger.slots.items()},basis if raw else expected_basis)
-                gates=[("cx",(("x",0),("d",0)),()),("cx",(("z",0),("d",0)),())]
-                gates += [(op,(("y",0),),()) for op,p,n in disjoint]
-                gates += [("cx",((a,0),(b,0)),()) for a,b in [("x","terminal_recompute"),("z","terminal_recompute"),("terminal_recompute","d"),("z","terminal_recompute"),("x","terminal_recompute")]]
-                self.assertEqual(c.ledger.operands,list(reversed(gates)) if raw else gates)
-                actual=list(reversed(expected)) if raw else expected
-                if raw:actual=[({"allocate":"release","release":"allocate","cx":"cx","x":"x"}[op],p,n) for op,p,n in actual]
-                self.assertEqual(c.ledger.leaves,actual)
+                self.assertEqual(basis_outputs(c.ledger),(expected_basis,basis)[raw])
+                self.assertEqual([(leaf[0],*leaf[3:]) for leaf in c.ledger.leaves if len(leaf)>3],(gates,gates[::-1])[raw])
+                stride,ops=[(1,{"allocate":"allocate","release":"release","cx":"cx","x":"x"}),(-1,{"allocate":"release","release":"allocate","cx":"cx","x":"x"})][raw]
+                actual=[(ops[op],p,n) for op,p,n in expected[::stride]]
+                self.assertEqual([leaf[:3] for leaf in c.ledger.leaves],actual)
                 self.assertEqual(c.ledger.finish(),{k:int(v) for k,v in resources.items()})
 
+    non_disjoint_cases=[
+        ({**terminal_signature,"mut":[1]},disjoint_source.replace("cx z d\ncx x d","cx z d\ncx d y\ncx x d"),"entry:4 (cx)",{"mut:0":0xAA,"in:0":0xF0,"in:1":0xCC},{"mut:0":0xAA^0xF0,"in:0":0xF0,"in:1":0xCC},0xFF),
+        ({**terminal_signature,"mut":[1],"in":[1]},terminal_source.replace("@root () (x:wire in, z:wire in)","@root (x:wire) (z:wire in)").replace("qfree d","x x\nqfree d"),"entry:5 (x)",{"mut:0":0xC,"in:0":0xA},{"mut:0":0x3,"in:0":0xA},0xF),
+        ({**terminal_signature,"mut":[1]},disjoint_source.replace("qfree d","cx d y\nqfree d"),"entry:5 (cx)",{"mut:0":0xAA,"in:0":0xF0,"in:1":0xCC},{"mut:0":0xAA,"in:0":0xF0,"in:1":0xCC},0xFF),
+        ({**terminal_signature,"mut":[1],"in":[1]},terminal_source.replace("@root () (x:wire in, z:wire in)","@root (z:wire) (x:wire in)").replace("cx z d\ncx x d","cx z d\nx z\ncx x d"),"entry:4 (x)",{"mut:0":0xC,"in:0":0xA},{"mut:0":0x3,"in:0":0xA},0xF),
+        ({**terminal_signature,"in":[]},"perm_action @root () () () () ()\n^entry():\na = qalloc any 1\nd = qalloc any 1\ncx a d\ncx a d\nqfree a\nqfree d","entry:4 (qfree)",{},{},1),
+    ]
+
     def test_k81_non_disjoint_rows_refuse_recompute_and_reverse_all_basis_inputs(self):
-        cases=[
-            ({**self.terminal_signature,"mut":[1]},self.disjoint_source.replace("cx z d\ncx x d","cx z d\ncx d y\ncx x d"),"entry:4 (cx)",{"mut:0":0xAA,"in:0":0xF0,"in:1":0xCC},{"mut:0":0xAA^0xF0,"in:0":0xF0,"in:1":0xCC},0xFF),
-            ({**self.terminal_signature,"mut":[1],"in":[1]},self.terminal_source.replace("@root () (x:wire in, z:wire in)","@root (x:wire) (z:wire in)").replace("qfree d","x x\nqfree d"),"entry:5 (x)",{"mut:0":0xC,"in:0":0xA},{"mut:0":0x3,"in:0":0xA},0xF),
-        ]
-        for (sig,code,row,basis,expected,mask),raw in product(cases,[False,True]):
+        for (sig,code,row,basis,expected,mask),raw in product(self.non_disjoint_cases,[False,True]):
             with self.subTest(row=row,raw_inverse=raw):
                 obj=make_object(code,sig);t=target()
-                doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
+                obj.sections["schedule"]=doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
                 c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t)
-                c.ledger=BasisLedger(t,e.Schedule(doc,obj,"root"),basis=expected if raw else basis,mask=mask)
+                c.ledger=BasisLedger(t,e.Schedule(doc,obj,"root"),basis=(basis,expected)[raw],mask=mask)
                 e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
-                self.assertEqual({slot:c.ledger.values[key] for slot,key in c.ledger.slots.items()},basis if raw else expected)
-                doc["entries"]=[entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],"entry:6")],realisation="recompute")]
-                obj.sections["schedule"]=doc
-                with self.assertRaises(e.ContractError) as error:e.estimate(obj,t,"root",[],["0"]*4)
-                self.assertIn("non-disjoint row "+row,str(error.exception))
+                self.assertEqual(basis_outputs(c.ledger),(expected,basis)[raw])
+                doc["entries"]=[entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],f"entry:{len(obj.functions['root'].code)-1}")],realisation="recompute")]
+                with self.assertRaisesRegex(e.ContractError,"non-disjoint row "+re.escape(row)):e.estimate(obj,t,"root",[],["0"]*4)
                 c.ledger=BasisLedger(t,e.Schedule(doc,obj,"root"),basis=basis,mask=mask)
-                with self.assertRaises(e.ContractError) as error:e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
-                self.assertIn("non-disjoint row "+row,str(error.exception))
+                with self.assertRaisesRegex(e.ContractError,"non-disjoint row "+re.escape(row)):e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
 
     def test_primitive_joint_inverse_has_only_first_release_owner(self):
         sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":[],"bounds":[]}
