@@ -3,6 +3,53 @@
 The estimator is Python; Cargo packages its stdlib-only interpreter and catalog.
 Coverage of the Rust launcher alone does not measure estimator semantics.
 
+## Terminal cleanup dependency safety
+
+Verified on 2026-11-07 at implementation `9a4e7a8`, after the dependency
+repair `ecc38f7`. ISA 0.9 §6.2/§6.4 and §11 K80/K81 at gate pin
+`fd626d37aba1f719c3b7b2059be46cbfaf462886` permit moving the owned inverses
+past disjoint rows. Checking only writes to the carrier had also admitted
+rows reading its partly restored value or changing a replay input.
+
+Terminal plans now retain complete read/write ranges. Recompute checks every
+non-owned row from the first replaced inverse to the release: it must neither
+read nor write the carrier or computed targets, nor write a computation
+input. Releasing an input changes its lifetime and also blocks replay.
+Explicit recompute fails before suppressing any inverse and names the
+non-disjoint source row; reverse remains available. The contiguous and both
+independent X placements retain their counts and source positions.
+
+The regression oracle executes the actual `Ledger.gate` wire identities,
+offsets and controls with bitwise AND/XOR, independently of estimator version
+matching and resource algebra. Each integer bit represents one basis input:
+`x=0xC,z=0xA` enumerate four assignments; `x=0xF0,z=0xCC,y=0xAA`
+enumerate eight. Expectations are hand-derived: independent X flips y,
+a carrier read between the inverses XORs x into y, a read after both inverses
+leaves y unchanged, and input X flips that input. Every scratch release must
+be zero on every assignment. Forward and raw inverse are checked separately.
+Complete positive gate traces also assert operands and controls.
+
+Both original counterexamples failed red first because no error was raised.
+The final five non-disjoint cases cover carrier reads between and after the
+inverses, input writes between and after them, and input release. Running the
+final test against pre-guard `16ebd9e` loaded in memory gives all ten expected
+subcase failures, with no test errors. Source partitioning and terminal-plan
+construction are separate phases; shared source coordinates and fixture data
+remove repeated formatting and test branching.
+
+Verification in the headless environment below, with no source edits afterward:
+
+- `timeout 60 python3 -B -m unittest discover -s tests -p test_schedule.py -k test_k8 -v`: two tests, all 16 fixture/direction subcases passed.
+- `timeout 90 python3 -B -m unittest discover -s tests -p test_schedule.py -k cleanup -v`: eight tests passed in 4.831 s.
+- `timeout 180 cargo test --offline --locked -j3 -- --test-threads=4`: 241 Python tests and four Rust wrappers passed, no skips; 118.40 s wall, 117.58 s Cargo interval, 124,196 KiB peak RSS.
+- `BENNETT_ESTIMATE_BIN=$CARGO_TARGET_DIR/debug/bennett-estimate timeout 180 python3 -B -m unittest discover -s tests -p test_estimate.py -k differential_rung3_and_rung2_inventory -v`: passed in 18.628 s, 19.01 s wall. This includes all ten complete CC-program comparisons against VM pin `d9cb68433c08f4db8f7d8c90f121a8adae51759b`. The VM still reports topology unavailable; no topology match is claimed.
+- `timeout 30 python3 -I -B scripts/quality_ratchet.py`: no regression against the unchanged baseline. Source cognitive-complexity mass is 6,367 against 6,377; test_schedule is 343 against 344. Maximum function lengths remain 252 and 40. Function-length distributions and wrapper counts pass; litter and process-identifier lists remain empty.
+- `cargo fmt --check`, `timeout 60 cargo clippy --offline --locked -j3 --all-targets -- -D warnings`, `bash -n scripts/pre-push scripts/check scripts/install-hooks.sh`, and `git diff --check 16ebd9e..HEAD`: passed.
+
+Coverage and the literal inventory below remain earlier snapshots, scoped by
+their recorded source hashes. The following interleaving section records the
+earlier repair and its measurements.
+
 ## Terminal cleanup interleavings
 
 The K80 witness now also covers an independent `x y` between the two inverse
