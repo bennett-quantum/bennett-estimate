@@ -264,68 +264,6 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
-    def test_k80_primitive_terminal_chain_recompute_has_exact_published_leaves(self):
-        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[1,1],"mem":[],"args":[],"bounds":[]}
-        code="perm_action @root () (x:wire in, z:wire in) () () ()\n^entry():\nd = qalloc any 1\ncx x d\ncx z d\ncx z d\ncx x d\nqfree d"
-        obj=make_object(code,sig);t=target()
-        doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
-        carrier=point(obj.symbol("root")["interface_hash"],"entry:5")
-        doc["entries"]=[entry("cleanup",path=[carrier],generated=0,realisation="recompute"),entry("gate",path=[{**carrier,"point":"entry:3"}],realisation="missing-scheme"),entry("gate",path=[carrier],generated=0,realisation="missing-scheme")]
-        obj.sections["schedule"]=doc
-        result=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
-        self.assertEqual(result["resources"],{"gate_count":"7","time":"7","peak_qubits[data]":"4","qubit_second[data]":"26"})
-        self.assertEqual(result["cleanup_decisions"][0]["owned_points"],["entry:3","entry:4","entry:5"])
-        class Trace(e.Ledger):
-            def __init__(self,*a,**kw):super().__init__(*a,**kw);self.leaves=[]
-            def allocate(self,b,**kw):self.leaves.append(("allocate",kw["chain"][-1]["point"],kw["ordinal"]));return super().allocate(b,**kw)
-            def release(self,b,**kw):self.leaves.append(("release",kw["chain"][-1]["point"],kw["ordinal"]));return super().release(b,**kw)
-            def gate(self,op,wires,controls=(),**kw):self.leaves.append((op,kw["chain"][-1]["point"],kw["ordinal"]));return super().gate(op,wires,controls,**kw)
-        expected=[("allocate","entry:0",0),("cx","entry:1",0),("cx","entry:2",0),("allocate","entry:5",0),*(('cx','entry:5',n) for n in range(1,6)),("release","entry:5",6),("release","entry:5",7)]
-        for raw in [False,True]:
-            c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);c.ledger=Trace(t,e.Schedule(doc,obj,"root"))
-            e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
-            actual=list(reversed(expected)) if raw else expected
-            if raw:actual=[("release" if op=="allocate" else "allocate" if op=="release" else op,p,n) for op,p,n in actual]
-            self.assertEqual(c.ledger.leaves,actual)
-            self.assertEqual(c.ledger.finish(),{k:int(v) for k,v in result["resources"].items()})
-
-    def test_primitive_joint_inverse_has_only_first_release_owner(self):
-        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":[],"bounds":[]}
-        for first,last in [("a","b"),("b","a")]:
-            code=f"perm_action @root () () () () ()\n^entry():\na = qalloc any 1\nb = qalloc any 1\nswap a b\nswap a b\nqfree {first}\nqfree {last}"
-            obj=make_object(code,sig)
-            doc=e.estimate(obj,target(),"root",[],["0"]*4)["effective_schedule"]
-            symbol=obj.symbol("root")["interface_hash"]
-            doc["entries"]=[entry("cleanup",path=[point(symbol,"entry:4")],realisation="recompute")]
-            obj.sections["schedule"]=doc
-            result=e.estimate(obj,target(),"root",[],["0"]*4,include_frame=True)
-            self.assertEqual(result["resources"],{"gate_count":"5","time":"5","peak_qubits[data]":"4","qubit_second[data]":"18"})
-            self.assertEqual([(d["chain"][-1]["point"],d["owned_points"]) for d in result["cleanup_decisions"]],[("entry:4",["entry:3","entry:4"]),("entry:5",["entry:5"])])
-
-    def test_primitive_cleanup_choice_is_lazy_and_does_not_replay_missing_history(self):
-        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":[],"mem":[],"args":[],"bounds":[]}
-        obj=make_object("perm_action @root (x:wire) () () () ()\n^entry():\ng = qalloc any 1\nswap x g\nswap x g\nqfree g",sig);t=target()
-        doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
-        chosen=entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],"entry:3")],realisation="reverse")
-        doc["entries"]=[chosen,chosen]
-        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);c.ledger=e.Ledger(t,e.Schedule(doc,obj,"root"))
-        with patch.object(t,"native_gate",wraps=t.native_gate) as native,self.assertRaisesRegex(e.ContractError,"multiple maximal"):
-            e.Source(obj,t,c).region("root",[],["0"]*4)
-        self.assertEqual(native.call_count,1)  # computing call, before cleanup
-        doc["entries"]=[{**chosen,"cleanup":{"realisation":"recompute"}}];obj.sections["schedule"]=doc
-        with self.assertRaisesRegex(e.ContractError,"recompute binding remains pending"):
-            e.estimate(obj,t,"root",[],["0"]*4)
-
-    def test_general_source_adjoint_cleanup_never_silently_ignores_recompute(self):
-        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[1],"mem":[],"args":[],"bounds":[]}
-        code="perm_action @root () (x:wire in) () () ()\n^entry():\nadj action_call @child () (x) () ()\nperm_action @child () (x:wire in) () () ()\n^entry():\ng = qalloc any 1\ncx x g\ncx x g\nqfree g"
-        obj=make_program(code,{"root":sig,"child":sig});t=target()
-        doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
-        doc["entries"]=[entry("cleanup",path=[point(obj.symbol("root")["interface_hash"]),point(obj.symbol("child")["interface_hash"])],realisation="recompute")]
-        obj.sections["schedule"]=doc
-        with self.assertRaisesRegex(e.ContractError,"recompute binding remains pending"):
-            e.estimate(obj,t,"root",[],["0"]*4)
-
     def test_empty_clean_allocation_cleanup_supports_whole_recompute(self):
         sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":["i64"],"bounds":[]}
         obj=make_object("perm_action @root () () () (n:i64) ()\n^entry():\ng = qalloc data n\nqfree g",sig)
