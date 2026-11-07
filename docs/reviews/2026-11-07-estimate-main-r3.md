@@ -105,4 +105,3 @@ no weakened/skipped tests, new silent defaults, process identifiers or
 tracked litter found. Plan items 9–11 were checked in round 1.
 
 **Provenance:** implementer gpt-6.1-sol; reviewer gpt-6.1-sol fresh session, D9.
-
