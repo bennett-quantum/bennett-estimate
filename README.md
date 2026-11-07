@@ -116,12 +116,6 @@ source adjoints form new pairs while raw inverse retains forward paths. General
 release-ended chains, action-call histories and cleanup window validation remain
 required; this family does not complete K81.
 
-Actions containing only clean allocations and frees also support whole-cleanup
-recompute, including an empty computing sequence. The fresh allocation, XOR
-and releases have ordinary leaf ordinals; the cleanup carrier adds no charge.
-Raw inverse keeps the forward carrier, while a source adjoint has its replacement
-release point. General inverse chains remain required.
-
 Default CC/R topology replay reserves vertices for all live registers, checks
 native adjacency and scratch capacity, and restores placements during uncall.
 The current VM binary rejects the topology field; the differential report

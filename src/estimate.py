@@ -3392,7 +3392,7 @@ class Source:
                 for node in before+after:self.catalog.source_metadata[id(node)]=(node,meta)
             prefix+=before;suffix=after+suffix
         pairs=self.oracle_pairs(fn,env,controls,adjoint)
-        body=self.action_nodes([i for _,code in fn.blocks.values() for i in code],env,regions,controls,adjoint=adjoint,oracle_pairs=pairs,empty_cleanups=self.empty_cleanups(fn))
+        body=self.action_nodes([i for _,code in fn.blocks.values() for i in code],env,regions,controls,adjoint=adjoint,oracle_pairs=pairs)
         return prefix+body+suffix
 
     @staticmethod
@@ -4115,7 +4115,7 @@ class Source:
             templates.append([{"parameters":[{"name":"x","type":"wire","width":N},{"name":"t","type":"wire","width":N},{"name":"f","type":"wire","width":Fwidth}],"body":[node]}])
         return {"invoke":"qinplace","args":[N,Fwidth,a[3],*templates,[]]}
 
-    def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False,function_name=None,oracle_pairs=None,empty_cleanups=()):
+    def action_nodes(self, source_nodes, env, regions, controls=(),depth=0,adjoint=False,function_name=None,oracle_pairs=None):
         out,fragments = [],[]
         inactive=env.setdefault(_SOURCE_INACTIVE,set())
         lifetimes=env.setdefault(_SOURCE_LIFETIMES,{})
@@ -4278,8 +4278,7 @@ class Source:
                 replacement={"inverse":True,"body":fragment}
                 if self.catalog.ledger is not None:self.catalog.source_metadata[id(replacement)]=(replacement,meta)
                 fragment=[replacement]
-            empty=(inst.block,inst.ordinal) in empty_cleanups
-            if not adjoint and op in ["quncopy","qunload","qfree","qreturn"] or adjoint and op=="qalloc" and empty:
+            if not adjoint and op in ["quncopy","qunload","qfree","qreturn"]:
                 recompute=None
                 if op in ["quncopy","qunload"]:
                     fresh=self.fresh("recompute",b.width)
@@ -4292,12 +4291,6 @@ class Source:
                     quantum=[compute,{"invoke":"bind.qxor","args":[b.width,fresh_name,name]},{"inverse":True,"body":[compute]}]
                     if predicates:quantum=[{"under":list(predicates),"body":quantum}]
                     replacement=[{"acquire":fresh_name},*quantum,{"relinquish":fresh_name},{"relinquish":name}]
-                    recompute=Captured(replacement,local,controls)
-                elif empty and op in ["qalloc","qfree"]:
-                    fresh=self.fresh("empty_recompute",b.width)
-                    fresh_name=f"$empty_fresh:{self.serial}"
-                    local=dict(env);local[fresh_name]=fresh
-                    replacement=[{"acquire":fresh_name},{"invoke":"bind.qxor","args":[b.width,fresh_name,name]},{"relinquish":fresh_name},{"relinquish":name}]
                     recompute=Captured(replacement,local,controls)
                 capture=f"$cleanup:{self.serial}";self.serial+=1
                 env[capture]=Captured(fragment,dict(env),controls,cleanup=True,recompute=recompute)
