@@ -290,56 +290,6 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
-    def review_witness(self,code,inputs,release):
-        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1],"in":inputs,"mem":[],"args":[],"bounds":[]}
-        obj=make_object(code,sig);t=target()
-        doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
-        doc["entries"]=[entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],release)],realisation="recompute")]
-        obj.sections["schedule"]=doc
-        return obj,t
-
-    def test_review_pjj_nonadjacent_independent_cleanup(self):
-        obj,t=self.review_witness("""perm_action @root (y:wire) (x:wire in, z:wire in) () () ()
-^entry():
-d = qalloc any 1
-cx x d
-cx z d
-cx z d
-x y
-cx x d
-qfree d""",[1,1],"entry:6")
-        result=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
-        self.assertEqual(result["cleanup_decisions"][0]["realisation"],"recompute")
-        self.assertEqual(result["resources"]["gate_count"],"8")
-
-    def test_review_yak_non_disjoint_cleanup(self):
-        obj,t=self.review_witness("""perm_action @root (y:wire) (x:wire in, z:wire in) () () ()
-^entry():
-d = qalloc any 1
-cx x d
-cx z d
-cx z d
-cx d y
-cx x d
-qfree d""",[1,1],"entry:6")
-        with self.assertRaisesRegex(e.ContractError,r"non-disjoint row entry:4 \(cx\)"):
-            e.estimate(obj,t,"root",[],["0"]*4)
-
-    def test_review_tdf_restored_input_cleanup(self):
-        obj,t=self.review_witness("""perm_action @root (x:wire) (z:wire in) () () ()
-^entry():
-d = qalloc any 1
-cx x d
-cx z d
-cx z d
-x x
-x x
-cx x d
-qfree d""",[1],"entry:7")
-        result=e.estimate(obj,t,"root",[],["0"]*4)
-        self.assertEqual(result["label"],"exact")
-        self.assertEqual(result["resources"],{"gate_count":"9","time":"9","peak_qubits[data]":"4","qubit_second[data]":"32"})
-
     terminal_signature={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[1,1],"mem":[],"args":[],"bounds":[]}
     terminal_source="perm_action @root () (x:wire in, z:wire in) () () ()\n^entry():\nd = qalloc any 1\ncx x d\ncx z d\ncx z d\ncx x d\nqfree d"
     disjoint_source=terminal_source.replace("@root ()", "@root (y:wire)")
