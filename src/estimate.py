@@ -3452,19 +3452,7 @@ class Source:
                 events[index]={"outputs":parts,"reads":parts,"match":None}
                 del versions.ranges[b.identity];del scope[name]
                 continue
-            if op in ["qxor","qexch"]:
-                require(len(a)==2,"wire operation arity")
-                left,right=wire(a[0],scope),wire(a[1],scope)
-                require(sum(b.width for b in left)==sum(b.width for b in right),"wire operation width mismatch")
-                outputs=left+right if op=="qexch" else right;reads=[] if op=="qexch" else left
-            else:
-                ws=wire([list_operand(n) if n.startswith("(") else n for n in a],scope)
-                count=sum(b.width for b in ws)
-                require(count>=1 if op=="mcx" else count==GATES[op],"gate arity/opcode")
-                if op=="swap":outputs=ws;reads=[]
-                else:
-                    outputs=[ws[-1].bit(ws[-1].width-1)]
-                    reads=ws[:-1]+([ws[-1].slice(0,ws[-1].width-1)] if ws[-1].width>1 else [])
+            outputs,reads=self.primitive_effects(inst,scope)
             if any(overlap(reads,b) for b in outputs):return None
             reads=reads+[Bundle(identity,1,cls,offset) for identity,offset,cls in controls]
             before=versions.capture(outputs);inputs=versions.capture(reads)
@@ -3475,6 +3463,26 @@ class Source:
                 history[(key,inputs,versions.capture(outputs))]=index
             events[index]={"outputs":outputs,"reads":reads,"before":before,"inputs":inputs,"match":match,"version":serial}
         return plans,owners
+
+    @staticmethod
+    def primitive_gate_wires(inst,scope):
+        ws=wire([list_operand(n) if n.startswith("(") else n for n in inst.args],scope)
+        count=sum(b.width for b in ws)
+        require(count>=1 if inst.op=="mcx" else count==GATES[inst.op],"gate arity/opcode")
+        return ws
+
+    @staticmethod
+    def primitive_bundle_effects(inst,scope):
+        require(len(inst.args)==2,"wire operation arity")
+        left,right=(wire(a,scope) for a in inst.args)
+        require(sum(b.width for b in left)==sum(b.width for b in right),"wire operation width mismatch")
+        return (left+right,[]) if inst.op=="qexch" else (right,left)
+
+    def primitive_effects(self,inst,scope):
+        if inst.op in ["qxor","qexch"]:return self.primitive_bundle_effects(inst,scope)
+        ws=self.primitive_gate_wires(inst,scope)
+        if inst.op=="swap":return ws,[]
+        return [ws[-1].bit(ws[-1].width-1)],ws[:-1]+([ws[-1].slice(0,ws[-1].width-1)] if ws[-1].width>1 else [])
 
     def primitive_cleanup_plan(self,fn,events,allocations,versions,b,index,inverse):
         inverse.sort();computation=sorted({events[i]["match"] for i in inverse})
@@ -3495,13 +3503,34 @@ class Source:
 
     @staticmethod
     def primitive_recompute_obstruction(fn,events,inverse,computation,release,carrier):
-        """K81: moving inverses to release may cross only disjoint rows."""
+        """K81: matching restores captured entry versions; adjacency is not required.
+
+        Under §6.2 an input write may cross the moved cleanup only with its
+        matched undo, with no intervening read of the changed input or change
+        to the computation's inputs or targets. Carrier accesses still block.
+        """
         if not inverse:return None
         outputs=[carrier]+[b for i in computation for b in events[i]["outputs"]]
         inputs=[b for i in computation for b in events[i]["reads"]]
         def overlaps(left,right):return any(a.identity==b.identity and a.offset<b.offset+b.width and b.offset<a.offset+a.width for a in left for b in right)
-        intervening=((i,row) for i,row in events.items() if inverse[0]<i<release and i not in inverse)
-        obstruction=next((fn.code[i] for i,row in intervening if overlaps(row["reads"]+row["outputs"],outputs) or overlaps(row["outputs"],inputs)),None)
+        pending=None;obstruction=None
+        for i in range(inverse[0]+1,release):
+            if i not in events:continue
+            row=events[i]
+            if pending is not None:
+                if row["match"]==pending:
+                    pending=None
+                    continue
+                changed=events[pending]["outputs"]
+                if overlaps(row["reads"],changed) or overlaps(row["outputs"],inputs+outputs):
+                    obstruction=fn.code[pending]
+                    break
+            if i in inverse:continue
+            if overlaps(row["reads"]+row["outputs"],outputs):
+                obstruction=fn.code[i]
+                break
+            if overlaps(row["outputs"],inputs):pending=i
+        if obstruction is None and pending is not None:obstruction=fn.code[pending]
         return f"{source_point(obstruction)} ({obstruction.op})" if obstruction is not None else None
 
     def cleanup_choice(self,plan):

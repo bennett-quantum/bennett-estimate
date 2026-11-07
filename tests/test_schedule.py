@@ -9,7 +9,7 @@ import sys
 import unittest
 from unittest.mock import patch
 from fractions import Fraction as F
-from itertools import product
+from itertools import product, permutations
 from functools import reduce
 from operator import and_
 
@@ -72,6 +72,66 @@ class BasisLedger(e.Ledger):
         self.values[operands[-1]]^=reduce(and_,(self.values[key] for key in predicates),self.mask)
         self.leaves.append((op,kw["chain"][-1]["point"],kw["ordinal"],tuple((identity.rsplit(":",1)[-1],offset) for identity,offset in operands),tuple(controls)))
         return super().gate(op,wires,controls,**kw)
+
+
+def scalar_cleanup(gates,assignment):
+    """Independent truth-table interpreter; no estimator nodes or version data."""
+    values=dict(zip(("x","y","z"),assignment));values.update(d=0,f=0)
+    observations=[]
+    for gate in gates:
+        observations.extend(scalar_gate(values,gate))
+    return values,observations
+
+
+def scalar_gate(values,gate):
+    op,*wires=gate.split()
+    assert op in ("x","cx")
+    observed=[(name,values[name]) for name in wires[:-1] if name in ("x","z")]
+    values[wires[-1]]^=all(values[name] for name in wires[:-1])
+    return observed
+
+
+def cleanup_truth_table(rows):
+    compute=["cx x d","cx z d"]
+    source=compute+["cx z d"]+[gate for name,gate in rows]
+    replay=compute+[gate for name,gate in rows if name!="inverse"]
+    replay+=["cx x f","cx z f","cx f d","cx z f","cx x f"]
+    outcomes=[cleanup_assignment(source,replay,assignment) for assignment in product((0,1),repeat=3)]
+    return all(valid for valid,values in outcomes),pack_cleanup_outputs([values for valid,values in outcomes])
+
+
+def cleanup_assignment(source,replay,assignment):
+    original,observations=scalar_cleanup(source,assignment)
+    moved,_=scalar_cleanup(replay,assignment)
+    initial=dict(zip(("x","y","z"),assignment))
+    restored=all(moved[name]==initial[name] for name in ("x","z"))
+    reads_current=all(value==initial[name] for name,value in observations)
+    return original==moved and original["d"]==moved["f"]==0 and restored and reads_current,original
+
+
+def pack_cleanup_outputs(outputs):
+    return {f"mut:{n}":sum(row[name]<<i for i,row in enumerate(outputs)) for n,name in enumerate(("x","y","z"))}
+
+
+def cleanup_interleavings():
+    probes=("x y","cx x y","cx d y","x z")
+    for restored,probe,flip in product((False,True),probes,("x x","cx y x")):
+        edits={"inverse":"cx x d","flip":flip,"probe":probe,"undo":flip}
+        for names in cleanup_orders(restored):
+            yield restored,probe,tuple((name,edits[name]) for name in names)
+
+
+def cleanup_orders(restored):
+    labels=("inverse","flip","probe","undo") if restored else ("inverse","flip","probe")
+    return [names for names in permutations(labels) if not restored or names.index("flip")<names.index("undo")]
+
+
+def cleanup_source(rows):
+    return "perm_action @root (x:wire, y:wire, z:wire) () () () ()\n^entry():\nd = qalloc any 1\ncx x d\ncx z d\ncx z d\n"+"\n".join(gate for name,gate in rows)+"\nqfree d"
+
+
+def trace_ordinals(events,point,step,phase):
+    return [v[4] for v in events if v[1:4]==(point,step,phase)]
 
 
 class Selectors(unittest.TestCase):
@@ -298,8 +358,7 @@ class Accounting(unittest.TestCase):
         obj.sections["schedule"]=doc
         return obj,t
 
-    def test_review_pjj_nonadjacent_independent_cleanup(self):
-        obj,t=self.review_witness("""perm_action @root (y:wire) (x:wire in, z:wire in) () () ()
+    review_pjj=("""perm_action @root (y:wire) (x:wire in, z:wire in) () () ()
 ^entry():
 d = qalloc any 1
 cx x d
@@ -308,12 +367,7 @@ cx z d
 x y
 cx x d
 qfree d""",[1,1],"entry:6")
-        result=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
-        self.assertEqual(result["cleanup_decisions"][0]["realisation"],"recompute")
-        self.assertEqual(result["resources"]["gate_count"],"8")
-
-    def test_review_yak_non_disjoint_cleanup(self):
-        obj,t=self.review_witness("""perm_action @root (y:wire) (x:wire in, z:wire in) () () ()
+    review_yak=("""perm_action @root (y:wire) (x:wire in, z:wire in) () () ()
 ^entry():
 d = qalloc any 1
 cx x d
@@ -322,11 +376,7 @@ cx z d
 cx d y
 cx x d
 qfree d""",[1,1],"entry:6")
-        with self.assertRaisesRegex(e.ContractError,r"non-disjoint row entry:4 \(cx\)"):
-            e.estimate(obj,t,"root",[],["0"]*4)
-
-    def test_review_tdf_restored_input_cleanup(self):
-        obj,t=self.review_witness("""perm_action @root (x:wire) (z:wire in) () () ()
+    review_tdf=("""perm_action @root (x:wire) (z:wire in) () () ()
 ^entry():
 d = qalloc any 1
 cx x d
@@ -336,6 +386,20 @@ x x
 x x
 cx x d
 qfree d""",[1],"entry:7")
+
+    def test_review_pjj_nonadjacent_independent_cleanup(self):
+        obj,t=self.review_witness(*self.review_pjj)
+        result=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
+        self.assertEqual(result["cleanup_decisions"][0]["realisation"],"recompute")
+        self.assertEqual(result["resources"]["gate_count"],"8")
+
+    def test_review_yak_non_disjoint_cleanup(self):
+        obj,t=self.review_witness(*self.review_yak)
+        with self.assertRaisesRegex(e.ContractError,r"non-disjoint row entry:4 \(cx\)"):
+            e.estimate(obj,t,"root",[],["0"]*4)
+
+    def test_review_tdf_restored_input_cleanup(self):
+        obj,t=self.review_witness(*self.review_tdf)
         result=e.estimate(obj,t,"root",[],["0"]*4)
         self.assertEqual(result["label"],"exact")
         self.assertEqual(result["resources"],{"gate_count":"9","time":"9","peak_qubits[data]":"4","qubit_second[data]":"32"})
@@ -360,27 +424,31 @@ qfree d""",[1],"entry:7")
     terminal_gate_cases=[terminal_gates+terminal_replay,terminal_gates+[("x",(("y",0),),())]+terminal_replay,terminal_gates+[("x",(("y",0),),())]+terminal_replay]
     terminal_fixtures=list(zip(terminal_cases,terminal_inputs,terminal_outputs,[0xF,0xFF,0xFF],terminal_gate_cases))
 
+    def check_terminal_recompute(self,fixture,raw):
+        (sig,code,release,owned,disjoint,resources),basis,expected_basis,mask,gates=fixture
+        obj=make_object(code,sig);t=target()
+        doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
+        carrier=point(obj.symbol("root")["interface_hash"],release)
+        doc["entries"]=[entry("cleanup",path=[carrier],generated=0,realisation="recompute"),entry("gate",path=[{**carrier,"point":owned[0]}],realisation="missing-scheme"),entry("gate",path=[carrier],generated=0,realisation="missing-scheme")]
+        obj.sections["schedule"]=doc
+        result=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
+        self.assertEqual(result["resources"],resources)
+        self.assertEqual(result["cleanup_decisions"][0]["owned_points"],owned)
+        expected=[("allocate","entry:0",0),("cx","entry:1",0),("cx","entry:2",0),*disjoint,("allocate",release,0),*(("cx",release,n) for n in range(1,6)),("release",release,6),("release",release,7)]
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t)
+        c.ledger=BasisLedger(t,e.Schedule(doc,obj,"root"),basis=(basis,expected_basis)[raw],mask=mask)
+        e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
+        self.assertEqual(basis_outputs(c.ledger),(expected_basis,basis)[raw])
+        self.assertEqual([(leaf[0],*leaf[3:]) for leaf in c.ledger.leaves if len(leaf)>3],(gates,gates[::-1])[raw])
+        stride,ops=[(1,{"allocate":"allocate","release":"release","cx":"cx","x":"x"}),(-1,{"allocate":"release","release":"allocate","cx":"cx","x":"x"})][raw]
+        actual=[(ops[op],p,n) for op,p,n in expected[::stride]]
+        self.assertEqual([leaf[:3] for leaf in c.ledger.leaves],actual)
+        self.assertEqual(c.ledger.finish(),{k:int(v) for k,v in resources.items()})
+
     def test_k80_primitive_terminal_chain_recompute_has_exact_published_leaves(self):
-        for ((sig,code,release,owned,disjoint,resources),basis,expected_basis,mask,gates),raw in product(self.terminal_fixtures,[False,True]):
-            with self.subTest(disjoint=disjoint,raw_inverse=raw):
-                obj=make_object(code,sig);t=target()
-                doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
-                carrier=point(obj.symbol("root")["interface_hash"],release)
-                doc["entries"]=[entry("cleanup",path=[carrier],generated=0,realisation="recompute"),entry("gate",path=[{**carrier,"point":owned[0]}],realisation="missing-scheme"),entry("gate",path=[carrier],generated=0,realisation="missing-scheme")]
-                obj.sections["schedule"]=doc
-                result=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
-                self.assertEqual(result["resources"],resources)
-                self.assertEqual(result["cleanup_decisions"][0]["owned_points"],owned)
-                expected=[("allocate","entry:0",0),("cx","entry:1",0),("cx","entry:2",0),*disjoint,("allocate",release,0),*(("cx",release,n) for n in range(1,6)),("release",release,6),("release",release,7)]
-                c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t)
-                c.ledger=BasisLedger(t,e.Schedule(doc,obj,"root"),basis=(basis,expected_basis)[raw],mask=mask)
-                e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
-                self.assertEqual(basis_outputs(c.ledger),(expected_basis,basis)[raw])
-                self.assertEqual([(leaf[0],*leaf[3:]) for leaf in c.ledger.leaves if len(leaf)>3],(gates,gates[::-1])[raw])
-                stride,ops=[(1,{"allocate":"allocate","release":"release","cx":"cx","x":"x"}),(-1,{"allocate":"release","release":"allocate","cx":"cx","x":"x"})][raw]
-                actual=[(ops[op],p,n) for op,p,n in expected[::stride]]
-                self.assertEqual([leaf[:3] for leaf in c.ledger.leaves],actual)
-                self.assertEqual(c.ledger.finish(),{k:int(v) for k,v in resources.items()})
+        for fixture,raw in product(self.terminal_fixtures,[False,True]):
+            with self.subTest(fixture=fixture,raw_inverse=raw):
+                self.check_terminal_recompute(fixture,raw)
 
     non_disjoint_cases=[
         ({**terminal_signature,"mut":[1]},disjoint_source.replace("cx z d\ncx x d","cx z d\ncx d y\ncx x d"),"entry:4 (cx)",{"mut:0":0xAA,"in:0":0xF0,"in:1":0xCC},{"mut:0":0xAA^0xF0,"in:0":0xF0,"in:1":0xCC},0xFF),
@@ -390,19 +458,50 @@ qfree d""",[1],"entry:7")
         ({**terminal_signature,"in":[]},"perm_action @root () () () () ()\n^entry():\na = qalloc any 1\nd = qalloc any 1\ncx a d\ncx a d\nqfree a\nqfree d","entry:4 (qfree)",{},{},1),
     ]
 
+    def check_non_disjoint_recompute(self,case,raw):
+        sig,code,row,basis,expected,mask=case
+        obj=make_object(code,sig);t=target()
+        obj.sections["schedule"]=doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t)
+        c.ledger=BasisLedger(t,e.Schedule(doc,obj,"root"),basis=(basis,expected)[raw],mask=mask)
+        e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
+        self.assertEqual(basis_outputs(c.ledger),(expected,basis)[raw])
+        doc["entries"]=[entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],f"entry:{len(obj.functions['root'].code)-1}")],realisation="recompute")]
+        with self.assertRaisesRegex(e.ContractError,"non-disjoint row "+re.escape(row)):e.estimate(obj,t,"root",[],["0"]*4)
+        c.ledger=BasisLedger(t,e.Schedule(doc,obj,"root"),basis=basis,mask=mask)
+        with self.assertRaisesRegex(e.ContractError,"non-disjoint row "+re.escape(row)):e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
+
     def test_k81_non_disjoint_rows_refuse_recompute_and_reverse_all_basis_inputs(self):
-        for (sig,code,row,basis,expected,mask),raw in product(self.non_disjoint_cases,[False,True]):
-            with self.subTest(row=row,raw_inverse=raw):
-                obj=make_object(code,sig);t=target()
-                obj.sections["schedule"]=doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
-                c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t)
-                c.ledger=BasisLedger(t,e.Schedule(doc,obj,"root"),basis=(basis,expected)[raw],mask=mask)
-                e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
-                self.assertEqual(basis_outputs(c.ledger),(expected,basis)[raw])
-                doc["entries"]=[entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],f"entry:{len(obj.functions['root'].code)-1}")],realisation="recompute")]
-                with self.assertRaisesRegex(e.ContractError,"non-disjoint row "+re.escape(row)):e.estimate(obj,t,"root",[],["0"]*4)
-                c.ledger=BasisLedger(t,e.Schedule(doc,obj,"root"),basis=basis,mask=mask)
-                with self.assertRaisesRegex(e.ContractError,"non-disjoint row "+re.escape(row)):e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
+        for case,raw in product(self.non_disjoint_cases,[False,True]):
+            with self.subTest(case=case,raw_inverse=raw):
+                self.check_non_disjoint_recompute(case,raw)
+
+    def check_cleanup_interleaving(self,rows,t,raw):
+        allowed,expected=cleanup_truth_table(rows)
+        sig={**self.terminal_signature,"mut":[1,1,1],"in":[]}
+        obj=make_object(cleanup_source(rows),sig)
+        doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
+        doc["entries"]=[entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],f"entry:{4+len(rows)}")],realisation="recompute")]
+        obj.sections["schedule"]=doc
+        basis={"mut:0":0xF0,"mut:1":0xCC,"mut:2":0xAA}
+        c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t)
+        c.ledger=BasisLedger(t,e.Schedule(doc,obj,"root"),basis=(basis,expected)[raw],mask=0xFF)
+        if not allowed:
+            with self.assertRaises(e.ContractError):e.estimate(obj,t,"root",[],["0"]*4)
+            with self.assertRaises(e.ContractError):e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
+            return
+        result=e.estimate(obj,t,"root",[],["0"]*4)
+        self.assertEqual(result["label"],"exact")
+        self.assertEqual(result["resources"]["gate_count"],str(6+len(rows)))
+        e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
+        self.assertEqual(basis_outputs(c.ledger),(expected,basis)[raw])
+
+    def test_cleanup_generated_interleavings_against_brute_force(self):
+        t=target();cases=list(cleanup_interleavings())
+        self.assertEqual(len(cases),144)
+        for (restored,probe,rows),raw in product(cases,(False,True)):
+            with self.subTest(restored=restored,probe=probe,rows=rows,raw_inverse=raw):
+                self.check_cleanup_interleaving(rows,t,raw)
 
     def test_primitive_joint_inverse_has_only_first_release_owner(self):
         sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":[],"bounds":[]}
@@ -559,6 +658,12 @@ qfree d""",[1],"entry:7")
                 result=e.estimate(obj,target(),"root",args,["0"]*4,token_aliases=[0,0],include_frame=True)
                 self.assertEqual([c["path"][-1]["call_index"] for c in result["invocation_contexts"][1:]],[0,0,1])
 
+    def check_oracle_invocations(self,source,ledger,points,indices,adjoint):
+        contexts=source.invocations[1:]
+        self.assertEqual([ctx["path"][-1]["point"] for ctx in contexts],points)
+        self.assertEqual([ctx["path"][-1]["call_index"] for ctx in contexts],indices)
+        self.assertEqual([d["chain"][-1]["point"] for d in ledger.cleanup_decisions],["entry:0" if adjoint else "entry:1"])
+
     def test_oracle_pair_source_adjoint_and_raw_inverse_keep_distinct_paths(self):
         obj=self.oracle_pair_object();t=target();args=[["1","0","0","0"]]*2
         doc=e.estimate(obj,t,"root",args,["0"]*4,token_aliases=[0,0])["effective_schedule"]
@@ -571,10 +676,7 @@ qfree d""",[1],"entry:7")
                 source=e.Source(obj,t,c)
                 source.region("root",args,["0"]*4,adjoint=adjoint,raw_inverse=raw,token_context=("same","same"))
                 rows.append(c.ledger.finish())
-                contexts=source.invocations[1:]
-                self.assertEqual([ctx["path"][-1]["point"] for ctx in contexts],points)
-                self.assertEqual([ctx["path"][-1]["call_index"] for ctx in contexts],indices)
-                self.assertEqual([d["chain"][-1]["point"] for d in c.ledger.cleanup_decisions],["entry:0" if adjoint else "entry:1"])
+                self.check_oracle_invocations(source,c.ledger,points,indices,adjoint)
         self.assertEqual(rows[0],rows[1]);self.assertEqual(rows[0],rows[2])
 
     def test_oracle_pair_matches_control_sets_and_indivisible_outputs(self):
@@ -1634,6 +1736,17 @@ qfree d""",[1],"entry:7")
         for key in ["time","gate_count"]:
             self.assertEqual(F(actual["resources"][key])-F(base["resources"][key]),2*(F(nested_cost["resources"][key])+F(flip_cost["resources"][key])))
 
+    def check_raw_oracle_budget(self,obj,t,Recording,events,budget):
+        values=[[str(budget),"0","0","0"]];events.clear()
+        baseline=e.estimate(obj,t,"root",values,["0"]*4)
+        with patch.object(e,"Ledger",Recording):actual=e.estimate(obj,t,"root",values,["0"]*4,include_frame=True)
+        self.assertEqual(actual["exact_resources"],baseline["exact_resources"])
+        coordinates=[]
+        for event in events:
+            if event[1]=="$step" and (not coordinates or coordinates[-1]!=event[2:4]):coordinates.append(event[2:4])
+        expected=[(step,phase) for phase,steps in [("rev",range(1,budget+1)),("fwd",range(budget,0,-1))] for step in steps]
+        self.assertEqual(coordinates,expected*2)
+
     def test_raw_inverse_oracle_swaps_support_partition_and_step_traversal(self):
         action={"abi":"0.9","tier":"q","kind":"perm_action","mut":[1,4],"in":[1,1],"mem":[],"args":["token"],"bounds":[]}
         oracle={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
@@ -1663,15 +1776,7 @@ qfree d""",[1],"entry:7")
         self.assertEqual([v[4] for v in forward[:half]],list(range(half-1,-1,-1)))
         self.assertEqual(support[0][3],"rev")
         for budget in [0,2]:
-            values=[[str(budget),"0","0","0"]];events.clear()
-            baseline=e.estimate(obj,t,"root",values,["0"]*4)
-            with patch.object(e,"Ledger",Recording):actual=e.estimate(obj,t,"root",values,["0"]*4,include_frame=True)
-            self.assertEqual(actual["exact_resources"],baseline["exact_resources"])
-            coordinates=[]
-            for event in events:
-                if event[1]=="$step" and (not coordinates or coordinates[-1]!=event[2:4]):coordinates.append(event[2:4])
-            expected=[(step,phase) for phase,steps in [("rev",range(1,budget+1)),("fwd",range(budget,0,-1))] for step in steps]
-            self.assertEqual(coordinates,expected*2)
+            self.check_raw_oracle_budget(obj,t,Recording,events,budget)
 
     def test_raw_inverse_calls_keep_forward_ordinals_and_reverse_bit_order(self):
         root={"abi":"0.9","tier":"q","kind":"perm_action","mut":[2],"in":[1,2],"mem":[],"args":[],"bounds":[]}
@@ -1961,37 +2066,42 @@ qfree d""",[1],"entry:7")
             if change=="duplicate-scheme":broken["schemes"].append(s)
             with self.assertRaises(e.ContractError,msg=change):e.Target.read(e.jcs(broken))
 
+    def check_reverse_ordinals(self,events,pt,step):
+        forward=trace_ordinals(events,pt,step,"fwd")
+        reverse=trace_ordinals(events,pt,step,"rev")
+        self.assertEqual(forward,list(range(len(forward))),(pt,step))
+        self.assertEqual(reverse,forward[::-1],(pt,step))
+
+    def check_oracle_stream_budget(self,obj,t,original,B):
+        baseline=e.estimate(obj,t,"root",[],[str(B),"0","0","0"])
+        events=[]
+        class Recording(original):
+            def allocate(self,b,**kw):
+                if kw.get("chain"):events.append(("alloc",kw["chain"][-1]["point"],kw.get("step"),kw.get("phase"),kw["ordinal"]))
+                return super().allocate(b,**kw)
+            def release(self,b,**kw):
+                if kw.get("chain"):events.append(("release",kw["chain"][-1]["point"],kw.get("step"),kw.get("phase"),kw["ordinal"]))
+                return super().release(b,**kw)
+            def gate(self,op,wires,controls=(),**kw):
+                events.append((op,kw["chain"][-1]["point"],kw.get("step"),kw.get("phase"),kw["ordinal"]))
+                return super().gate(op,wires,controls,**kw)
+        with patch.object(e,"Ledger",Recording):
+            result=e.estimate(obj,t,"root",[],[str(B),"0","0","0"],include_frame=True)
+        self.assertEqual(result["exact_resources"],baseline["exact_resources"],B)
+        self.assertEqual(result["gates"],baseline["gates"],B)
+        self.assertEqual([r["width"] for r in result["frame"]["history"]],[6]*B)
+        for pt,step in product(["$step","entry:0","entry:1"],range(1,B+1)):
+            self.check_reverse_ordinals(events,pt,step)
+        self.assertTrue(any(v[1]=="$construct" for v in events))
+        self.assertTrue(any(v[1]=="$commit" for v in events))
+        self.assertTrue(any(v[1]=="$release" for v in events))
+
     def test_oracle_scheduled_stream_matches_summary_and_reverse_ordinals(self):
         sig={"abi":"0.9","tier":"q","kind":"oracle","in":[],"tgt":1,"fault":4,"mem":[],"args":[]}
         obj=make_object("oracle @root () (t:wire) (f:wire[4]) () ()\nregs { r:reg[1] }\n^entry():\nr = lift.const.i1 1\nlift.retval r",sig)
         t=target();original=e.Ledger
         for B in [0,1,2,3]:
-            baseline=e.estimate(obj,t,"root",[],[str(B),"0","0","0"])
-            events=[]
-            class Recording(original):
-                def allocate(self,b,**kw):
-                    if kw.get("chain"):events.append(("alloc",kw["chain"][-1]["point"],kw.get("step"),kw.get("phase"),kw["ordinal"]))
-                    return super().allocate(b,**kw)
-                def release(self,b,**kw):
-                    if kw.get("chain"):events.append(("release",kw["chain"][-1]["point"],kw.get("step"),kw.get("phase"),kw["ordinal"]))
-                    return super().release(b,**kw)
-                def gate(self,op,wires,controls=(),**kw):
-                    events.append((op,kw["chain"][-1]["point"],kw.get("step"),kw.get("phase"),kw["ordinal"]))
-                    return super().gate(op,wires,controls,**kw)
-            with patch.object(e,"Ledger",Recording):
-                result=e.estimate(obj,t,"root",[],[str(B),"0","0","0"],include_frame=True)
-            self.assertEqual(result["exact_resources"],baseline["exact_resources"],B)
-            self.assertEqual(result["gates"],baseline["gates"],B)
-            self.assertEqual([r["width"] for r in result["frame"]["history"]],[6]*B)
-            for pt in ["$step","entry:0","entry:1"]:
-                for step in range(1,B+1):
-                    forward=[v[4] for v in events if v[1:4]==(pt,step,"fwd")]
-                    reverse=[v[4] for v in events if v[1:4]==(pt,step,"rev")]
-                    self.assertEqual(forward,list(range(len(forward))),(pt,step))
-                    self.assertEqual(reverse,forward[::-1],(pt,step))
-            self.assertTrue(any(v[1]=="$construct" for v in events))
-            self.assertTrue(any(v[1]=="$commit" for v in events))
-            self.assertTrue(any(v[1]=="$release" for v in events))
+            self.check_oracle_stream_budget(obj,t,original,B)
 
     def test_frame_reports_every_lifetime_and_excludes_inherited_controls(self):
         t=target();ledger=e.Ledger(t,e.Schedule(schedule()))
