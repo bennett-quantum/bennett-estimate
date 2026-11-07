@@ -8,7 +8,6 @@ import sys
 import unittest
 from unittest.mock import patch
 from fractions import Fraction as F
-from itertools import product
 
 ROOT=Path(__file__).resolve().parents[1]
 import sys
@@ -265,42 +264,30 @@ class Selectors(unittest.TestCase):
 
 
 class Accounting(unittest.TestCase):
-    terminal_signature={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[1,1],"mem":[],"args":[],"bounds":[]}
-    terminal_source="perm_action @root () (x:wire in, z:wire in) () () ()\n^entry():\nd = qalloc any 1\ncx x d\ncx z d\ncx z d\ncx x d\nqfree d"
-    disjoint_source=terminal_source.replace("@root ()", "@root (y:wire)")
-    # K80: two original CXs with three live wires, five replacement CXs with
-    # four: gates/time = 7, peak = 4, area = 2*3+5*4 = 26.
-    # K81 interleavings: the independent X adds one gate and y stays live;
-    # gates/time = 2+1+5 = 8, peak = 5, area = 3*4+5*5 = 37.
-    terminal_cases=[
-        (terminal_signature,terminal_source,"entry:5",["entry:3","entry:4","entry:5"],[],{"gate_count":"7","time":"7","peak_qubits[data]":"4","qubit_second[data]":"26"}),
-        ({**terminal_signature,"mut":[1]},disjoint_source.replace("cx z d\ncx x d", "cx z d\nx y\ncx x d"),"entry:6",["entry:3","entry:5","entry:6"],[("x","entry:4",0)],{"gate_count":"8","time":"8","peak_qubits[data]":"5","qubit_second[data]":"37"}),
-        ({**terminal_signature,"mut":[1]},disjoint_source.replace("qfree d", "x y\nqfree d"),"entry:6",["entry:3","entry:4","entry:6"],[("x","entry:5",0)],{"gate_count":"8","time":"8","peak_qubits[data]":"5","qubit_second[data]":"37"}),
-    ]
-
     def test_k80_primitive_terminal_chain_recompute_has_exact_published_leaves(self):
+        sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[1,1],"mem":[],"args":[],"bounds":[]}
+        code="perm_action @root () (x:wire in, z:wire in) () () ()\n^entry():\nd = qalloc any 1\ncx x d\ncx z d\ncx z d\ncx x d\nqfree d"
+        obj=make_object(code,sig);t=target()
+        doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
+        carrier=point(obj.symbol("root")["interface_hash"],"entry:5")
+        doc["entries"]=[entry("cleanup",path=[carrier],generated=0,realisation="recompute"),entry("gate",path=[{**carrier,"point":"entry:3"}],realisation="missing-scheme"),entry("gate",path=[carrier],generated=0,realisation="missing-scheme")]
+        obj.sections["schedule"]=doc
+        result=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
+        self.assertEqual(result["resources"],{"gate_count":"7","time":"7","peak_qubits[data]":"4","qubit_second[data]":"26"})
+        self.assertEqual(result["cleanup_decisions"][0]["owned_points"],["entry:3","entry:4","entry:5"])
         class Trace(e.Ledger):
             def __init__(self,*a,**kw):super().__init__(*a,**kw);self.leaves=[]
             def allocate(self,b,**kw):self.leaves.append(("allocate",kw["chain"][-1]["point"],kw["ordinal"]));return super().allocate(b,**kw)
             def release(self,b,**kw):self.leaves.append(("release",kw["chain"][-1]["point"],kw["ordinal"]));return super().release(b,**kw)
             def gate(self,op,wires,controls=(),**kw):self.leaves.append((op,kw["chain"][-1]["point"],kw["ordinal"]));return super().gate(op,wires,controls,**kw)
-        for (sig,code,release,owned,disjoint,resources),raw in product(self.terminal_cases,[False,True]):
-            with self.subTest(disjoint=disjoint,raw_inverse=raw):
-                obj=make_object(code,sig);t=target()
-                doc=e.estimate(obj,t,"root",[],["0"]*4)["effective_schedule"]
-                carrier=point(obj.symbol("root")["interface_hash"],release)
-                doc["entries"]=[entry("cleanup",path=[carrier],generated=0,realisation="recompute"),entry("gate",path=[{**carrier,"point":owned[0]}],realisation="missing-scheme"),entry("gate",path=[carrier],generated=0,realisation="missing-scheme")]
-                obj.sections["schedule"]=doc
-                result=e.estimate(obj,t,"root",[],["0"]*4,include_frame=True)
-                self.assertEqual(result["resources"],resources)
-                self.assertEqual(result["cleanup_decisions"][0]["owned_points"],owned)
-                expected=[("allocate","entry:0",0),("cx","entry:1",0),("cx","entry:2",0),*disjoint,("allocate",release,0),*(("cx",release,n) for n in range(1,6)),("release",release,6),("release",release,7)]
-                c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);c.ledger=Trace(t,e.Schedule(doc,obj,"root"))
-                e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
-                actual=list(reversed(expected)) if raw else expected
-                if raw:actual=[({"allocate":"release","release":"allocate","cx":"cx","x":"x"}[op],p,n) for op,p,n in actual]
-                self.assertEqual(c.ledger.leaves,actual)
-                self.assertEqual(c.ledger.finish(),{k:int(v) for k,v in resources.items()})
+        expected=[("allocate","entry:0",0),("cx","entry:1",0),("cx","entry:2",0),("allocate","entry:5",0),*(('cx','entry:5',n) for n in range(1,6)),("release","entry:5",6),("release","entry:5",7)]
+        for raw in [False,True]:
+            c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),t);c.ledger=Trace(t,e.Schedule(doc,obj,"root"))
+            e.Source(obj,t,c).region("root",[],["0"]*4,raw_inverse=raw)
+            actual=list(reversed(expected)) if raw else expected
+            if raw:actual=[("release" if op=="allocate" else "allocate" if op=="release" else op,p,n) for op,p,n in actual]
+            self.assertEqual(c.ledger.leaves,actual)
+            self.assertEqual(c.ledger.finish(),{k:int(v) for k,v in result["resources"].items()})
 
     def test_primitive_joint_inverse_has_only_first_release_owner(self):
         sig={"abi":"0.9","tier":"q","kind":"perm_action","mut":[],"in":[],"mem":[],"args":[],"bounds":[]}

@@ -3443,6 +3443,7 @@ class Source:
                 targets={part.identity for i in computation for part in events[i]["outputs"]}|{b.identity}
                 local=all(identity in allocations and identity in versions.ranges for identity in targets)
                 clean=all(value for identity,lo,hi,version,value in versions.capture([b]))
+                contiguous=inverse==list(range(index-len(inverse),index))
                 early=not computation or local and all(allocations[identity]["index"]<computation[0] for identity in targets)
                 produced=set();entry_clean=True
                 for i in computation:
@@ -3452,7 +3453,7 @@ class Source:
                     produced.add(row["version"])
                 target_specs=sorted((allocations[identity] for identity in targets),key=lambda t:t["index"]) if local else []
                 point=(inst.block,inst.ordinal)
-                plan={"point":point,"symbol":self.obj.symbol(fn.name)["interface_hash"],"function":fn.name,"release":name,"compute":[fn.code[i] for i in computation],"targets":target_specs,"available":local and clean and early and entry_clean,"owned_points":[f"{fn.code[i].block}:{fn.code[i].ordinal}" for i in inverse]+[f"{inst.block}:{inst.ordinal}"],"choices":{},"recomputations":{}}
+                plan={"point":point,"symbol":self.obj.symbol(fn.name)["interface_hash"],"function":fn.name,"release":name,"compute":[fn.code[i] for i in computation],"targets":target_specs,"available":local and clean and contiguous and early and entry_clean,"owned_points":[f"{fn.code[i].block}:{fn.code[i].ordinal}" for i in inverse]+[f"{inst.block}:{inst.ordinal}"],"choices":{},"recomputations":{}}
                 plans[point]=plan
                 for i in inverse:owners[(fn.code[i].block,fn.code[i].ordinal)]=plan;owned.add(i)
                 del versions.ranges[b.identity];del scope[name]
