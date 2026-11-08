@@ -380,7 +380,6 @@ fn reverse_estimator_operands_execute_like_every_source_witness() {
 }
 
 #[test]
-#[ignore = "Await council and implementation: docs/design/2026-11-08-recompute-cleanup-admissibility.md §4.1"]
 fn pjj_estimator_accepts_both_disjoint_placements() {
     for witness in &WITNESSES[..2] {
         check_estimator(witness, "recompute", "");
@@ -388,26 +387,22 @@ fn pjj_estimator_accepts_both_disjoint_placements() {
 }
 
 #[test]
-#[ignore = "Await council and implementation: docs/design/2026-11-08-recompute-cleanup-admissibility.md §4.2"]
 fn yak_estimator_rejects_both_semantically_wrong_recomputations() {
     check_estimator(&WITNESSES[2], "recompute", "entry:4");
     check_estimator(&WITNESSES[3], "recompute", "entry:5");
 }
 
 #[test]
-#[ignore = "Await council and implementation: docs/design/2026-11-08-recompute-cleanup-admissibility.md §4.3"]
 fn tdf_estimator_accepts_a_matched_input_flip_and_undo() {
     check_estimator(&WITNESSES[4], "recompute", "");
 }
 
 #[test]
-#[ignore = "Await council and implementation: docs/design/2026-11-08-recompute-cleanup-admissibility.md §4.4"]
 fn w2b_estimator_accepts_reading_the_flipped_input() {
     check_estimator(&WITNESSES[5], "recompute", "");
 }
 
 #[test]
-#[ignore = "Await council and implementation: docs/design/2026-11-08-recompute-cleanup-admissibility.md §4.5"]
 fn estimator_accepts_cancelling_scratch_reads() {
     check_estimator(&WITNESSES[6], "recompute", "");
 }
