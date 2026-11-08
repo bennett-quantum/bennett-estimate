@@ -32,6 +32,20 @@ including `--budget 0,0,0,0` when zero is intended. Token-free action and CC/R
 entries retain a zero invocation tuple. The variant defaults to `forward` and
 inherited control count to zero. All bindings appear in the result.
 
+Consumer reports also expose `target` (the target filename stem),
+`object_sha256` (SHA-256 of the exact input file bytes), `budget` (named
+`steps`, `heap`, `stack`, `depth` components), and `padded` (the resource rows
+for the stated invocation and realisation). These supplement the existing
+ISA bindings: `object_hash` excludes schedule, certificate and coverage
+sections, whereas `object_sha256` includes every byte. Budget components
+below 2^53 are JSON numbers; larger components are decimal strings so their
+integer bits survive JSON canonicalisation. `padded` preserves the report's
+`exact` or conditional `bound` label; it does not establish correctness or
+structure recovery. For an oracle, both B-step passes contribute to the cost,
+including inactive rows. A pending-evidence report has request bindings and
+exit status 3, with no `padded` or resource rows. Full option names and canonical
+LF input files are required.
+
 `--token-aliases '[0,0]'` supplies the published K91 equality partition.
 Oracle contexts list their primary token followed by token arguments; actions
 and CC/R entries list only token arguments. Equal labels require equal tuples;
@@ -136,6 +150,13 @@ orchestrator to file in the spec tracker; it has not been adopted here.
 `examples/memory-lookup-2pow20.bisa` exercises 1024 linear lookups into 2^20
 eight-bit cells using fewer than 1000 constructor visits. This verifies scaling
 of the reference cost calculation; the full rung-4 Grover estimate is pending.
+The available rung-4 diagnostic is an ISA 0.8 reduced object, for which this
+estimator has no published complete padded expansion catalog. It cannot supply
+the real N=2^20 SQLite launch estimate. That estimate requires the actual
+compiled launch with its full image, oracle closure and k=7 calls, resolved
+invocation parameters and budgets, and a published target whose capacities
+admit the full memory register. The illustrative superconducting target's
+16 data and 4 buffer qubits cannot hold the required 2^28-wire register.
 
 Allocation-table scans also use exact address-popcount summaries. The
 VM-admitted lifted-free-2pow20 example estimates a complete 2^20-entry table
