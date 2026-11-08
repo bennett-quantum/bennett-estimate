@@ -239,7 +239,7 @@ argument spelling, lossless budget bindings and missing resource evidence.
   "scripts/pinned.py": {"cognitive_complexity": 25, "function_lengths": [11, 32], "trivial_wrappers": 0},
   "scripts/quality_ratchet.py": {"cognitive_complexity": 63, "function_lengths": [3, 4, 11, 18, 18, 18, 23], "trivial_wrappers": 0},
   "scripts/record_expectations.py": {"cognitive_complexity": 38, "function_lengths": [4, 10, 11, 17, 58], "trivial_wrappers": 0},
-  "src/estimate.py": {"cognitive_complexity": 6683, "function_lengths": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 15, 15, 15, 15, 15, 16, 16, 17, 17, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 19, 20, 21, 21, 21, 22, 23, 23, 24, 24, 24, 24, 25, 25, 25, 26, 26, 26, 26, 26, 26, 27, 27, 29, 29, 30, 31, 32, 34, 35, 36, 36, 36, 37, 37, 38, 40, 42, 45, 45, 48, 49, 52, 55, 57, 57, 59, 59, 60, 62, 63, 64, 66, 69, 69, 70, 71, 71, 80, 88, 97, 121, 147, 166, 176, 207, 248, 252], "trivial_wrappers": 6},
+  "src/estimate.py": {"cognitive_complexity": 6687, "function_lengths": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 15, 15, 15, 15, 15, 16, 16, 17, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 19, 20, 21, 21, 21, 21, 22, 23, 23, 24, 24, 24, 24, 25, 25, 25, 26, 26, 26, 26, 26, 26, 27, 27, 29, 29, 30, 31, 32, 34, 35, 36, 36, 36, 37, 37, 38, 40, 42, 45, 45, 48, 49, 52, 55, 57, 57, 59, 59, 60, 62, 63, 64, 66, 69, 69, 70, 71, 71, 80, 88, 97, 121, 147, 166, 176, 207, 248, 252], "trivial_wrappers": 6},
   "tests/brute_ledger.py": {"cognitive_complexity": 39, "function_lengths": [2, 5, 5, 6, 7, 17, 32], "trivial_wrappers": 0},
   "tests/run_suite.py": {"cognitive_complexity": 14, "function_lengths": [4, 8, 10], "trivial_wrappers": 0},
   "tests/test_brute_accounting.py": {"cognitive_complexity": 24, "function_lengths": [4, 4, 13, 14, 23], "trivial_wrappers": 0},
@@ -416,3 +416,19 @@ Enclosing captured lifetime histories can hide an allocation from a local
 partition. Such entry bindings are explicitly unestablished, never defaulted
 to clean zero. Existing loop, conditional and source-adjoint lifetime tests
 verify that this unavailable proof does not break reverse estimation.
+
+
+## Repeated-lifetime replacement construction
+
+Fresh target allocation now follows the carrier's captured allocation entry
+occurrences. Reusing a lowering descriptor after release cannot add another
+lifetime's acquisition to a replacement. The source baseline changes only
+materialize's span (17 to 21 lines) and its measured complexity delta
+(+4); other function allowances, wrapper budgets, files and hygiene checks
+stay unchanged.
+
+The repeated-name fixture has separately written literal first, second and
+both-carrier replacements. The unchanged independent Rust interpreter checks
+all four interface bases in both directions, and executes the actual forward
+and raw-inverse operands. Hand-derived gates=time / peak / area are 4/3/12
+for reverse, 6/4/21 for either single replacement and 8/4/30 for both.

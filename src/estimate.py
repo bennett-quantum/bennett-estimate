@@ -3616,9 +3616,13 @@ class TerminalCleanups:
 
     def materialize(self,plan):
         targets=self.target_bits(plan);local={};mapping={};prefix=[];suffix=[]
-        for index,row in enumerate(self.rows):
-            if row.kind!=CleanupKind.ACQUIRE or not targets.intersection(bits([row.bundle])):continue
-            fresh=Bundle(f"recompute:{row.bundle.identity}:{plan['meta']['point']}",row.bundle.width,row.bundle.cls)
+        entries=[self.versions.entry_before[plan["release"]].get(bit) for bit in targets]
+        if any(entry is None or entry>=0 for entry in entries):raise CleanupUnestablished("joint replay outputs require locally allocated target bundles")
+        # Negative entry versions identify allocation occurrences by row index,
+        # even when separate source lifetimes share a lowering descriptor.
+        for index in sorted({-entry-1 for entry in entries}):
+            row=self.rows[index]
+            fresh=Bundle(f"recompute:{row.bundle.identity}:{index}:{plan['meta']['point']}",row.bundle.width,row.bundle.cls)
             name=f"$terminal_fresh:{index}";local[name]=fresh
             prefix.append({"acquire":name});suffix.insert(0,{"relinquish":name})
             mapping.update(zip(bits([row.bundle]),bits([fresh])))
