@@ -230,7 +230,7 @@ checks each case. Both quality-check test methods pass.
   "scripts/differential.py": {"cognitive_complexity": 76, "function_lengths": [18, 71], "trivial_wrappers": 0},
   "scripts/measure_coverage.py": {"cognitive_complexity": 2, "function_lengths": [5, 36], "trivial_wrappers": 0},
   "scripts/phase_snapshot.py": {"cognitive_complexity": 50, "function_lengths": [33], "trivial_wrappers": 0},
-  "scripts/pinned.py": {"cognitive_complexity": 23, "function_lengths": [11, 28], "trivial_wrappers": 0},
+  "scripts/pinned.py": {"cognitive_complexity": 25, "function_lengths": [11, 32], "trivial_wrappers": 0},
   "scripts/quality_ratchet.py": {"cognitive_complexity": 63, "function_lengths": [3, 4, 11, 18, 18, 18, 23], "trivial_wrappers": 0},
   "scripts/record_expectations.py": {"cognitive_complexity": 38, "function_lengths": [4, 10, 11, 17, 58], "trivial_wrappers": 0},
   "src/estimate.py": {"cognitive_complexity": 6377, "function_lengths": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 15, 15, 15, 15, 16, 16, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 19, 20, 21, 21, 21, 22, 22, 23, 23, 24, 24, 24, 25, 25, 26, 26, 26, 26, 26, 27, 29, 29, 30, 31, 32, 35, 36, 36, 36, 37, 37, 38, 40, 42, 45, 45, 48, 49, 52, 55, 57, 57, 59, 59, 60, 60, 62, 63, 66, 69, 69, 70, 71, 71, 80, 88, 97, 121, 147, 166, 176, 207, 248, 252], "trivial_wrappers": 6},
@@ -241,6 +241,7 @@ checks each case. Both quality-check test methods pass.
   "tests/test_fail_fast.py": {"cognitive_complexity": 1, "function_lengths": [2, 4, 6, 7, 7, 8], "trivial_wrappers": 0},
   "tests/test_gate.py": {"cognitive_complexity": 8, "function_lengths": [12, 26], "trivial_wrappers": 0},
   "tests/test_output.py": {"cognitive_complexity": 0, "function_lengths": [9, 12], "trivial_wrappers": 0},
+  "tests/test_pinned.py": {"cognitive_complexity": 11, "function_lengths": [5, 6, 7, 7, 9, 9, 13, 19, 26], "trivial_wrappers": 0},
   "tests/test_phases.py": {"cognitive_complexity": 4, "function_lengths": [5, 5, 6, 7, 7, 8, 11, 14], "trivial_wrappers": 0},
   "tests/test_quality.py": {"cognitive_complexity": 9, "function_lengths": [7, 9, 11, 15, 15, 27], "trivial_wrappers": 0},
   "tests/test_quality_ratchet.py": {"cognitive_complexity": 2, "function_lengths": [40], "trivial_wrappers": 0},
@@ -333,3 +334,19 @@ length, every complexity/wrapper limit, and all other files and hygiene limits.
 The source and test maximum lengths remain 252 and 40. The ratchet code and
 its regression tests are unchanged. Historical measurements above describe the
 quality batch before removal; they are not measurements of this candidate.
+
+## Pinned sibling layout resolution
+
+`scripts/pinned.py` now tries `BENNETT_GATE_LAYOUT/<sibling>` before its
+existing local cache, legacy sibling directory and commondir checkout cache.
+The selected directory still passes the same revision and file-hash checks; a
+revision or hash mismatch fails immediately. Missing-pin errors list every
+candidate. The focused layout regression was observed failing with a missing
+pin before this change and passing afterward.
+
+The baseline changes only the resolver row (four added lines and one layout
+condition) and adds the new `tests/test_pinned.py` row. The tests cover a
+symlinked pin in a gate-run layout with no commondir cache, layout precedence,
+revision/hash failures without fallback, detached Git HEAD validation, missing
+files, all existing candidates with unset/empty/missing layouts, and complete
+missing-candidate diagnostics. All other baseline rows remain unchanged.
