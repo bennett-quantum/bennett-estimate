@@ -1,5 +1,6 @@
 """Resolve published test inputs only at the commits in gate.toml."""
 from pathlib import Path
+import os
 import tomllib
 
 
@@ -22,6 +23,9 @@ def sibling(root, name):
     sha = pin["sha"]
     candidates = [root / ".tmp/gate/cache" / f"{name}@{sha[:12]}" / name,
                   root / ".tmp/gate-siblings" / f"{name}@{sha}"]
+    layout = os.environ.get("BENNETT_GATE_LAYOUT")
+    if layout:
+        candidates.insert(0, Path(layout) / name)
     # A gate's clean checkout can share the main checkout's immutable cache.
     metadata = root / ".git"
     if metadata.is_file():
@@ -43,4 +47,5 @@ def sibling(root, name):
                 if actual != expected:
                     raise RuntimeError(f"{name}@{sha}: {relative} hash {actual}, expected {expected}")
             return path
-    raise RuntimeError(f"missing gate pin {name}@{sha}; populate the gate cache")
+    tried = ", ".join(str(path) for path in candidates)
+    raise RuntimeError(f"missing gate pin {name}@{sha}; tried: {tried}; populate the gate cache")
