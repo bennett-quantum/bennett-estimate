@@ -106,6 +106,22 @@ class PinnedSibling(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "checkout revision " + "b" * 40):
             sibling(self.root, self.name)
 
+    def test_relative_layout_resolves_from_the_process_directory(self):
+        self.populate(self.candidates[0])
+        relative = os.path.relpath(self.layout, Path.cwd())
+        with patch.dict(os.environ, BENNETT_GATE_LAYOUT=relative):
+            resolved = sibling(self.root, self.name)
+        self.assertEqual(resolved.resolve(), self.candidates[0])
+        self.assertEqual((resolved / "target.json").read_bytes(), self.content)
+
+    def test_malformed_or_non_directory_layout_uses_valid_pinned_cache(self):
+        self.populate(self.candidates[1])
+        regular_file = self.base / "regular-file"
+        regular_file.write_text("not a layout")
+        for value in (str(regular_file), " ", "\t", "\n", "not-a-layout"):
+            with self.subTest(layout=value), patch.dict(os.environ, BENNETT_GATE_LAYOUT=value):
+                self.assertEqual(sibling(self.root, self.name), self.candidates[1])
+
     def test_missing_pinned_file_propagates(self):
         candidate = self.populate(self.candidates[0])
         self.populate(self.candidates[1])

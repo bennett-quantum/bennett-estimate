@@ -1651,7 +1651,7 @@ class Object:
             kind = symbol["kind"]
             required = {"cc":["params","results"],"r":["params","results"],"oracle":["in","tgt","fault","mem","args"],"action":["mut","in","mem","args","bounds"],"perm_action":["mut","in","mem","args","bounds"],"lproc":["params","result","tokens","args","mem"],"data":["size"]}
             require(kind in required, "unknown symbol kind")
-            keys(sig, ["tier","kind","abi",*required[kind]], context="signature")
+            keys(sig, ["tier","kind","abi",*required[kind]], context=f"ISA {versions['isa']} {kind} signature")
             require(sig["kind"] == kind and sig["abi"] == versions["isa"], "signature version/kind mismatch")
             require(sig["tier"]=={"cc":"cc","r":"r","oracle":"q","action":"q","perm_action":"q","lproc":"q","data":"-"}[kind],"signature kind/tier mismatch")
             if kind != "data":
@@ -4820,7 +4820,7 @@ class Certificate:
 
 
 def main(argv=None):
-    parser=argparse.ArgumentParser(prog="bennett-estimate",description="ISA 0.9 resource estimator, exact rational arithmetic; JSON on stdout")
+    parser=argparse.ArgumentParser(prog="bennett-estimate",allow_abbrev=False,description="ISA 0.9 resource estimator, exact rational arithmetic; JSON on stdout")
     parser.add_argument("object",type=Path)
     parser.add_argument("--target",type=Path,required=True)
     parser.add_argument("--region",help="required for objects with multiple executable definitions")
@@ -4838,7 +4838,8 @@ def main(argv=None):
     a=parser.parse_args(argv)
     try:
         require((a.certificate_template is None)==(a.write_certificate is None),"--certificate-template and --write-certificate must be used together")
-        obj=Object.read(a.object.read_text())
+        object_bytes=a.object.read_bytes()
+        obj=Object.read(object_bytes.decode("utf-8"))
         target=Target.read(a.target.read_text())
         candidates=[f.name for f in obj.functions.values() if f.kind!="lproc"]
         region=a.region or (candidates[0] if len(candidates)==1 else None)
@@ -4854,7 +4855,10 @@ def main(argv=None):
             aliases=loads(Path(a.token_aliases[1:]).read_text() if a.token_aliases.startswith("@") else a.token_aliases)
             require(isinstance(aliases,list),"E_ARG: token_aliases must be a JSON array")
         budget=a.budget.split(",") if a.budget is not None else ["0"]*4
+        request={"target":a.target.stem,"object_sha256":hashlib.sha256(object_bytes).hexdigest(),
+                 "budget":metadata_counts(dict(zip(["steps","heap","stack","depth"],validate_budget(budget,obj))))}
         result=estimate(obj,target,region,params,budget,a.variant,a.inherited_controls,a.classical_step_bound,a.epsilon,a.include_frame or a.certificate is not None or a.certificate_template is not None,aliases)
+        result.update(request,padded=result["resources"])
         if a.certificate:
             result["certificate_status"]=Certificate.read(a.certificate.read_text()).check_resource_rows(result)
         if a.certificate_template:
@@ -4870,7 +4874,7 @@ def main(argv=None):
         if isinstance(ex,ContractError) and code in ["EST-SOURCE-01","EST-SOURCE-02","EST-SOURCE-03","EST-SOURCE-04","EST-CONTEXT-03"]:
             # The request remains concrete/reviewable while the missing
             # published binding is tracked. No resource number is invented.
-            pending={"schema":"bennett-estimate/0.1","label":"pending evidence","object_hash":obj.hash,"target_hash":target.hash,
+            pending={**request,"schema":"bennett-estimate/0.1","label":"pending evidence","object_hash":obj.hash,"target_hash":target.hash,
                      "region":region,"variant":a.variant,"inherited_controls":a.inherited_controls,
                      "invocation":{"args":params,"budget":budget},"params_hash":digest(jcs(params)),
                      "epsilon":exact_decimal(decimal_value(a.epsilon)),
