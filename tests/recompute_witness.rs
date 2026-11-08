@@ -406,3 +406,149 @@ fn w2b_estimator_accepts_reading_the_flipped_input() {
 fn estimator_accepts_cancelling_scratch_reads() {
     check_estimator(&WITNESSES[6], "recompute", "");
 }
+
+const FAMILY_VERDICTS: &str = r#"
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path.cwd()/'tests'))
+from test_schedule import e, make_object, target, entry, point
+t=target()
+signature={'abi':'0.9','tier':'q','kind':'perm_action','mut':[1,1],
+           'in':[1],'mem':[],'args':[],'bounds':[]}
+for source in sys.stdin.read().split('\nCASE\n'):
+    obj=make_object(source.rstrip(),signature)
+    doc=e.estimate(obj,t,'root',[],['0']*4)['effective_schedule']
+    carrier=len(obj.functions['root'].code)-1
+    doc['entries']=[entry('cleanup',path=[point(obj.symbol('root')['interface_hash'],
+                          f'entry:{carrier}')],realisation='recompute')]
+    obj.sections['schedule']=doc
+    try:
+        result=e.estimate(obj,t,'root',[],['0']*4)
+    except e.ContractError as error:
+        message=str(error)
+        assert 'recompute' in message and 'refused:' in message, message
+        assert 'pending' not in message, message
+        print('refuse')
+    else:
+        assert result['label']=='exact', result
+        print('admit')
+"#;
+
+fn enumerate_retained(prefix: &mut Vec<(usize, usize)>, cases: &mut Vec<Vec<(usize, usize)>>) {
+    cases.push(prefix.clone());
+    if prefix.len() == 3 {
+        return;
+    }
+    let first_gap = prefix.last().map_or(0, |&(gap, _)| gap);
+    for gap in first_gap..3 {
+        for operation in 0..4 {
+            // Temporary input changes live between inverses, or after the
+            // source cleanup. No flip spans the earlier inverse endpoint.
+            if gap == 0 && operation == 3 {
+                continue;
+            }
+            prefix.push((gap, operation));
+            enumerate_retained(prefix, cases);
+            prefix.pop();
+        }
+    }
+}
+
+fn generated_programs(rows: &[(usize, usize)]) -> (String, String) {
+    let operations = ["x y\n", "cx x y\n", "cx d y\n", "x x\n"];
+    let prefix = "perm_action @root (x:wire, y:wire) (z:wire in) () () ()\n^entry():\nd = qalloc any 1\ncx x d\ncx z d\n";
+    let mut source = prefix.to_owned();
+    let mut candidate = prefix.to_owned();
+    for gap in 0..3 {
+        for &(position, operation) in rows {
+            if position == gap {
+                source.push_str(operations[operation]);
+                candidate.push_str(operations[operation]);
+            }
+        }
+        source.push_str(["cx z d\n", "cx x d\n", "qfree d\n"][gap]);
+    }
+    candidate
+        .push_str("u = qalloc any 1\ncx x u\ncx z u\ncx u d\ncx z u\ncx x u\nqfree u\nqfree d\n");
+    (source, candidate)
+}
+
+fn executed_family_verdict(source: &str, candidate: &str) -> Option<bool> {
+    let mut equivalent = true;
+    for basis in 0..8 {
+        let initial = ["x", "y", "z"]
+            .into_iter()
+            .enumerate()
+            .map(|(bit, name)| (name.to_owned(), basis & (1 << bit) != 0))
+            .collect();
+        for inverse in [false, true] {
+            let original = execute(source, &initial, inverse);
+            if original.releases.iter().any(|(_, bit)| *bit) {
+                return None;
+            }
+            let replacement = execute(candidate, &initial, inverse);
+            equivalent &= original.interface == replacement.interface
+                && replacement.releases.iter().all(|(_, bit)| !bit);
+        }
+    }
+    Some(equivalent)
+}
+
+#[test]
+fn exhaustive_recompute_family_matches_executed_equivalence() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut cases = Vec::new();
+    enumerate_retained(&mut Vec::new(), &mut cases);
+    let programs: Vec<_> = cases
+        .iter()
+        .map(|rows| generated_programs(rows))
+        .filter_map(|(source, candidate)| {
+            executed_family_verdict(&source, &candidate).map(|verdict| (source, verdict))
+        })
+        .collect();
+    let input = programs
+        .iter()
+        .map(|(source, _)| source.as_str())
+        .collect::<Vec<_>>()
+        .join("\nCASE\n");
+    let mut child = Command::new("python3")
+        .args(["-I", "-B", "-c", FAMILY_VERDICTS])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Python 3 must execute family verdicts");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .expect("family source programs must be delivered");
+    let output = child.wait_with_output().expect("family must finish");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let verdicts: Vec<_> = stdout.lines().collect();
+    assert_eq!(verdicts.len(), programs.len());
+    for ((source, expected), verdict) in programs.iter().zip(verdicts) {
+        assert_eq!(
+            verdict,
+            if *expected { "admit" } else { "refuse" },
+            "admit-but-unsound or refuse-but-sound finding:\n{source}"
+        );
+    }
+    let admitted = programs.iter().filter(|(_, verdict)| *verdict).count();
+    assert!(admitted > 0 && admitted < programs.len());
+    println!(
+        "{} generated programs, {} valid sources, {admitted} admit, {} refuse; zero findings",
+        cases.len(),
+        programs.len(),
+        programs.len() - admitted
+    );
+}
