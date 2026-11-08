@@ -3325,6 +3325,10 @@ class CleanupVersions:
             version=index+1 if labels is None else labels[index]+1
             reads,writes=row.access()
             for bit in reads|writes:self.current.setdefault(bit,0);self.entries.setdefault(bit,0)
+            if row.kind==CleanupKind.RELEASE:
+                # An enclosing captured history may own the allocation. Its
+                # entry binding is unestablished here, never an invented zero.
+                for bit in bits([row.bundle]):self.current.setdefault(bit,None);self.entries.setdefault(bit,None)
             self.before.append(dict(self.current));self.entry_before.append(dict(self.entries))
             if row.kind==CleanupKind.ACQUIRE:
                 # A clean allocation is a new lifetime, even if lowering can
@@ -3480,7 +3484,7 @@ class TerminalCleanups:
 
     def owner(self,index,claimed):
         row=self.rows[index];targets=set(bits([row.bundle]));owned=[]
-        if any(self.versions.before[index][bit]!=self.versions.entry_before[index][bit] for bit in targets):return []
+        if any(self.versions.entry_before[index][bit] is None or self.versions.before[index][bit]!=self.versions.entry_before[index][bit] for bit in targets):return []
         for previous in range(index-1,-1,-1):
             candidate=self.rows[previous]
             if candidate.kind==CleanupKind.OPAQUE:break
@@ -3509,7 +3513,7 @@ class TerminalCleanups:
             row.capture.owned_points=tuple(self.rows[i].meta["point"] for i in owned+[index])
             # Empty clean lifetimes also have a K65 carrier. A missing match
             # for a nonempty lifetime is proof unavailability, not ill-formedness.
-            plan["matched"]=bool(owned) or all(self.versions.before[index][bit]==self.versions.entry_before[index][bit] for bit in bits([row.bundle]))
+            plan["matched"]=bool(owned) or all(self.versions.entry_before[index][bit] is not None and self.versions.before[index][bit]==self.versions.entry_before[index][bit] for bit in bits([row.bundle]))
             row.capture.recompute=Captured([],{},(),builder=self.replacement(plan))
             try:plan["material"]=self.materialize(plan)
             except CleanupUnestablished as error:plan["material"]=error
