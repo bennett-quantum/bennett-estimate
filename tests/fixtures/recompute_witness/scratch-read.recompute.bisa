@@ -1,0 +1,14 @@
+perm_action @root (y:wire) (x:wire in, z:wire in) () () ()
+^entry():
+d = qalloc any 1
+cx x d
+cx z d
+cx d y
+u = qalloc any 1
+cx x u
+cx z u
+cx u d
+cx z u
+cx x u
+qfree u
+qfree d
