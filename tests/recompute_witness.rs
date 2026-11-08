@@ -40,13 +40,14 @@ macro_rules! witness {
     };
 }
 
-const WITNESSES: [Witness; 6] = [
+const WITNESSES: [Witness; 7] = [
     witness!("disjoint-between", "y", "x,z", FlipY, 0, 0),
     witness!("disjoint-before-release", "y", "x,z", FlipY, 0, 0),
     witness!("scratch-read", "y", "x,z", XIntoY, 4, 0),
     witness!("unrestored-input", "x", "z", FlipX, 0, 4),
     witness!("restored-input", "x", "z", Identity, 0, 0),
     witness!("restored-input-read", "x,y", "z", NotXIntoY, 0, 0),
+    witness!("cancelling-scratch-reads", "y", "x,z", Identity, 0, 0),
 ];
 
 #[derive(Debug, PartialEq, Eq)]
@@ -233,6 +234,11 @@ fn w2b_read_of_flipped_input_executes_equivalently() {
     assert_witness(&WITNESSES[5]);
 }
 
+#[test]
+fn cancelling_scratch_reads_execute_equivalently() {
+    assert_witness(&WITNESSES[6]);
+}
+
 // This bridge only records actual emitted operands. It makes no admissibility
 // decisions and does not provide expected basis outputs to the Rust interpreter.
 const ESTIMATOR_TRACE: &str = r#"
@@ -269,7 +275,8 @@ else:
         expected = {'disjoint-between':(8,5,37,[3,5,6]),
                     'disjoint-before-release':(8,5,37,[3,4,6]),
                     'restored-input':(9,4,32,[3,6,7]),
-                    'restored-input-read':(10,5,45,[3,7,8])}
+                    'restored-input-read':(10,5,45,[3,7,8]),
+                    'cancelling-scratch-reads':(9,5,41,[3,6,7])}
         gates, peak, area, owned = expected[Path(fixture).stem]
         assert result['resources'] == {'gate_count':str(gates), 'time':str(gates),
             'peak_qubits[data]':str(peak), 'qubit_second[data]':str(area)}, result
@@ -397,4 +404,10 @@ fn tdf_estimator_accepts_a_matched_input_flip_and_undo() {
 #[ignore = "Await council and implementation: docs/design/2026-11-08-recompute-cleanup-admissibility.md §4.4"]
 fn w2b_estimator_accepts_reading_the_flipped_input() {
     check_estimator(&WITNESSES[5], "recompute", "");
+}
+
+#[test]
+#[ignore = "Await council and implementation: docs/design/2026-11-08-recompute-cleanup-admissibility.md §4.5"]
+fn estimator_accepts_cancelling_scratch_reads() {
+    check_estimator(&WITNESSES[6], "recompute", "");
 }
