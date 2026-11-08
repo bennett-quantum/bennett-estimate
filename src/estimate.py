@@ -677,6 +677,7 @@ class Captured:
     recompute: object = None
     builder: object = None
     loop_plan: object = None
+    owned_points: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -1302,7 +1303,7 @@ class Catalog:
                 if captured.cleanup and self.ledger is not None:
                     address=self.leaf_address(carrier=True)
                     choice=self.ledger.schedule.pick("cleanup",**address) or {"realisation":"reverse"}
-                    self.ledger.cleanup_decisions.append({**address,**choice})
+                    self.ledger.cleanup_decisions.append({**address,**choice,**({"owned_points":list(captured.owned_points)} if captured.owned_points else {})})
                     if choice["realisation"]=="recompute":
                         require(captured.recompute is not None,"source cleanup-pair recompute binding remains pending for this carrier")
                         captured=captured.recompute
@@ -3260,6 +3261,382 @@ class ClassicalMachine:
         return (p, steps)
 
 
+class CleanupUnestablished(Exception):
+    """An exact proof mechanism is unavailable; this is no source rejection."""
+
+
+class CleanupKind(Enum):
+    GATE=auto()
+    ACQUIRE=auto()
+    RELEASE=auto()
+    OPAQUE=auto()
+
+
+class CleanupGate(Enum):
+    X="x"
+    CX="cx"
+    CCX="ccx"
+    MCX="mcx"
+    SWAP="swap"
+    S="s"
+    SDG="sdg"
+    T="t"
+    TDG="tdg"
+    CZ="cz"
+    H="h"
+
+    def own_controls(self,width):
+        return {CleanupGate.CX:1,CleanupGate.CCX:2,CleanupGate.MCX:width-1}.get(self,0)
+
+    def bind(self,wires,controls):
+        own=self.own_controls(len(wires))
+        wires=tuple(sorted(wires[:own]))+wires[own:]
+        return self,wires,tuple(sorted(set(controls)-set(wires[:own])))
+
+
+@dataclass
+class CleanupRow:
+    node: dict
+    meta: dict
+    kind: CleanupKind
+    gates: tuple = ()
+    bundle: object = None
+    capture: object = None
+
+    def access(self):
+        reads,writes=set(),set()
+        for op,wires,controls in self.gates:
+            own=op.own_controls(len(wires))
+            if op in [CleanupGate.S,CleanupGate.SDG,CleanupGate.T,CleanupGate.TDG,CleanupGate.CZ]:reads.update(wires)
+            elif op==CleanupGate.SWAP:writes.update(wires)
+            else:reads.update(wires[:own]);writes.update(wires[own:])
+            reads.update(controls)
+        return reads,writes
+
+    def permutation(self):
+        return self.kind==CleanupKind.GATE and all(op in [CleanupGate.X,CleanupGate.CX,CleanupGate.CCX,CleanupGate.MCX,CleanupGate.SWAP] for op,_,_ in self.gates)
+
+
+class CleanupVersions:
+    """Occurrence matching is separate from the composed semantic proof."""
+    def __init__(self,rows,labels=None):
+        self.current={};self.entries={};self.before=[];self.entry_before=[];self.after=[];self.pairs={};history={}
+        for index,row in enumerate(rows):
+            version=index+1 if labels is None else labels[index]+1
+            reads,writes=row.access()
+            for bit in reads|writes:self.current.setdefault(bit,0);self.entries.setdefault(bit,0)
+            if row.kind==CleanupKind.RELEASE:
+                # An enclosing captured history may own the allocation. Its
+                # entry binding is unestablished here, never an invented zero.
+                for bit in bits([row.bundle]):self.current.setdefault(bit,None);self.entries.setdefault(bit,None)
+            self.before.append(dict(self.current));self.entry_before.append(dict(self.entries))
+            if row.kind==CleanupKind.ACQUIRE:
+                # A clean allocation is a new lifetime, even if lowering can
+                # reuse its storage descriptor after an earlier release.
+                for bit in bits([row.bundle]):self.current[bit]=-version;self.entries[bit]=-version
+            elif row.kind==CleanupKind.OPAQUE:
+                history.clear()
+                self.current={bit:version for bit in self.current}
+            elif row.permutation():
+                inputs=tuple((bit,self.current[bit]) for bit in sorted(reads))
+                outputs=tuple((bit,self.current[bit]) for bit in sorted(writes))
+                key=(row.meta["kind"],row.gates,inputs,outputs)
+                previous=history.get(key)
+                if previous is not None:
+                    computing,entry=previous
+                    self.pairs[index]=computing;self.current.update(entry)
+                else:
+                    entry=dict(outputs)
+                    for bit in writes:self.current[bit]=version
+                    outputs=tuple((bit,self.current[bit]) for bit in sorted(writes))
+                    history[(row.meta["kind"],row.gates,inputs,outputs)]=(index,entry)
+            elif writes:
+                for bit in writes:self.current[bit]=version
+            self.after.append(dict(self.current))
+
+
+class CleanupSemantics:
+    """Exact Boolean maps and eighth-turn phases on arbitrary input bits.
+
+    Boolean functions use algebraic normal form. Phase functions use integer
+    multilinear polynomials modulo eight, including their constant term.
+    Equality therefore includes global phase, also under effective controls.
+    The symbolic-work allowance defers a proof; it never changes a verdict.
+    """
+    MAX_TERMS=4096
+
+    def __init__(self):
+        self.values={};self.entries={};self.phase={};self.clean=True
+
+    @staticmethod
+    def product(left,right):
+        result=set()
+        for a in left:
+            for b in right:
+                term=a|b
+                if term in result:result.remove(term)
+                else:result.add(term)
+        if len(result)>CleanupSemantics.MAX_TERMS:raise CleanupUnestablished("Boolean proof term allowance exceeded")
+        return frozenset(result)
+
+    def value(self,bit):
+        if bit not in self.values:self.values[bit]=frozenset([frozenset([bit])])
+        return self.values[bit]
+
+    def predicate(self,controls):
+        result=frozenset([frozenset()])
+        for bit in controls:result=self.product(result,self.value(bit))
+        return result
+
+    def add_phase(self,predicate,coefficient):
+        # XOR(a,b)=a+b-2ab over integer Boolean functions. Retain the
+        # constant monomial: discarding it would lose controlled global phase.
+        polynomial={}
+        for term in sorted(predicate,key=lambda t:(len(t),sorted(t))):
+            delta={term:1}
+            for old,value in polynomial.items():delta[old|term]=delta.get(old|term,0)-2*value
+            for key,value in delta.items():polynomial[key]=(polynomial.get(key,0)+value)%8
+            polynomial={key:value for key,value in polynomial.items() if value}
+            if len(polynomial)>self.MAX_TERMS:raise CleanupUnestablished("phase proof term allowance exceeded")
+        for term,value in polynomial.items():self.phase[term]=(self.phase.get(term,0)+coefficient*value)%8
+        self.phase={term:value for term,value in self.phase.items() if value}
+
+    def gate(self,op,wires,controls):
+        own=op.own_controls(len(wires))
+        enabled=self.predicate(tuple(dict.fromkeys(controls+wires[:own])))
+        match op:
+            case CleanupGate.X|CleanupGate.CX|CleanupGate.CCX|CleanupGate.MCX:
+                self.values[wires[-1]]=self.value(wires[-1])^enabled
+            case CleanupGate.SWAP:
+                a,b=wires;change=self.product(self.value(a)^self.value(b),enabled)
+                self.values[a]=self.value(a)^change;self.values[b]=self.value(b)^change
+            case CleanupGate.S|CleanupGate.SDG|CleanupGate.T|CleanupGate.TDG|CleanupGate.CZ:
+                predicate=self.product(enabled,self.predicate(wires))
+                self.add_phase(predicate,{CleanupGate.S:2,CleanupGate.SDG:-2,CleanupGate.T:1,CleanupGate.TDG:-1,CleanupGate.CZ:4}[op])
+            case _:raise CleanupUnestablished(f"composed proof for {op.value} is unavailable")
+
+    def execute(self,row):
+        if row.kind==CleanupKind.OPAQUE:raise CleanupUnestablished(f"composed proof for source point {row.meta['point']} is unavailable")
+        if row.kind==CleanupKind.ACQUIRE:
+            for bit in bits([row.bundle]):
+                entry=(f"borrow:{id(row)}:{bit[0]}",bit[1],bit[2])
+                value=frozenset([frozenset([entry])]) if row.bundle.state=="borrowed" else frozenset()
+                self.values[bit]=value;self.entries[bit]=value
+        elif row.kind==CleanupKind.RELEASE:
+            for bit in bits([row.bundle]):
+                self.clean &= self.value(bit)==self.entries[bit]
+                del self.values[bit]
+        else:
+            for op,wires,controls in row.gates:self.gate(op,wires,controls)
+
+
+class TerminalCleanups:
+    """K81 terminal owners, §6.2 replay bindings, and composed K80 proof.
+
+    Transparent primitive constructors are proved symbolically. Opaque calls,
+    cells and control-flow constructors retain their existing reverse path;
+    requesting an unavailable proof reports unestablished mechanics explicitly.
+    No semantic equality substitutes for source occurrence/version matching.
+    """
+    MAX_PROOF_WIRES=256
+    MAX_PROOF_ROWS=4096
+
+    def __init__(self,source,nodes,env,controls):
+        self.source=source;self.nodes=nodes;self.env=env
+        self.plans=[]
+        # Bound symbolic proof work before expanding any storage-sized bundle.
+        # Reverse and the estimator's existing storage summaries remain valid.
+        width=sum(b.width for value in env.values() for b in ([value] if isinstance(value,Bundle) else value if isinstance(value,(list,tuple)) else []) if isinstance(b,Bundle))
+        if width+len(controls)>self.MAX_PROOF_WIRES or len(nodes)>self.MAX_PROOF_ROWS:
+            self.rows=[];self.versions=None;return
+        self.rows=[self.decode(node,env,controls) for node in nodes]
+        self.versions=CleanupVersions(self.rows)
+
+    @property
+    def catalog(self):return self.source.catalog
+
+    def decode(self,node,env,controls,meta=None):
+        marked=self.catalog.source_metadata.get(id(node))
+        meta=marked[1] if marked is not None else meta
+        if meta is None:return CleanupRow(node,{"point":"captured lifetime history"},CleanupKind.OPAQUE)
+        if "under" in node and len(node["body"])==1:
+            joined=tuple(sorted(set(controls+bits(wire(node["under"],env)))))
+            row=self.decode(node["body"][0],env,joined,meta);row.node=node;return row
+        if "splice" in node:
+            captured=env[node["splice"]]
+            if captured.cleanup and len(captured.body)==1 and "relinquish" in captured.body[0]:
+                bundle=captured.env[captured.body[0]["relinquish"]]
+                return CleanupRow(node,meta,CleanupKind.RELEASE,bundle=bundle,capture=captured)
+            return CleanupRow(node,meta,CleanupKind.OPAQUE)
+        for key,kind in [("acquire",CleanupKind.ACQUIRE),("relinquish",CleanupKind.RELEASE)]:
+            if key in node:return CleanupRow(node,meta,kind,bundle=env[node[key]])
+        if "gate" in node and not node.get("params"):
+            wires=bits(wire(node["wires"],env))
+            op=CleanupGate(node["gate"])
+            return CleanupRow(node,meta,CleanupKind.GATE,(op.bind(wires,controls),))
+        if node.get("invoke") in ["bind.qxor","bind.qexch"]:
+            if meta["kind"] in ["qcopy","qload"]:return CleanupRow(node,meta,CleanupKind.OPAQUE)
+            _,a,b=node["args"];left,right=bits(wire(a,env)),bits(wire(b,env))
+            op=CleanupGate.CX if node["invoke"]=="bind.qxor" else CleanupGate.SWAP
+            gates=tuple(op.bind((a,b),controls) for a,b in zip(left,right))
+            return CleanupRow(node,meta,CleanupKind.GATE,gates)
+        return CleanupRow(node,meta,CleanupKind.OPAQUE)
+
+    def owner(self,index,claimed):
+        row=self.rows[index];targets=set(bits([row.bundle]));owned=[]
+        if any(self.versions.entry_before[index][bit] is None or self.versions.before[index][bit]!=self.versions.entry_before[index][bit] for bit in targets):return []
+        for previous in range(index-1,-1,-1):
+            candidate=self.rows[previous]
+            if candidate.kind==CleanupKind.OPAQUE:break
+            if candidate.kind==CleanupKind.RELEASE:
+                if targets.intersection(bits([candidate.bundle])):break
+                continue
+            if candidate.kind==CleanupKind.ACQUIRE and targets.intersection(bits([candidate.bundle])):break
+            _,writes=candidate.access()
+            if not writes.intersection(targets):continue
+            if previous not in self.versions.pairs or previous in claimed:break
+            owned.append(previous);targets.update(writes)
+        return sorted(owned)
+
+    def choice(self,plan):
+        previous=self.catalog.source_context;self.catalog.source_context=plan["meta"]
+        try:return (self.catalog.ledger.schedule.pick("cleanup",**self.catalog.leaf_address(carrier=True)) or {"realisation":"reverse"})["realisation"]
+        finally:self.catalog.source_context=previous
+
+    def partition(self):
+        claimed=set()
+        for index,row in enumerate(self.rows):
+            if row.kind!=CleanupKind.RELEASE or row.capture is None:continue
+            owned=self.owner(index,claimed);claimed.update(owned)
+            computes=sorted(self.versions.pairs[i] for i in owned)
+            plan={"release":index,"owned":owned,"computes":computes,"meta":row.meta}
+            row.capture.owned_points=tuple(self.rows[i].meta["point"] for i in owned+[index])
+            # Empty clean lifetimes also have a K65 carrier. A missing match
+            # for a nonempty lifetime is proof unavailability, not ill-formedness.
+            plan["matched"]=bool(owned) or all(self.versions.entry_before[index][bit] is not None and self.versions.before[index][bit]==self.versions.entry_before[index][bit] for bit in bits([row.bundle]))
+            row.capture.recompute=Captured([],{},(),builder=self.replacement(plan))
+            try:plan["material"]=self.materialize(plan)
+            except CleanupUnestablished as error:plan["material"]=error
+            self.plans.append(plan)
+            for inverse in owned:self.nodes[inverse]=self.retained_inverse(plan,inverse)
+        return self.nodes
+
+    def retained_inverse(self,plan,index):
+        row=self.rows[index]
+        def expand(joined,inverse,env):
+            if self.choice(plan)=="recompute":return Profile()
+            return self.catalog.body([row.node],self.env,joined,inverse)
+        name=f"$terminal_inverse:{index}"
+        self.env[name]=Captured([],{},(),builder=expand)
+        wrapper={"splice":name};self.catalog.source_metadata[id(wrapper)]=(wrapper,row.meta)
+        return wrapper
+
+    def replay_gates(self,plan,mapping):
+        result=[]
+        for index in plan["computes"]:
+            for op,wires,controls in self.rows[index].gates:
+                result.append((op,tuple(mapping.get(bit,bit) for bit in wires),tuple(mapping.get(bit,bit) for bit in controls)))
+        return result
+
+    def target_bits(self,plan):
+        targets=set().union(*(self.rows[i].access()[1] for i in plan["computes"])) if plan["computes"] else set(bits([self.rows[plan["release"]].bundle]))
+        for row in self.rows:
+            if row.kind==CleanupKind.ACQUIRE and targets.intersection(bits([row.bundle])):targets.update(bits([row.bundle]))
+        return targets
+
+    def replay_window(self,plan,selected):
+        if not plan["matched"]:raise CleanupUnestablished("exact computing occurrences for the released lifetime are unestablished")
+        targets=self.target_bits(plan);erased={i for p in selected for i in p["owned"]}
+        labels=[i for i in range(plan["release"]) if i not in erased]
+        candidate=CleanupVersions([self.rows[i] for i in labels],labels)
+        for computing in plan["computes"]:
+            row=self.rows[computing];reads,_=row.access();external=reads-targets
+            protected=external|targets
+            for index in range(computing+1,plan["release"]):
+                changed=self.rows[index].access()[1]&external
+                if not changed:continue
+                paired=self.versions.pairs.get(index)
+                if paired is not None and paired>computing:continue
+                undo=next((j for j,i in self.versions.pairs.items() if i==index and j<plan["release"]),None)
+                if undo is None:self.refuse(plan,index,"captured replay input version is not restored")
+                for middle in range(index+1,undo):
+                    if self.rows[middle].access()[1]&protected:self.refuse(plan,middle,"input undo interval changes a protected basis value")
+            for bit in external:
+                expected=self.versions.before[computing][bit]
+                if candidate.current[bit]!=expected:
+                    self.refuse(plan,plan["release"],"captured replay input version is unavailable")
+            for index in range(computing+1,plan["release"]):
+                event=self.rows[index]
+                reads,writes=event.access()
+                if event.kind==CleanupKind.OPAQUE:raise CleanupUnestablished(f"window proof at {event.meta['point']} is unavailable")
+                if event.kind==CleanupKind.GATE and not event.permutation() and writes&protected:
+                    self.refuse(plan,index,"non-permutation basis change closes the cleanup window")
+
+    def refuse(self,plan,index,reason):
+        raise ContractError(f"recompute at {plan['meta']['point']} refused: {reason}; conflicting source point {self.rows[index].meta['point']}")
+
+    def composed(self,selected):
+        source,candidate=CleanupSemantics(),CleanupSemantics();conflict=None
+        erased={i for plan in selected for i in plan["owned"]}
+        releases={plan["release"]:plan for plan in selected}
+        for index,row in enumerate(self.rows):
+            source.execute(row)
+            if index in erased:continue
+            if index in releases:
+                plan=releases[index];targets=self.target_bits(plan)
+                mapping={bit:(f"proof:{index}:{bit[0]}",bit[1],bit[2]) for bit in targets}
+                for bit in mapping.values():candidate.values[bit]=frozenset()
+                gates=self.replay_gates(plan,mapping)
+                for gate in gates:candidate.gate(*gate)
+                for bit,fresh in mapping.items():candidate.gate(CleanupGate.CX,(fresh,bit),())
+                for gate in reversed(gates):candidate.gate(*gate)
+                for fresh in mapping.values():
+                    candidate.clean &= not candidate.value(fresh);del candidate.values[fresh]
+            candidate.execute(row)
+            _,writes=row.access()
+            if conflict is None and (source.phase!=candidate.phase or any(source.value(bit)!=candidate.value(bit) for bit in writes)):
+                conflict=index
+        if not source.clean:raise CleanupUnestablished("source clean-release proof is unestablished")
+        if not candidate.clean or source.values!=candidate.values or source.phase!=candidate.phase:
+            self.refuse(selected[0],conflict if conflict is not None else selected[0]["release"],"composed state/phase equality or clean release fails")
+
+    def replacement(self,plan):
+        def expand(joined,inverse,env):
+            try:
+                selected=[p for p in self.plans if self.choice(p)=="recompute"]
+                for chosen in selected:self.replay_window(chosen,selected)
+                self.composed(selected)
+                material=plan["material"]
+                if isinstance(material,CleanupUnestablished):raise material
+                nodes,local=material
+            except CleanupUnestablished as error:
+                raise ContractError(f"recompute at {plan['meta']['point']} pending/unestablished: {error}") from error
+            return self.catalog.body(nodes,local,joined,inverse)
+        return expand
+
+    def materialize(self,plan):
+        targets=self.target_bits(plan);local={};mapping={};prefix=[];suffix=[]
+        entries=[self.versions.entry_before[plan["release"]].get(bit) for bit in targets]
+        if any(entry is None or entry>=0 for entry in entries):raise CleanupUnestablished("joint replay outputs require locally allocated target bundles")
+        # Negative entry versions identify allocation occurrences by row index,
+        # even when separate source lifetimes share a lowering descriptor.
+        for index in sorted({-entry-1 for entry in entries}):
+            row=self.rows[index]
+            fresh=Bundle(f"recompute:{row.bundle.identity}:{index}:{plan['meta']['point']}",row.bundle.width,row.bundle.cls)
+            name=f"$terminal_fresh:{index}";local[name]=fresh
+            prefix.append({"acquire":name});suffix.insert(0,{"relinquish":name})
+            mapping.update(zip(bits([row.bundle]),bits([fresh])))
+        if not targets<=mapping.keys():raise CleanupUnestablished("joint replay outputs require locally allocated target bundles")
+        gates=[]
+        for op,wires,controls in self.replay_gates(plan,mapping):
+            node={"gate":op.value,"wires":[Bundle(identity,1,cls,offset) for identity,offset,cls in wires]}
+            if controls:node={"under":[Bundle(identity,1,cls,offset) for identity,offset,cls in controls],"body":[node]}
+            gates.append(node)
+        copies=[{"gate":CleanupGate.CX.value,"wires":[Bundle(fresh[0],1,fresh[2],fresh[1]),Bundle(bit[0],1,bit[2],bit[1])]} for bit,fresh in sorted(mapping.items())]
+        released=self.rows[plan["release"]].bundle;local["$terminal_released"]=released
+        return [*prefix,*gates,*copies,{"inverse":True,"body":gates},*suffix,{"relinquish":"$terminal_released"}],local
+
+
 class Source:
     def __init__(self, obj, target, catalog):
         self.obj, self.target, self.catalog = obj, target, catalog
@@ -3393,7 +3770,10 @@ class Source:
             prefix+=before;suffix=after+suffix
         pairs=self.oracle_pairs(fn,env,controls,adjoint)
         body=self.action_nodes([i for _,code in fn.blocks.values() for i in code],env,regions,controls,adjoint=adjoint,oracle_pairs=pairs)
-        return prefix+body+suffix
+        nodes=prefix+body+suffix
+        if self.catalog.ledger is not None and not adjoint:
+            nodes=TerminalCleanups(self,nodes,env,controls).partition()
+        return nodes
 
     @staticmethod
     def empty_cleanups(fn):
