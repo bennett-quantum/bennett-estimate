@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import patch
 
-from test_schedule import ROOT, e, make_object, target, entry
+from test_schedule import ROOT, e, make_object, target, entry, point
 
 
 class Recompute(unittest.TestCase):
@@ -45,6 +45,15 @@ class Recompute(unittest.TestCase):
 
     def test_composed_identity_does_not_replace_source_occurrence_matching(self):
         obj,t=self.scheduled("d = qalloc any 1\nqxor x d\ncx x d\nqfree d")
+        with self.assertRaisesRegex(e.ContractError,"recompute.*pending/unestablished.*computing occurrences"):
+            e.estimate(obj,t,"root",[],["0"]*4)
+        obj.sections["schedule"]["entries"][0]["cleanup"]["realisation"]="reverse"
+        self.assertEqual(e.estimate(obj,t,"root",[],["0"]*4)["label"],"exact")
+
+    def test_reallocation_does_not_restore_an_earlier_input_lifetime(self):
+        body="b = qalloc any 1\na = qalloc any 1\ncx b a\nqfree b\nb = qalloc any 1\ncx b a\nqfree a\nqfree b"
+        obj,t=self.scheduled(body)
+        obj.sections["schedule"]["entries"]=[entry("cleanup",path=[point(obj.symbol("root")["interface_hash"],"entry:6")],realisation="recompute")]
         with self.assertRaisesRegex(e.ContractError,"recompute.*pending/unestablished.*computing occurrences"):
             e.estimate(obj,t,"root",[],["0"]*4)
         obj.sections["schedule"]["entries"][0]["cleanup"]["realisation"]="reverse"

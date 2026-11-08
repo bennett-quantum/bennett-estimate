@@ -3320,14 +3320,16 @@ class CleanupRow:
 class CleanupVersions:
     """Occurrence matching is separate from the composed semantic proof."""
     def __init__(self,rows,labels=None):
-        self.current={};self.before=[];self.after=[];self.pairs={};history={}
+        self.current={};self.entries={};self.before=[];self.entry_before=[];self.after=[];self.pairs={};history={}
         for index,row in enumerate(rows):
             version=index+1 if labels is None else labels[index]+1
             reads,writes=row.access()
-            for bit in reads|writes:self.current.setdefault(bit,0)
-            self.before.append(dict(self.current))
+            for bit in reads|writes:self.current.setdefault(bit,0);self.entries.setdefault(bit,0)
+            self.before.append(dict(self.current));self.entry_before.append(dict(self.entries))
             if row.kind==CleanupKind.ACQUIRE:
-                for bit in bits([row.bundle]):self.current[bit]=0
+                # A clean allocation is a new lifetime, even if lowering can
+                # reuse its storage descriptor after an earlier release.
+                for bit in bits([row.bundle]):self.current[bit]=-version;self.entries[bit]=-version
             elif row.kind==CleanupKind.OPAQUE:
                 history.clear()
                 self.current={bit:version for bit in self.current}
@@ -3413,7 +3415,8 @@ class CleanupSemantics:
         if row.kind==CleanupKind.OPAQUE:raise CleanupUnestablished(f"composed proof for source point {row.meta['point']} is unavailable")
         if row.kind==CleanupKind.ACQUIRE:
             for bit in bits([row.bundle]):
-                value=frozenset([frozenset([bit])]) if row.bundle.state=="borrowed" else frozenset()
+                entry=(f"borrow:{id(row)}:{bit[0]}",bit[1],bit[2])
+                value=frozenset([frozenset([entry])]) if row.bundle.state=="borrowed" else frozenset()
                 self.values[bit]=value;self.entries[bit]=value
         elif row.kind==CleanupKind.RELEASE:
             for bit in bits([row.bundle]):
@@ -3477,7 +3480,7 @@ class TerminalCleanups:
 
     def owner(self,index,claimed):
         row=self.rows[index];targets=set(bits([row.bundle]));owned=[]
-        if any(self.versions.before[index].get(bit,0)!=0 for bit in targets):return []
+        if any(self.versions.before[index][bit]!=self.versions.entry_before[index][bit] for bit in targets):return []
         for previous in range(index-1,-1,-1):
             candidate=self.rows[previous]
             if candidate.kind==CleanupKind.OPAQUE:break
@@ -3506,7 +3509,7 @@ class TerminalCleanups:
             row.capture.owned_points=tuple(self.rows[i].meta["point"] for i in owned+[index])
             # Empty clean lifetimes also have a K65 carrier. A missing match
             # for a nonempty lifetime is proof unavailability, not ill-formedness.
-            plan["matched"]=bool(owned) or all(self.versions.before[index].get(bit,0)==0 for bit in bits([row.bundle]))
+            plan["matched"]=bool(owned) or all(self.versions.before[index][bit]==self.versions.entry_before[index][bit] for bit in bits([row.bundle]))
             row.capture.recompute=Captured([],{},(),builder=self.replacement(plan))
             try:plan["material"]=self.materialize(plan)
             except CleanupUnestablished as error:plan["material"]=error
