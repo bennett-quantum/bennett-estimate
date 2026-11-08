@@ -224,6 +224,12 @@ upstream prefixes, job/shift/review/session labels and suffixed lock files.
 Both probes now return exit 1; `test_quality_ratchet_hygiene.py` independently
 checks each case. Both quality-check test methods pass.
 
+The consumer-report change updates only the CLI main length (60 to 64 lines),
+the new CLI regression module and the pinned-layout edge-case tests in this
+baseline. Production control-flow complexity and wrapper allowances remain
+unchanged. The added cases cover raw input digests, canonical line endings,
+argument spelling, lossless budget bindings and missing resource evidence.
+
 <!-- quality-baseline -->
 ```json
 {"files": {
