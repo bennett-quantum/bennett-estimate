@@ -9,7 +9,7 @@ from test_estimate import ROOT, e, sibling
 class Output(unittest.TestCase):
     def test_pending_output_has_contract_code_and_reason_only(self):
         command = [str(ROOT / "tests/fixtures/ret-delivery-source-gap.bisa"), "--target",
-                   str(sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json"),
+                   str(sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json"),
                    "--region", "root", "--budget", "2,0,0,0", "--token-aliases", "[0]"]
         with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
             status = e.main(command)

@@ -65,7 +65,7 @@ class CoverageEdges(unittest.TestCase):
 
 class InheritedReview(unittest.TestCase):
     def test_oracle_and_token_entries_require_explicit_budget(self):
-        target = sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json"
+        target = sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json"
         requests = [
             ("ret-delivery-source-gap.bisa", []),
             ("token-alias-source-gap.bisa", ["--params", '[["1","0","0","0"],["1","0","0","0"]]', "--token-aliases", "[0,1]"]),

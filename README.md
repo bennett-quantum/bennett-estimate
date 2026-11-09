@@ -12,13 +12,15 @@ Build with Rust and Python 3.11 or newer (standard library only):
 
 ```sh
 cargo build --offline --locked -j3
-target_data=.tmp/gate/cache/bennett-targets@4a74c6275592/bennett-targets/targets/ideal-all-to-all.json
+target_data=.tmp/gate/cache/bennett-targets@d2b0813b262d/bennett-targets/targets/ideal-quantum-circuit.json
 target/debug/bennett-estimate tests/fixtures/example3.bisa \
   --target "$target_data"
 target/debug/bennett-estimate tests/fixtures/example1.bisa \
   --target "$target_data" \
   --region inc8 --budget 1048576,0,0,0 --params '[]'
 ```
+
+The `ideal-quantum-circuit` target describes an ideal quantum circuit with ideal logical qubits, implementing the standard quantum circuit model.
 
 The CLI writes one deterministic JSON object. Invalid input produces a
 diagnostic on stderr, nonzero exit status and empty stdout. A request affected
@@ -160,8 +162,8 @@ admit the full memory register. The illustrative superconducting target's
 
 Allocation-table scans also use exact address-popcount summaries. The
 VM-admitted lifted-free-2pow20 example estimates a complete 2^20-entry table
-in 2940 constructor visits. Under ideal-all-to-all with budget 1,0,0,0 its
-reference construction costs 23,657,972,470 gates and peaks at 70,254,784
+in 2940 constructor visits. The target is `ideal-quantum-circuit`: an ideal quantum circuit with ideal logical qubits, implementing the standard quantum circuit model.
+With budget 1,0,0,0 its reference construction costs 23,657,972,470 gates and peaks at 70,254,784
 qubits. The VM checks one logical faulting step; it supplies no native gate
 count for this fixture.
 

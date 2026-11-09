@@ -29,7 +29,7 @@ def run(root, estimator):
             raise AssertionError(f"rung-3 failed-prefix step/time differential mismatch: {name}")
         (history if name in ["nested","impure"] else faults).append({"region":name,"status":actual["status"],"fault":actual["fault"],"steps":actual["steps"],"estimate_time":predicted["resources"]["time"],"match":True})
     native_fixture=root/"examples/native-pair-program.bisa"
-    target_path=sibling(root,"bennett-targets")/"targets/ideal-all-to-all.json"
+    target_path=sibling(root,"bennett-targets")/"targets/ideal-quantum-circuit.json"
     admitted=json.loads(subprocess.run([str(vm),"check",str(native_fixture)],capture_output=True,text=True,timeout=30,check=True).stdout)
     actual=json.loads(subprocess.run([str(vm),"run-program",str(native_fixture),"main","--target",str(target_path)],capture_output=True,text=True,timeout=30,check=True).stdout)
     predicted=json.loads(subprocess.run([str(estimator),str(native_fixture),"--target",str(target_path),"--region","pair"],capture_output=True,text=True,timeout=30,check=True).stdout)

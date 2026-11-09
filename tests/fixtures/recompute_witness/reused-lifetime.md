@@ -11,7 +11,8 @@ all four x/z bases. Both traversal directions release every source and fresh
 allocation clean. Renaming the second source allocation changes no effect,
 ownership, admissibility or resource total.
 
-On the pinned ideal target, allocation and release take zero time, each CX
+The pinned `ideal-quantum-circuit` target describes an ideal quantum circuit with ideal logical qubits, implementing the standard quantum circuit model.
+Allocation and release take zero time, each CX
 has unit gate count/time, and data occupancy has unit qubit-time rate.
 Written reverse uses two gates per lifetime at occupancy three: gates/time
 four, peak three, area `2 * (2 * 3) = 12`.

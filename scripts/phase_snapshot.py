@@ -28,7 +28,7 @@ def main():
         if "2pow20" in path.name or path.name == "fixed-procedure-instances.bisa":
             continue
         obj = e.Object.read(path.read_text())
-        for target_path in [sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json", ROOT / "data/ideal-four-clique.json"]:
+        for target_path in [sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json", ROOT / "data/ideal-four-clique.json"]:
             target = e.Target.read(target_path.read_text())
             for fn in obj.functions.values():
                 if fn.kind == "lproc":

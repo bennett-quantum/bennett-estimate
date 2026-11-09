@@ -19,7 +19,7 @@ e=importlib.util.module_from_spec(spec);sys.modules[spec.name]=e;spec.loader.exe
 
 
 def target():
-    return e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+    return e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
 
 
 def point(symbol="a"*64,point="entry:0",iteration=()):

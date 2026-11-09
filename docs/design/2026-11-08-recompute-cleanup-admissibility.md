@@ -245,7 +245,7 @@ releases. In every program the common computation is
 `d = qalloc any 1; cx x d; cx z d`. The table lists the rest of the source;
 semicolons separate distinct instruction rows. Counts cover every interface
 basis, in each of forward and raw inverse traversal.
-Resource totals below use the gate-pinned `ideal-all-to-all` target (unit gate time and data occupancy rate; zero allocation/release time).
+Resource totals below use the gate-pinned `ideal-quantum-circuit` target: an ideal quantum circuit with ideal logical qubits, implementing the standard quantum circuit model. Gate time and data occupancy rate are unit; allocation/release time is zero.
 
 | Review / witness | Source tail after computation | Recompute verdict | Executed evidence |
 |---|---|---|---|
