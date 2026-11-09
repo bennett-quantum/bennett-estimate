@@ -23,7 +23,7 @@ note = "Published K86/K91 additive target/token contracts; base implementation r
 "spec/Bennett-ISA-Spec-0.9.md" = "bbd887c7841f4eed40f7b3518270a8f2cf781204c14ac4cc3eabca5c5b4b8c3b"
 
 [siblings."bennett-targets"]
-sha = "4a74c627559250b2353936abcd46adceab738a97"
+sha = "d2b0813b262de8cbe6f1d5a4134c6a748d41b1bc"
 note = "targets origin/main"
 
 [siblings."bennett-conformance"]
