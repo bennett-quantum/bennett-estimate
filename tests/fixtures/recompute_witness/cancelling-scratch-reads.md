@@ -23,8 +23,8 @@ At `(x,z,y)=(0,1,0)`, the retained readers leave intermediate `y` values
 in-context effects differ on all four bases with `z=1` but cancel exactly.
 This distinguishes composed semantic equality from a per-read requirement.
 
-On the gate-pinned ideal-all-to-all target (unit gate time and data occupancy
-rate, zero allocation/release time), four original/retained CXs run with
+The gate-pinned `ideal-quantum-circuit` target describes an ideal quantum circuit with ideal logical qubits, implementing the standard quantum circuit model.
+With unit gate time and data occupancy rate and zero allocation/release time, four original/retained CXs run with
 four live wires and five replay/XOR/uncompute CXs run with five. Thus the
 future recompute totals are gates/time 9, peak 5, and qubit-time
 `4*4 + 5*5 = 41`, independently of estimator output.

@@ -36,7 +36,7 @@ def object_with_signatures(functions, signatures, layout=None, devices=None, dat
 class Arithmetic(unittest.TestCase):
     def test_jcs_large_integer_and_utf16_class_order(self):
         self.assertEqual(e.jcs(9007199254740993),"9007199254740992")
-        doc=e.loads((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        doc=e.loads((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         desc={"capacity":"unbounded","dirty_rate":1,"qubit_second":1}
         doc["classes"]={"\ue000":desc,"😀":desc}
         c=e.Catalog((ROOT/"data/ref-0.9.json").read_text(),e.Target.read(e.jcs(doc)))
@@ -63,7 +63,7 @@ class Arithmetic(unittest.TestCase):
 
 class Targets(unittest.TestCase):
     def test_numeric_target_fields_are_json_numbers(self):
-        original=e.loads((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        original=e.loads((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         for location in ["class","capability","rate","expression","table"]:
             doc=e.loads(e.jcs(original))
             if location=="class":doc["classes"]["data"]["dirty_rate"]="1"
@@ -81,12 +81,13 @@ class Targets(unittest.TestCase):
             self.assertEqual(len(t.hash), 64)
             self.assertEqual(t.gate("x", ["data"], 0).counts["gate_count"], 1)
 
+    # Keep the precision witness explicit: the published duration is now 0.0002.
     def test_decimal_text_preserved(self):
-        t = e.Target.read((sibling(ROOT, "bennett-targets") / "targets/superconducting-grid-illustrative.json").read_text())
+        t = e.Target.read((sibling(ROOT, "bennett-targets") / "targets/superconducting-grid-illustrative.json").read_text().replace('"time":0.0002', '"time":0.00019999999999999998'))
         self.assertEqual(t.gate("cx", ["data", "data"], 1).time, F("0.00019999999999999998"))
 
     def test_unknown_and_negative(self):
-        doc = json.loads((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        doc = json.loads((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         doc["oops"] = 1
         with self.assertRaises(e.ContractError): e.Target.read(json.dumps(doc), canonical=False)
         del doc["oops"]
@@ -94,7 +95,7 @@ class Targets(unittest.TestCase):
         with self.assertRaises(e.ContractError): e.Target.read(json.dumps(doc), canonical=False)
 
     def test_scheme_target_order_and_exact_entry_prohibition(self):
-        doc=e.loads((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        doc=e.loads((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         desc={"capacity":"unbounded","dirty_rate":1,"qubit_second":1}
         doc["classes"]={"alpha":desc,"beta":desc}
         doc["gates"]=[{"op":"cx","classes":pattern,"controls":{"min":1,"max":1},"epsilon":0,"cost":{"gate_count":1,"time":time}} for pattern,time in [(["alpha","beta"],1),(["beta","alpha"],2)]]
@@ -264,7 +265,7 @@ class Catalog(unittest.TestCase):
                          [(66356,345,19648878),(66480,376,21484636)])
 
     def setUp(self):
-        self.t = e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        self.t = e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         self.c = e.Catalog((ROOT / "data/ref-0.9.json").read_text(), self.t)
 
     def test_published_identity(self):
@@ -395,7 +396,7 @@ class Catalog(unittest.TestCase):
 class Objects(unittest.TestCase):
     def test_lifted_free_million_entry_source_object_uses_table_summaries(self):
         obj=e.Object.read((ROOT/"examples/lifted-free-2pow20.bisa").read_text())
-        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         original=e.Catalog
         class BoundedWork(original):
             def body(self,*args,**kw):
@@ -410,14 +411,14 @@ class Objects(unittest.TestCase):
 
     def test_literal_allocator_length_uses_the_existing_length_binding_gap(self):
         obj=e.Object.read((ROOT/"tests/fixtures/literal-alloc-source-gap.bisa").read_text())
-        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         with self.assertRaisesRegex(e.ContractError,"EST-SOURCE-02"):
             e.estimate(obj,t,"root",[],["2","1","0","0"])
 
     def test_wide_zero_and_signed_words_keep_constant_summary_work(self):
         n=2**53+1
         sig={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":[]}
-        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text());original=e.Catalog
+        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text());original=e.Catalog
         class BoundedWork(original):
             def body(self,*args,**kw):
                 if self.visits>500:raise AssertionError("wide constant was enumerated")
@@ -434,7 +435,7 @@ class Objects(unittest.TestCase):
     def test_signed_lifted_literals_match_unsigned_encoding(self):
         sig={"abi":"0.9","tier":"q","kind":"oracle","in":[],"tgt":8,"fault":4,"mem":[],"args":[]}
         def obj(value):return object_with_signatures(f"oracle @root () (t:wire[8]) (f:wire[4]) () ()\nregs {{ w:reg[8] }}\n^entry():\nw = lift.const.i8 {value}\nlift.retval w",{"root":sig})
-        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text());budget=["1","0","0","0"]
+        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text());budget=["1","0","0","0"]
         for signed,unsigned in [(-1,255),(-128,128),(-3,253)]:
             first=e.estimate(obj(signed),t,"root",[],budget);second=e.estimate(obj(unsigned),t,"root",[],budget)
             self.assertEqual(first["exact_resources"],second["exact_resources"])
@@ -446,14 +447,14 @@ class Objects(unittest.TestCase):
 
     def test_distinct_legal_jump_widths_expose_ref_binding_gap(self):
         obj=e.Object.read((ROOT/"tests/fixtures/jump-width-source-gap.bisa").read_text())
-        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         with self.assertRaisesRegex(e.ContractError,"EST-SOURCE-04"):
             e.estimate(obj,t,"root",[],["3","0","0","0"])
         self.assertEqual(e.estimate(obj,t,"root",[],["0"]*4)["label"],"exact")
 
     def test_wide_unwritten_location_exposes_ret_delivery_contract_gap(self):
         obj=e.Object.read((ROOT/"tests/fixtures/ret-delivery-source-gap.bisa").read_text())
-        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         with self.assertRaisesRegex(e.ContractError,"EST-SOURCE-03"):
             e.estimate(obj,t,"root",[],["4","1","8","1"])
         self.assertEqual(e.estimate(obj,t,"root",[],["0","1","8","1"])["label"],"exact")
@@ -490,7 +491,7 @@ class Objects(unittest.TestCase):
     def test_unused_resolved_parameters_preserve_binding_without_extra_wires(self):
         sig={"abi":"0.9","tier":"q","kind":"oracle","in":[1],"tgt":1,"fault":4,"mem":[],"args":["i128","f64","token"]}
         obj=object_with_signatures("oracle @unused (x:wire in) (t:wire) (f:wire[4]) () (a:i128, b:f64, tk:token)\nregs {  }\n^entry():\nlift.retval x",{"unused":sig})
-        target=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        target=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         a=["0","0x0000000000000000",["2","0","0","0"]]
         b=[str(1<<100),"0x8000000000000000",["3","0","0","0"]]
         first=e.estimate(obj,target,"unused",a,["1","0","0","0"])
@@ -500,7 +501,7 @@ class Objects(unittest.TestCase):
         self.assertNotEqual(first["params_hash"],second["params_hash"])
 
     def test_published_source_binding_gaps_have_concrete_witnesses(self):
-        target=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        target=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         parameter=e.Object.read((ROOT/"tests/fixtures/parameter-source-gap.bisa").read_text())
         self.assertEqual(parameter.symbol("parameter")["signature"]["args"],["i1"])
         for value in ["0","1"]:
@@ -519,7 +520,7 @@ class Objects(unittest.TestCase):
         sig={"abi":"0.9","tier":"q","kind":"oracle","in":[],"tgt":32,"fault":4,"mem":[],"args":[]}
         data_sig={"abi":"0.9","tier":"-","kind":"data","size":1}
         layout={"ptr_width":32,"H":3,"A_tab":1,"S_cells":0,"null_size":1,"heap_base":2,"heap_limit_max":6,"globals":{"g":{"base":1,"size":1,"image":"g"}},"interface_regions":{}}
-        target=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        target=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         results=[]
         for image in ["00","80"]:
             obj=object_with_signatures(fn,{"address":sig,"g":data_sig},layout,data={"g":image})
@@ -545,7 +546,7 @@ class Objects(unittest.TestCase):
         with self.assertRaisesRegex(e.ContractError,"selected realisation"):
             e.estimate(obj,target,"controlled",[],["0"]*4)
         obj.sections["schedule"]["entries"][0]["gate"]["realisation"]=original
-        ideal=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        ideal=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         result=e.estimate(obj,ideal,"controlled",[],["0"]*4)
         self.assertEqual(result["gates"],{"x":"1"})
         self.assertEqual(result["resources"]["time"],"1")
@@ -572,7 +573,7 @@ class Objects(unittest.TestCase):
         path = sibling(ROOT, "bennett-conformance") / "ladder/rung-3/fixtures/executor-control.bisa"
         obj = e.Object.read(path.read_text())
         self.assertEqual(len(obj.functions), 12)
-        t = e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        t = e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         doc = e.loads(e.jcs(t.doc))
         doc["ptr_widths_supported"] = [16, 32, 64]
         t = e.Target.read(e.jcs(doc))
@@ -586,7 +587,7 @@ class Objects(unittest.TestCase):
         self.assertTrue(bound["bound_assumptions"])
     def test_borrow_action(self):
         obj = e.Object.read((ROOT / "tests/fixtures/example3.bisa").read_text())
-        t = e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        t = e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         result = e.estimate(obj, t, "borrow_demo", [], ["0"]*4)
         self.assertEqual(result["resources"]["gate_count"], "4")
         self.assertEqual(result["resources"]["time"], "4")
@@ -600,7 +601,7 @@ class Objects(unittest.TestCase):
 
     def test_padded_oracle_budget_and_large_budget(self):
         obj = e.Object.read((ROOT / "tests/fixtures/example1.bisa").read_text())
-        t = e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        t = e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         results = [e.estimate(obj,t,"inc8",[],[str(b),"0","0","0"]) for b in [0,1,2,3,2**40]]
         counts = [int(r["resources"]["gate_count"]) for r in results]
         self.assertGreater(counts[1],counts[0])
@@ -611,7 +612,7 @@ class Objects(unittest.TestCase):
 
     def test_million_cell_source_lookup_without_gate_materialisation(self):
         obj=e.Object.read((ROOT/"examples/memory-lookup-2pow20.bisa").read_text())
-        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         result=e.estimate(obj,t,"lookup",[],["0"]*4)
         self.assertEqual(result["label"],"exact")
         self.assertGreater(int(result["resources"]["gate_count"]),2**20*1024*8)
@@ -771,7 +772,7 @@ class Certificates(unittest.TestCase):
 
 class CommandLine(unittest.TestCase):
     def test_pending_source_report_preserves_explicit_token_partition(self):
-        command=[os.environ["BENNETT_ESTIMATE_BIN"],str(ROOT/"tests/fixtures/ret-delivery-source-gap.bisa"),"--target",str(sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json"),"--region","root","--budget","2,0,0,0","--token-aliases","[0]"]
+        command=[os.environ["BENNETT_ESTIMATE_BIN"],str(ROOT/"tests/fixtures/ret-delivery-source-gap.bisa"),"--target",str(sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json"),"--region","root","--budget","2,0,0,0","--token-aliases","[0]"]
         actual=subprocess.run(command,capture_output=True,text=True,timeout=30)
         self.assertEqual(actual.returncode,3,actual.stderr)
         report=json.loads(actual.stdout)
@@ -781,7 +782,7 @@ class CommandLine(unittest.TestCase):
 
     def test_classical_alias_partition_cli_has_exact_distinct_requests(self):
         binary=os.environ["BENNETT_ESTIMATE_BIN"]
-        base=[binary,"--budget","0,0,0,0",str(ROOT/"tests/fixtures/token-alias-source-gap.bisa"),"--target",str(sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json"),"--region","root","--params",'[["1","0","0","0"],["1","0","0","0"]]']
+        base=[binary,"--budget","0,0,0,0",str(ROOT/"tests/fixtures/token-alias-source-gap.bisa"),"--target",str(sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json"),"--region","root","--params",'[["1","0","0","0"],["1","0","0","0"]]']
         rows=[]
         for aliases,steps,time in [("[0,0]","4","6"),("[0,1]","3","3")]:
             command=base+["--token-aliases",aliases]
@@ -802,7 +803,7 @@ class CommandLine(unittest.TestCase):
         checked=json.loads(subprocess.run([str(vm),"check",str(path)],capture_output=True,text=True,timeout=30,check=True).stdout)
         self.assertEqual(checked["object_hash"],obj.hash)
         self.assertEqual(checked["symbols"]["main"]["closure_hash"],obj.identities(closure=True)["main"])
-        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         result=e.estimate(obj,t,"main",[],["0"]*4)
         self.assertEqual((result["classical_status"],result["classical_steps"],result["reversed_classical_steps"]),("FAILED","10","4"))
         self.assertEqual(result["resources"],{"gate_count":"0","peak_qubits[data]":"6","qubit_second[data]":"9","time":"14"})
@@ -821,7 +822,7 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(checked["object_hash"],obj.hash)
         actual=json.loads(subprocess.run([str(vm),"run-oracle",str(path),"root","--input","0,1","--budget","1,0,0,0"],capture_output=True,text=True,timeout=30,check=True).stdout)
         self.assertEqual(actual,{"payload":0,"code":7,"steps":1})
-        target=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        target=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         predicted=e.estimate(obj,target,"root",[],["1","0","0","0"])
         self.assertEqual(int(predicted["padded_steps"]["forward"]),actual["steps"])
 
@@ -831,7 +832,7 @@ class CommandLine(unittest.TestCase):
         checked=json.loads(subprocess.run([str(vm),"check",str(path)],capture_output=True,text=True,timeout=30,check=True).stdout)
         self.assertEqual(checked["object_hash"],obj.hash)
         self.assertEqual(checked["symbols"]["root"]["closure_hash"],obj.identities(closure=True)["root"])
-        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json").read_text())
+        t=e.Target.read((sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json").read_text())
         for budget in [3,4,5]:
             actual=json.loads(subprocess.run([str(vm),"run-oracle",str(path),"root","--input","1","--budget",f"{budget},1,8,1"],capture_output=True,text=True,timeout=30,check=True).stdout)
             predicted=e.estimate(obj,t,"root",[],[str(budget),"1","8","1"])
@@ -842,7 +843,7 @@ class CommandLine(unittest.TestCase):
 
     def test_contract_dependent_outputs_are_pending_evidence(self):
         binary=os.environ["BENNETT_ESTIMATE_BIN"]
-        target=str(sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json")
+        target=str(sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json")
         cases=[("parameter-source-gap.bisa","parameter",'["0"]',"EST-SOURCE-01"),("implicit-length-source-gap.bisa","read_byte","[]","EST-SOURCE-02"),("token-alias-source-gap.bisa","root",'[["1","0","0","0"],["1","0","0","0"]]',"EST-CONTEXT-03"),("ret-delivery-source-gap.bisa","root","[]","EST-SOURCE-03"),("jump-width-source-gap.bisa","root","[]","EST-SOURCE-04"),("literal-alloc-source-gap.bisa","root","[]","EST-SOURCE-02")]
         for file,region,args,code in cases:
             command=[binary,str(ROOT/"tests/fixtures"/file),"--target",target,"--region",region,"--params",args,"--budget","2,0,0,0"]
@@ -898,7 +899,7 @@ class CommandLine(unittest.TestCase):
 
     def test_deterministic_and_failure(self):
         binary=os.environ["BENNETT_ESTIMATE_BIN"]
-        command=[binary,str(ROOT/"tests/fixtures/example3.bisa"),"--target",str(sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json")]
+        command=[binary,str(ROOT/"tests/fixtures/example3.bisa"),"--target",str(sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json")]
         a=subprocess.run(command,capture_output=True,text=True,timeout=30)
         b=subprocess.run(command,capture_output=True,text=True,timeout=30)
         self.assertEqual(a.returncode,0,a.stderr)

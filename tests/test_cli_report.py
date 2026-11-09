@@ -16,7 +16,7 @@ SHORT_HANG_GUARD_SECONDS = 30
 class ConsumerReport(unittest.TestCase):
     def setUp(self):
         self.binary = os.environ["BENNETT_ESTIMATE_BIN"]
-        self.target = sibling(ROOT, "bennett-targets") / "targets/ideal-all-to-all.json"
+        self.target = sibling(ROOT, "bennett-targets") / "targets/ideal-quantum-circuit.json"
         self.published = (sibling(ROOT, "bennett-isa-spec") /
                           "conformance/fixtures/controlled-action-09/controlled.bisa")
 
@@ -28,7 +28,7 @@ class ConsumerReport(unittest.TestCase):
         actual = self.run_cli(self.published, "--region", "controlled")
         self.assertEqual(actual.returncode, 0, actual.stderr)
         report = json.loads(actual.stdout)
-        self.assertEqual(report["target"], "ideal-all-to-all")
+        self.assertEqual(report["target"], "ideal-quantum-circuit")
         self.assertEqual(report["object_sha256"], hashlib.sha256(self.published.read_bytes()).hexdigest())
         self.assertNotEqual(report["object_sha256"], report["object_hash"])
         self.assertEqual(report["budget"], {"steps": 0, "heap": 0, "stack": 0, "depth": 0})
@@ -66,7 +66,7 @@ class ConsumerReport(unittest.TestCase):
                               "--region", "root", "--budget", "2,0,0,0", "--token-aliases", "[0]")
         self.assertEqual(actual.returncode, 3, actual.stderr)
         report = json.loads(actual.stdout)
-        self.assertEqual(report["target"], "ideal-all-to-all")
+        self.assertEqual(report["target"], "ideal-quantum-circuit")
         self.assertEqual(report["budget"], {"steps": 2, "heap": 0, "stack": 0, "depth": 0})
         self.assertEqual(report["label"], "pending evidence")
         self.assertNotIn("padded", report)
