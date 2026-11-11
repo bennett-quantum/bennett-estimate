@@ -247,6 +247,7 @@ argument spelling, lossless budget bindings and missing resource evidence.
   "tests/test_estimate.py": {"cognitive_complexity": 157, "function_lengths": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 13, 13, 13, 14, 14, 14, 14, 15, 15, 16, 16, 16, 16, 16, 16, 16, 17, 18, 19, 19, 19, 21, 23], "trivial_wrappers": 0},
   "tests/test_fail_fast.py": {"cognitive_complexity": 1, "function_lengths": [2, 4, 6, 7, 7, 8], "trivial_wrappers": 0},
   "tests/test_gate.py": {"cognitive_complexity": 8, "function_lengths": [12, 26], "trivial_wrappers": 0},
+  "tests/test_legacy_lproc.py": {"cognitive_complexity": 8, "function_lengths": [5, 5, 5, 6, 10, 10, 10], "trivial_wrappers": 0},
   "tests/test_output.py": {"cognitive_complexity": 0, "function_lengths": [9, 12], "trivial_wrappers": 0},
   "tests/test_phases.py": {"cognitive_complexity": 4, "function_lengths": [5, 5, 6, 7, 7, 8, 11, 14], "trivial_wrappers": 0},
   "tests/test_pinned.py": {"cognitive_complexity": 12, "function_lengths": [5, 6, 7, 7, 7, 7, 9, 9, 13, 19, 26], "trivial_wrappers": 0},

@@ -85,7 +85,7 @@ class ConsumerReport(unittest.TestCase):
         actual = self.run_cli(path, "--budget", "100,0,0,0")
         self.assertEqual(actual.returncode, 1)
         self.assertEqual(actual.stdout, "")
-        self.assertIn("ISA 0.8 lproc signature", actual.stderr)
+        self.assertIn("0.8 has no published complete expansion library", actual.stderr)
 
 
 if __name__ == "__main__":
