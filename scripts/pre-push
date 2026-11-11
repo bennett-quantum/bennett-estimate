@@ -5,6 +5,11 @@
 # See bennett/tools/gate_README.md. The tool is run, never imported: a dev tool at a pinned commit, like cargo.
 set -euo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS BROWSER
+# Development/runner entry: deliberately precedes every git operation.
+if [[ "${1:-}" == --working-tree ]]; then
+  script_dir="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+  exec "$script_dir/check"
+fi
 root="$(git -C "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" rev-parse --show-toplevel)"
 if [ "${BENNETT_GATE_HOOK_PROBE:-}" = 1 ]; then echo "bennett-gate-hook-chained $root"; exit 0; fi
 common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)"
