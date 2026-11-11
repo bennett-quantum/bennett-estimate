@@ -1,8 +1,12 @@
 # Push-gate pins (bennett/tools/gate_README.md). Siblings resolve only to these commits.
 schema = 1
 repo = "bennett-estimate"
-tool_sha = "3779522887ace6426f8ba13fb0d55b625b781941"
+tool_sha = "822aaeffab369114e1a719a7b887a0192b22d386"
 timeout_s = 7200
+
+# Paths no check reads; changing only these reuses a PASS receipt (bennett/tools/gate_README.md).
+[receipt]
+non_product = [".beads/", "worklog/"]
 
 [env]
 CARGO_TARGET_DIR = "{root}/.tmp/gate-target"
