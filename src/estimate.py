@@ -1650,7 +1650,7 @@ class Object:
             require(re.fullmatch(r"[0-9a-f]{64}",symbol["interface_hash"]), "invalid interface hash")
             sig = symbol["signature"]
             kind = symbol["kind"]
-            required = {"cc":["params","results"],"r":["params","results"],"oracle":["in","tgt","fault","mem","args"],"action":["mut","in","mem","args","bounds"],"perm_action":["mut","in","mem","args","bounds"],"lproc":["params","result","tokens","args","mem"],"data":["size"]}
+            required = {"cc":["params","results"],"r":["params","results"],"oracle":["in","tgt","fault","mem","args"],"action":["mut","in","mem","args","bounds"],"perm_action":["mut","in","mem","args","bounds"],"lproc":["params","result"] + (["tokens","args","mem"] if versions["isa"]=="0.9" else []),"data":["size"]}
             require(kind in required, "unknown symbol kind")
             keys(sig, ["tier","kind","abi",*required[kind]], context=f"ISA {versions['isa']} {kind} signature")
             require(sig["kind"] == kind and sig["abi"] == versions["isa"], "signature version/kind mismatch")
@@ -1700,7 +1700,7 @@ class Object:
                 elif kind in ["action","perm_action"]:
                     require(width_values(sig["mut"])==widths(g[0]) and width_values(sig["in"])==widths(g[1]) and sig["mem"]==mem(g[2]) and sig["args"]==[ty for n,ty,r in g[3]] and not g[4],"§9.1: action signature/header mismatch")
                 else:
-                    require(len(g[1])==1 and width_values(sig["params"])==widths(g[0]) and width_value(sig["result"])==widths(g[1])[0] and sig["tokens"]==[ty for n,ty,r in g[2]] and sig["args"]==[ty for n,ty,r in g[3]] and sig["mem"]==mem(g[4]),"§9.1: lproc signature/header mismatch")
+                    require(len(g[1])==1 and width_values(sig["params"])==widths(g[0]) and width_value(sig["result"])==widths(g[1])[0] and (versions["isa"]=="0.8" or sig["tokens"]==[ty for n,ty,r in g[2]] and sig["args"]==[ty for n,ty,r in g[3]] and sig["mem"]==mem(g[4])),"§9.1: lproc signature/header mismatch")
                 for n,ty,r in fn.regs: type_width(ty,out.ptr)
             else:
                 require(symbol["name"] in out.sections.get("data",{}) and integer(sig["size"],0)*2==len(out.sections["data"][symbol["name"]]),"data signature size mismatch")
